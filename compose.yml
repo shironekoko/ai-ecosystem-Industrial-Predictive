@@ -1,0 +1,259 @@
+version: '3.8'
+
+services:
+  # -------------------------
+  # ส่วนของ Redis
+  # -------------------------
+  redis:
+    image: redis:8.8.0-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - ./logs:/logs
+    command: sh -c "redis-server --appendonly yes 2>&1 | tee /logs/redis.log"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -------------------------
+  # ส่วนของ PostgreSQL
+  # -------------------------
+  db:
+    image: postgres:15.4-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: mydatabase
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+      - ./logs:/logs
+      - ./dev/init-mlflow-db.sql:/docker-entrypoint-initdb.d/init-mlflow-db.sql:ro
+    command: postgres -c logging_collector=on -c log_directory=/logs -c log_filename=postgres.log
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    container_name: label-studio
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=mydatabase
+      - LOG_DIR=/logs
+    volumes:
+      - ./logs:/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -------------------------
+  # ส่วนของ MinIO (Object Storage)
+  # -------------------------
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+      - ./logs:/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# -------------------------
+# ส่วนของ MLflow Tracking Server
+# -------------------------
+  mlflow:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.mlflow
+    container_name: mlflow
+    restart: unless-stopped
+    ports:
+      - "5001:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=postgresql://myuser:mypassword@db:5432/mlflow
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=s3://mlflow-artifacts
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    command: >
+      mlflow server
+        --backend-store-uri postgresql://myuser:mypassword@db:5432/mlflow
+        --default-artifact-root s3://mlflow-artifacts
+        --host 0.0.0.0
+        --port 5000
+    depends_on:
+      db:
+        condition: service_started
+      minio:
+        condition: service_started
+    volumes:
+      - ./logs:/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -------------------------
+  # สร้าง Bucket สำหรับ MLflow Artifacts ใน MinIO (รันครั้งเดียว)
+  # -------------------------
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing myminio/mlflow-artifacts;
+      echo '✅ Bucket mlflow-artifacts created';
+      "
+    restart: "no"
+
+# -------------------------
+# ส่วนของ Backend API (FastAPI)
+# -------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://myuser:mypassword@db:5432/mydatabase
+      - MINIO_ENDPOINT=minio:9000
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_started
+      minio:
+        condition: service_started
+    volumes:
+      - ./logs:/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -------------------------
+  # ส่วนของ Trainer Worker (ARQ + GPU)
+  # -------------------------
+  trainer-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.trainer
+    container_name: trainer-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio:9000
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      mlflow:
+        condition: service_started
+    volumes:
+      - ./logs:/logs
+    # ── GPU ──
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -------------------------
+  # ส่วนของ Inference Worker (ARQ + MLflow)
+  # -------------------------
+  inference-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.inference
+    container_name: inference-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio:9000
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    depends_on:
+      redis:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    volumes:
+      - ./logs:/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# -------------------------
+# ส่วนประกาศสร้าง Volumes
+# -------------------------
+volumes:
+  redis-data:
+  postgresql-data:
+  minio-data:

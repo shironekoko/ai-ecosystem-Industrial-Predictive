@@ -1,0 +1,4 @@
+FROM ghcr.io/mlflow/mlflow:v2.16.2
+
+# ติดตั้ง psycopg2-binary สำหรับต่อ PostgreSQL และ boto3 สำหรับต่อ S3 (MinIO)
+RUN pip install --no-cache-dir psycopg2-binary boto3

@@ -1,0 +1,24 @@
+# Environments
+.env
+.venv
+backend/.venv
+
+# Python Bytecode
+__pycache__/
+*.py[cod]
+
+# Logs
+logs/*
+!logs/.gitkeep
+backend/logs/*
+!backend/logs/.gitkeep
+
+# Testing and Sandbox
+.pytest_cache/
+sandbox/
+
+# OS and IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

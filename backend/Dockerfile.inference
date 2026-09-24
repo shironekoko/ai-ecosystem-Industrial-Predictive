@@ -1,0 +1,30 @@
+# ── Inference Worker ──
+# ARQ worker สำหรับรัน Model Inference ผ่าน MLflow
+# Build:  docker compose build inference-worker
+# Run:    docker compose up inference-worker
+#
+# หมายเหตุ: Inference Worker ใช้ CPU เท่านั้น (ไม่ต้อง GPU)
+
+FROM python:3.12-slim
+
+# ── System deps ──
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential curl git libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Install uv ──
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+# ── Install Python deps (cache layer) ──
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
+
+# ── Copy source ──
+COPY . .
+
+# ── สร้าง /logs directory ──
+RUN mkdir -p /logs
+
+CMD ["uv", "run", "arq", "app.features.workers.inference_tasks.InferenceWorkerSettings"]

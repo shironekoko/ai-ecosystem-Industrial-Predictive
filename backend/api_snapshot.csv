@@ -1,0 +1,51 @@
+﻿Method,Path,Summary,Description,Tags,Parameters,Request Body,Response Codes,Response Schema,Operation ID,Deprecated
+GET,/health,ตรวจสอบสถานะระบบเบื้องต้น,ตรวจสอบว่า API สามารถทำงานได้ปกติ (Basic Health Check),Health Check,,,200,HealthResponse,get_health_health_get,No
+GET,/health/components,ตรวจสอบสถานะระบบและส่วนประกอบต่างๆ,"ตรวจสอบสถานะการเชื่อมต่อของบริการต่างๆ เช่น Database, Redis, MinIO, Label Studio",Health Check,,,200,HealthResponse,get_components_health_health_components_get,No
+POST,/auth/signup,สมัครสมาชิกใหม่,"สร้างบัญชีผู้ใช้ใหม่
+
+- ตรวจสอบ email / username ซ้ำ
+- Hash password ด้วย bcrypt
+- บันทึกลง PostgreSQL",Authentication,,SignUpRequest,"201, 422",UserResponse,signup_auth_signup_post,No
+POST,/auth/login,เข้าสู่ระบบ,"ตรวจสอบ email + password แล้วออก JWT token pair
+
+- Access token (30 นาที)
+- Refresh token (7 วัน)",Authentication,,LoginRequest,"200, 422",TokenResponse,login_auth_login_post,No
+POST,/auth/logout,ออกจากระบบ,"ออกจากระบบ — client ควรลบ token ออกจาก storage
+
+(Stateless JWT: ฝั่ง server ไม่ได้ blacklist token
+แต่ยืนยันว่า token ยัง valid ก่อนตอบ)",Authentication,,,200,app__features__auth__schemas__MessageResponse,logout_auth_logout_post,No
+POST,/auth/refresh,ต่ออายุ token,"ใช้ refresh token เพื่อขอ access token ใหม่
+
+- ตรวจสอบว่า refresh token ยัง valid
+- ออก access + refresh token ใหม่ทั้งคู่ (token rotation)",Authentication,,RefreshTokenRequest,"200, 422",TokenResponse,refresh_token_auth_refresh_post,No
+GET,/auth/me,ดูข้อมูลผู้ใช้ปัจจุบัน,ดึงข้อมูล user ที่ login อยู่,Authentication,,,200,UserResponse,get_me_auth_me_get,No
+GET,/profile/me,ดูข้อมูลโปรไฟล์ตัวเอง,ดึงข้อมูลโปรไฟล์ของ user ที่ login อยู่ พร้อม presigned URL ของรูปโปรไฟล์,Profile,,,200,UserResponse,get_my_profile_profile_me_get,No
+PUT,/profile/me,แก้ไขข้อมูลโปรไฟล์,อัปเดต full_name และ bio ของ user ที่ login อยู่,Profile,,UpdateProfileRequest,"200, 422",UserResponse,update_my_profile_profile_me_put,No
+POST,/profile/me/avatar,อัปโหลดรูปโปรไฟล์ (ไฟล์รูป),"อัปโหลดรูปโปรไฟล์ไป MinIO
+
+- รองรับ: JPEG, PNG, GIF, WebP
+- ขนาดไม่เกิน 5MB
+- ลบรูปเก่าอัตโนมัติ",Profile,,Body_upload_my_avatar_profile_me_avatar_post,"200, 422",AvatarResponse,upload_my_avatar_profile_me_avatar_post,No
+DELETE,/profile/me/avatar,ลบรูปโปรไฟล์,ลบรูปโปรไฟล์จาก MinIO และ clear ข้อมูลใน DB,Profile,,,200,AvatarDeleteResponse,delete_my_avatar_profile_me_avatar_delete,No
+POST,/profile/me/avatar-url,ตั้งรูปโปรไฟล์จาก URL (ลิงก์ MinIO),"ตั้งรูปโปรไฟล์โดยใส่ object name ที่เก็บใน MinIO
+
+เช่น ถ้ามีรูปอยู่ใน MinIO แล้ว สามารถใส่ object_name เช่น
+`avatars/my-photo.jpg` เพื่อตั้งเป็นรูปโปรไฟล์ได้เลย",Profile,object_name (query),,"200, 422",AvatarResponse,set_avatar_from_url_profile_me_avatar_url_post,No
+GET,/storage/buckets,รายการ Buckets ทั้งหมด,ดึงรายการ Buckets ทั้งหมดในระบบ MinIO,Storage (MinIO),,,200,BucketListResponse,list_buckets_storage_buckets_get,No
+POST,/storage/buckets,สร้าง Bucket ใหม่,สร้าง Bucket ใหม่ในระบบ MinIO,Storage (MinIO),,CreateBucketRequest,"200, 422",DeleteResponse,create_bucket_storage_buckets_post,No
+DELETE,/storage/buckets/{bucket_name},ลบ Bucket,ลบ Bucket ออกจากระบบ MinIO,Storage (MinIO),bucket_name (path),,"200, 422",DeleteResponse,delete_bucket_storage_buckets__bucket_name__delete,No
+GET,/storage/buckets/{bucket_name}/objects,รายการ Objects ใน Bucket,ดึงรายการ Objects ทั้งหมดใน Bucket ที่ระบุ,Storage (MinIO),"bucket_name (path), prefix (query)",,"200, 422",ObjectListResponse,list_objects_storage_buckets__bucket_name__objects_get,No
+POST,/storage/buckets/{bucket_name}/upload,อัปโหลด Object,อัปโหลดไฟล์ไปยัง Bucket ที่ระบุ,Storage (MinIO),bucket_name (path),Body_upload_object_storage_buckets__bucket_name__upload_post,"200, 422",UploadResponse,upload_object_storage_buckets__bucket_name__upload_post,No
+GET,/storage/buckets/{bucket_name}/objects/{object_name}/download,ดาวน์โหลด Object,ดาวน์โหลดไฟล์จาก Bucket ที่ระบุ,Storage (MinIO),"bucket_name (path), object_name (path)",,"200, 422",,download_object_storage_buckets__bucket_name__objects__object_name__download_get,No
+GET,/storage/buckets/{bucket_name}/objects/{object_name}/presigned-url,สร้าง Presigned URL,สร้าง URL สำหรับดาวน์โหลดไฟล์แบบมีอายุจำกัด,Storage (MinIO),"bucket_name (path), object_name (path), expires_seconds (query)",,"200, 422",PresignedUrlResponse,get_presigned_url_storage_buckets__bucket_name__objects__object_name__presigned_url_get,No
+DELETE,/storage/buckets/{bucket_name}/objects/{object_name},ลบ Object,ลบไฟล์ออกจาก Bucket ที่ระบุ,Storage (MinIO),"bucket_name (path), object_name (path)",,"200, 422",DeleteResponse,delete_object_storage_buckets__bucket_name__objects__object_name__delete,No
+GET,/labeling/projects,ดึงรายการโปรเจกต์ทั้งหมด,ดึงรายการโปรเจกต์ทั้งหมดที่มีอยู่ใน Label Studio,Labeling (Label Studio),,,200,ProjectListResponse,get_projects_labeling_projects_get,No
+POST,/labeling/projects,สร้างโปรเจกต์ใหม่,สร้างโปรเจกต์สำหรับ labeling ใหม่ โดยกำหนด title และ label_config,Labeling (Label Studio),,CreateProjectRequest,"200, 422",ProjectDetailResponse,create_project_labeling_projects_post,No
+GET,/labeling/projects/{project_id},ดึงข้อมูลโปรเจกต์,ดึงรายละเอียดโปรเจกต์ตาม ID ที่ระบุ,Labeling (Label Studio),project_id (path),,"200, 422",ProjectDetailResponse,get_project_labeling_projects__project_id__get,No
+DELETE,/labeling/projects/{project_id},ลบโปรเจกต์,ลบโปรเจกต์ออกจาก Label Studio,Labeling (Label Studio),project_id (path),,"200, 422",app__features__labeling__schemas__MessageResponse,delete_project_labeling_projects__project_id__delete,No
+GET,/labeling/projects/{project_id}/tasks,ดึงรายการ Tasks ในโปรเจกต์,ดึงรายการ task ทั้งหมดที่อยู่ในโปรเจกต์ที่ระบุ,Labeling (Label Studio),project_id (path),,"200, 422",TaskListResponse,get_tasks_labeling_projects__project_id__tasks_get,No
+POST,/labeling/projects/{project_id}/tasks,นำเข้า Tasks แบบกลุ่ม,นำเข้าข้อมูล task เข้าสู่โปรเจกต์เพื่อการ label,Labeling (Label Studio),project_id (path),CreateTasksRequest,"200, 422",app__features__labeling__schemas__MessageResponse,create_tasks_labeling_projects__project_id__tasks_post,No
+POST,/workers/jobs,Enqueue a new background job,เพิ่ม Job ใหม่เข้าคิวเพื่อประมวลผลเบื้องหลัง (Background Job) ด้วย ARQ,Workers (Background Jobs),,EnqueueJobRequest,"200, 422",JobResponse,enqueue_job_workers_jobs_post,No
+GET,/workers/jobs/{job_id},Get job status,ตรวจสอบสถานะการทำงานของ Job ผ่าน Job ID,Workers (Background Jobs),job_id (path),,"200, 422",JobStatusResponse,get_job_status_workers_jobs__job_id__get,No
+GET,/workers/redis/ping,Ping Redis server,ทดสอบการเชื่อมต่อกับ Redis Server,Workers (Background Jobs),,,200,RedisPingResponse,ping_redis_workers_redis_ping_get,No
+GET,/workers/redis/info,Get Redis server info,ดึงข้อมูลสถานะและสถิติของ Redis Server,Workers (Background Jobs),,,200,RedisInfoResponse,redis_info_workers_redis_info_get,No

@@ -21,7 +21,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "redis>=5.0.0",
     "sqlalchemy>=2.0.51",
-    "uvicorn>=0.30.0",
+    "uvicorn[standard]>=0.30.0",
     "transformers>=4.40.0",
     "datasets>=2.19.0",
     "accelerate>=0.30.0",
@@ -38,5 +38,19 @@ dependencies = [
     "opentelemetry-instrumentation-redis>=0.65b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
     "opentelemetry-instrumentation-logging>=0.65b0",
+    "psycopg2-binary>=2.9.13",
+    "passlib>=1.7.4",
+    "torchvision>=0.29.0",
+    "pandas>=2.3.3",
+    "scikit-learn>=1.9.0",
+    "scipy>=1.18.1",
+    "pillow>=12.3.0",
+    "opencv-python-headless>=4.12.0.88",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
 ]
 

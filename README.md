@@ -50,15 +50,21 @@ Trainer Worker ──เทรนโมเดล──▶ MLflow (log param/metr
 │   ├── core/           # Infrastructure & Configuration
 │   ├── scripts/        # สคริปต์สำหรับจัดการระบบ
 │   └── utils/          # เครื่องมือและ Utilities ทั่วไป
-├── infrastructure/     # (ถ้ามี) การตั้งค่า Docker และระบบอื่นๆ
-├── README.md           # ไฟล์อธิบายโปรเจกต์ (ไฟล์นี้)
-└── docker-compose.yml  # ไฟล์กำหนด Container Services
+├── frontend/           # โค้ด React + TypeScript + Tailwind (PdM & QC Web Platform)
+│   ├── src/            # Source code (Components, Pages, Context, Types)
+│   └── README.md       # คู่มืออธิบายทั้ง 11 หน้าเว็บและ API Integration
+├── dataset/            # ข้อมูลสำหรับเทรนและทดสอบระบบ
+│   ├── timeseries/     # NASA C-MAPSS Turbofan (FD001-FD004) สำหรับ BiLSTM RUL
+│   └── non-timeseries/ # MVTec AD Screw สำหรับ PatchCore Anomaly Detection
+├── README.md           # ไฟล์อธิบายโปรเจกต์หลัก (ไฟล์นี้)
+└── compose.yml         # ไฟล์กำหนด Container Services
 ```
 
 ## Getting Started (การเริ่มต้นใช้งาน)
 ### ข้อกำหนดเบื้องต้น (Prerequisites)
 - Docker และ Docker Compose
 - Python 3.10+ และ `uv` package manager
+- Node.js 18+ และ `npm`
 
 ### การติดตั้งและรันระบบ
 1. **รัน Infrastructure Services:**
@@ -71,6 +77,13 @@ Trainer Worker ──เทรนโมเดล──▶ MLflow (log param/metr
    uv sync
    uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
    ```
+3. **รัน Frontend:**
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   > 📖 **ดูคู่มือ Frontend และข้อกำหนด API ทั้ง 11 หน้าได้ที่:** [`frontend/README.md`](file:///c:/Users/Klong/OneDrive/เอกสาร/Code/ai-ecosystem-Industrial-Predictive/frontend/README.md)
 
 ## API Documentation
 เมื่อระบบรันสำเร็จ สามารถเข้าดูเอกสาร API ได้ที่:

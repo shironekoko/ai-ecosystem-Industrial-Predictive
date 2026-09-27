@@ -162,3 +162,17 @@ app.include_router(labeling_router)
 app.include_router(workers_router)
 app.include_router(training_router)
 app.include_router(inference_router)
+
+# ── Serve Frontend Web UI Demo ──
+from pathlib import Path
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+_frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
+if (_frontend_dir / "index.html").exists():
+    @app.get("/", include_in_schema=False)
+    async def serve_root_ui():
+        return FileResponse(str(_frontend_dir / "index.html"))
+
+    app.mount("/ui", StaticFiles(directory=str(_frontend_dir), html=True), name="ui")
+

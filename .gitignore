@@ -19,6 +19,10 @@ logs/*
 backend/logs/*
 !backend/logs/.gitkeep
 
+# Datasets (Large binary & telemetry files excluded from Git)
+dataset/*
+!dataset/README.md
+
 # Testing and Sandbox
 .pytest_cache/
 sandbox/

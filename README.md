@@ -85,6 +85,18 @@ Trainer Worker ──เทรนโมเดล──▶ MLflow (log param/metr
    ```
    > 📖 **ดูคู่มือ Frontend และข้อกำหนด API ทั้ง 11 หน้าได้ที่:** [`frontend/README.md`](file:///c:/Users/Klong/OneDrive/เอกสาร/Code/ai-ecosystem-Industrial-Predictive/frontend/README.md)
 
+## 📦 Datasets (ชุดข้อมูลที่ใช้)
+โฟลเดอร์ `dataset/` ถูกตั้งค่าให้อยู่ใน `.gitignore` เนื่องจากขนาดไฟล์ใหญ่เกินโควตาของ GitHub หากต้องการนำข้อมูลมาเทรนหรือรันระบบ ให้ดาวน์โหลดและจัดวางตามโครงสร้างดังนี้:
+
+1. **NASA Turbofan Engine Degradation Simulation (C-MAPSS Timeseries):**
+   - **Download Link:** [NASA Turbofan Dataset on Kaggle](https://www.kaggle.com/datasets/bishals098/nasa-turbofan-engine-degradation-simulation/data)
+   - นำไฟล์ทั้งหมด (`train_FD*.txt`, `test_FD*.txt`, `RUL_FD*.txt`) วางไว้ที่: `dataset/timeseries/`
+2. **MVTec Anomaly Detection (Screw Category):**
+   - **Download Link:** [MVTec AD Dataset on Kaggle](https://www.kaggle.com/datasets/ipythonx/mvtec-ad/data)
+   - นำเฉพาะโฟลเดอร์ `screw/` วางไว้ที่: `dataset/non-timeseries/screw/`
+
+> 📖 **ดูโครงสร้างโฟลเดอร์และรายละเอียดชุดข้อมูลทั้งหมดได้ที่:** [`dataset/README.md`](file:///c:/Users/Klong/OneDrive/เอกสาร/Code/ai-ecosystem-Industrial-Predictive/dataset/README.md)
+
 ## API Documentation
 เมื่อระบบรันสำเร็จ สามารถเข้าดูเอกสาร API ได้ที่:
 - **Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)

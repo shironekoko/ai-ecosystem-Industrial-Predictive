@@ -5,9 +5,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import { LoginPage } from './pages/login';
 import { DashboardPage } from './pages/dashboard';
 import { MachineMonitoringPage } from './pages/machine-monitoring';
-import { RequisitionsPage } from './pages/requisitions';
 import { VisualQcPage } from './pages/visual-qc';
-import { InventoryPage } from './pages/inventory';
 import { ActiveLearningPage } from './pages/active-learning';
 import { AuditLogPage } from './pages/audit-log';
 import { NotificationsPage } from './pages/notifications';
@@ -28,7 +26,6 @@ export const App: React.FC = () => {
               <AppLayout
                 currentRole={currentRole}
                 onRoleChange={setCurrentRole}
-                pendingReqCount={0}
                 retrainQueueCount={0}
                 unreadAlertCount={0}
               />
@@ -38,9 +35,7 @@ export const App: React.FC = () => {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="login" element={<LoginPage />} />
             <Route path="machine-monitoring" element={<MachineMonitoringPage />} />
-            <Route path="requisitions" element={<RequisitionsPage />} />
             <Route path="visual-qc" element={<VisualQcPage />} />
-            <Route path="inventory" element={<InventoryPage />} />
             <Route path="active-learning" element={<ActiveLearningPage />} />
             <Route path="audit-log" element={<AuditLogPage />} />
             <Route path="notifications" element={<NotificationsPage />} />

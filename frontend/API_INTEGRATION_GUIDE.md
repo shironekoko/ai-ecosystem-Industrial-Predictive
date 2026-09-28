@@ -39,7 +39,6 @@ Every page in the frontend is a **production-ready component shell** awaiting re
 | `/active-learning` | Model Registry & MLOps | REST | `GET /api/v1/models/registry`<br>`GET /api/v1/models/retraining-pool`<br>`POST /api/v1/training/queue` |
 | `/audit-log` | Audit Trail & Sign-offs | REST | `GET /api/v1/audit-logs` |
 | `/reports` | Tool Degradation Reports | REST | `GET /api/v1/reports/degradation-summary`<br>`GET /api/v1/reports/export/pdf` |
-| `/inventory` | Cutting Tool Catalog | REST | `GET /api/v1/tools/presets`<br>`POST /api/v1/tools/presets` |
 | `/user-management` | Users & RBAC | REST | `GET /api/v1/users`<br>`POST /api/v1/users`<br>`PATCH /api/v1/users/{id}/role`<br>`DELETE /api/v1/users/{id}` |
 | `/login` | Authentication | REST | `POST /api/v1/auth/login`<br>`POST /api/v1/auth/register`<br>`GET /api/v1/auth/me` |
 
@@ -388,48 +387,24 @@ Executive OEE and reliability reporting using Weibull distribution analysis and 
 
 ---
 
-## 8. Cutting Tool Catalog (`/inventory`)
-
-### 8.1 `GET /api/v1/tools/presets`
-* **Response `200 OK`:**
-  ```json
-  [
-    {
-      "sku": "MILL-FM-25-4T",
-      "name": "25mm 4-Flute High-Feed Cutter",
-      "category": "Face Mill (4-Flute)",
-      "teethCount": 4,
-      "diameterMm": 25.0,
-      "fluteLengthMm": 45.0,
-      "stockQty": 6,
-      "updatedAt": "2026-09-28T10:00:00Z"
-    }
-  ]
-  ```
-
-### 8.2 `POST /api/v1/tools/presets`
-* **Request Body:** JSON representation of `CuttingToolItem`.
-
----
-
-## 9. Users & RBAC Management (`/user-management`)
+## 8. Users & RBAC Management (`/user-management`)
 
 *Strictly protected: Administrator Role required (`403 Forbidden` for non-admins).*
 
-### 9.1 `GET /api/v1/users`
+### 8.1 `GET /api/v1/users`
 * **Response `200 OK`:** Array of `User` objects.
 
-### 9.2 `PATCH /api/v1/users/{id}/role`
+### 8.2 `PATCH /api/v1/users/{id}/role`
 * **Request:** `{ "role": "admin" | "engineer" }`
 
-### 9.3 `DELETE /api/v1/users/{id}`
+### 8.3 `DELETE /api/v1/users/{id}`
 * **Response `200 OK`:** `{ "status": "deleted" }`
 
 ---
 
-## 10. Authentication (`/login`)
+## 9. Authentication (`/login`)
 
-### 10.1 `POST /api/v1/auth/login`
+### 9.1 `POST /api/v1/auth/login`
 * **Request Body:**
   ```json
   {

@@ -9,7 +9,6 @@ import { ShieldAlert, ArrowRight } from 'lucide-react';
 interface AppLayoutProps {
   currentRole: UserRole;
   onRoleChange: (role: UserRole) => void;
-  pendingReqCount: number;
   retrainQueueCount: number;
   unreadAlertCount: number;
 }
@@ -17,7 +16,6 @@ interface AppLayoutProps {
 export const AppLayout: React.FC<AppLayoutProps> = ({
   currentRole,
   onRoleChange,
-  pendingReqCount,
   retrainQueueCount,
   unreadAlertCount,
 }) => {
@@ -55,7 +53,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       <div className="flex-1 flex overflow-hidden">
         <Sidebar
           collapsed={sidebarCollapsed}
-          pendingReqCount={pendingReqCount}
           retrainQueueCount={retrainQueueCount}
           unreadAlertCount={unreadAlertCount}
         />
@@ -66,3 +63,5 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
     </div>
   );
 };
+
+export default AppLayout;

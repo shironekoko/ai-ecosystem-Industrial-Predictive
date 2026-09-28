@@ -11,10 +11,8 @@ interface PageHeaderProps {
 const routeLabels: Record<string, string> = {
   dashboard: 'Dashboard',
   login: 'Authentication',
-  'machine-monitoring': 'Machine Monitoring',
-  requisitions: 'Parts Requisitions',
-  'visual-qc': 'Visual QC',
-  inventory: 'Parts Catalog',
+  'machine-monitoring': 'Live Telemetry',
+  'visual-qc': 'Tool Verification',
   'active-learning': 'Model Registry',
   'audit-log': 'Audit Trail',
   notifications: 'Notifications',

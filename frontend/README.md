@@ -22,8 +22,7 @@
    - [6. Model Registry & Active Learning (`/active-learning`)](#6-model-registry--active-learning-active-learning)
    - [7. Audit Trail & Incident History (`/audit-log`)](#7-audit-trail--incident-history-audit-log)
    - [8. Tool Degradation Reports (`/reports`)](#8-tool-degradation-reports-reports)
-   - [9. Cutting Tool Inventory & Presets (`/inventory`)](#9-cutting-tool-inventory--presets-inventory)
-   - [10. Users & Access Control (`/user-management`)](#10-users--access-control-user-management)
+   - [9. Users & Access Control (`/user-management`)](#9-users--access-control-user-management)
 5. [คำแนะนำการรันและ Build ระบบ](#5-คำแนะนำการรันและ-build-ระบบ)
 
 ---
@@ -54,7 +53,6 @@ frontend/src/
 │   ├── active-learning/     # MLflow Model Registry & Human-in-the-Loop Retraining
 │   ├── audit-log/           # Immutable Sign-Off Compliance Trail
 │   ├── reports/             # ISO 8688 Degradation & Weibull Reliability Analytics
-│   ├── inventory/           # Milling Cutter Catalog & Presetter Storage
 │   ├── user-management/     # Administrator RBAC Access Console
 │   └── login/               # Secure Session Access
 ├── services/
@@ -88,7 +86,7 @@ frontend/src/
 | ระดับผู้ใช้ (Role) | สิทธิ์ในระบบ | สิทธิ์การเข้าถึงหน้า / ฟังก์ชัน |
 | :--- | :--- | :--- |
 | **Guest (ยังไม่ Sign In)** | Read-Only Viewer | • ดูข้อมูลทุกหน้าได้แบบ Read-Only<br>• ห้ามกดปุ่มควบคุม (Start Stream, Confirm Wear, Retrain, Register)<br>• มีแถบเตือนสีส้มนำทางให้เข้าสู่ระบบ |
-| **Maintenance Engineer (`engineer`)** | Operational Worker | • มอนิเตอร์ Live Spindle Telemetry และสั่งหยุด/เริ่มสตรีมได้<br>• ส่องกล้องตรวจสอบใบมีด และกด Sign-Off (Confirm Wear / False Alarm)<br>• ลงทะเบียนหัวกัดใน Tool Inventory<br>• **ถูกบล็อกไม่ให้เข้าหน้า `/user-management` (403 Forbidden)** |
+| **Maintenance Engineer (`engineer`)** | Operational Worker | • มอนิเตอร์ Live Spindle Telemetry และสั่งหยุด/เริ่มสตรีมได้<br>• ส่องกล้องตรวจสอบใบมีด และกด Sign-Off (Confirm Wear / False Alarm)<br>• ตรวจสอบประวัติการสึกหรอและรายงาน (Degradation Reports)<br>• **ถูกบล็อกไม่ให้เข้าหน้า `/user-management` (403 Forbidden)** |
 | **System Administrator (`admin`)** | Root Authority | • ได้รับสิทธิ์ทั้งหมดของ Engineer<br>• สั่งยิงคิวเทรนโมเดลใหม่ใน Active Learning (`/active-learning`)<br>• **เข้าหน้า `/user-management` ได้แต่เพียงผู้เดียว** เพื่อเปลี่ยน Role และจัดการสิทธิ์พนักงาน |
 
 ---
@@ -171,15 +169,7 @@ frontend/src/
 
 ---
 
-### 9. Cutting Tool Inventory & Presets (`/inventory`)
-* **หน้าที่:** ทะเบียนจัดเก็บและลงทะเบียนหัวกัด CNC (Face Mill 4-Flute, Solid Carbide, ISO APKT Inserts) และจำนวนสต็อกคงเหลือ
-* **API Endpoints:**
-  * `GET /api/v1/tools/presets` ➔ รายการหัวกัดทั้งหมด
-  * `POST /api/v1/tools/presets` ➔ บันทึกหัวกัดตัวใหม่
-
----
-
-### 10. Users & Access Control (`/user-management`)
+### 9. Users & Access Control (`/user-management`)
 * **หน้าที่:** จัดการสิทธิ์พนักงาน (เฉพาะ System Administrator เท่านั้น)
 * **API Endpoints:**
   * `GET /api/v1/users` ➔ รายชื่อพนักงาน

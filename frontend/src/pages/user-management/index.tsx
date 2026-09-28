@@ -109,7 +109,7 @@ export default function UserManagementPage() {
             <h3 className="text-sm font-bold text-gray-900">Maintenance Engineer</h3>
           </div>
           <p className="text-xs text-gray-500 leading-relaxed">
-            Can monitor RUL degradation, approve maintenance requisitions, perform optical QC inspections, and flag AI classification errors. Restricted from user administration.
+            Can monitor spindle cutting telemetry, perform optical tool wear inspections, and verify AI classification predictions. Restricted from user administration.
           </p>
         </div>
 

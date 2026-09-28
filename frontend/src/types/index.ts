@@ -135,53 +135,5 @@ export interface AlertNotification {
   actionUrl?: string; // e.g. "/visual-qc?id=T10R12B2"
 }
 
-// Backwards compatibility aliases
 export type MachineAsset = CNCSpindleAsset;
-export interface RequisitionRecord {
-  id: string;
-  assetId: string;
-  assetName: string;
-  partName: string;
-  partSku: string;
-  predictedRul: number;
-  thresholdHours: number;
-  urgency: 'HIGH' | 'MEDIUM' | 'LOW';
-  estimatedCost: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  requestedAt: string;
-  reviewer?: string;
-  notes: string;
-}
-export interface InspectionRecord {
-  id: string;
-  partSku: string;
-  category: string;
-  lotNumber: string;
-  anomalyScore: number;
-  threshold: number;
-  aiVerdict: 'PASS' | 'FAIL';
-  defectClass?: string;
-  inspectedAt: string;
-  hasHeatmap: boolean;
-  minioKey: string;
-}
-export interface DeflexQueueItem {
-  id: string;
-  partSku: string;
-  category: string;
-  aiVerdict: string;
-  groundTruth: string;
-  inspectorNote: string;
-  inspectorName: string;
-  queuedTimestamp: string;
-  status: 'QUEUED' | 'PROCESSING' | 'COMPLETED';
-}
-export interface PartCatalogItem {
-  sku: string;
-  name: string;
-  category: string;
-  specifications: string;
-  minioObjectPath: string;
-  stockQty: number;
-  updatedAt: string;
-}
+

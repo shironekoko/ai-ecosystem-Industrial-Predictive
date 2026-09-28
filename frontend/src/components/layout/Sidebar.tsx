@@ -15,7 +15,6 @@ import { useAuth } from '../../context/AuthContext';
 
 interface SidebarProps {
   collapsed: boolean;
-  pendingReqCount: number;
   retrainQueueCount: number;
   unreadAlertCount: number;
 }

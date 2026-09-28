@@ -1,90 +1,118 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { EmptyState } from '../../components/common/EmptyState';
-import { Download, Search, FileText, Lock } from 'lucide-react';
+import { History, Search, Filter } from 'lucide-react';
 import { AuditEvent } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 
-export default function AuditLog() {
+export function AuditLogPage() {
   const { isAuthenticated } = useAuth();
-  const events: AuditEvent[] = []; // Empty data as requested
+  const [filterType, setFilterType] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Audit events state - Initialized empty awaiting API log stream
+  const [events] = useState<AuditEvent[]>([]);
+
+  const filteredEvents = events.filter((ev) => {
+    if (filterType !== 'ALL' && ev.eventType !== filterType) return false;
+    if (searchQuery.trim() === '') return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      ev.id.toLowerCase().includes(query) ||
+      ev.actor.toLowerCase().includes(query) ||
+      ev.summary.toLowerCase().includes(query) ||
+      ev.targetResource.toLowerCase().includes(query)
+    );
+  });
 
   return (
     <div className="space-y-6">
-      <PageHeader 
-        title="Audit Trail" 
-        subtitle="Immutable log of all system activities, approvals, and overrides"
-        actions={
-          <button
-            disabled={!isAuthenticated}
-            title={!isAuthenticated ? 'Sign in required to export' : ''}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-md text-sm font-medium shadow-sm transition ${
-              !isAuthenticated
-                ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
-                : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            {!isAuthenticated ? <Lock className="w-4 h-4" /> : <Download className="w-4 h-4" />}
-            <span>Export</span>
-          </button>
-        }
+      <PageHeader
+        title="Audit Trail & Sign-Off History"
+        subtitle="Chronological immutable record of human-in-the-loop decisions, model promotions, and system events"
       />
 
-      <div className="bg-white p-4 border border-gray-200 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-2">
-          <button className="px-3 py-1.5 bg-blue-50 text-blue-700 text-sm font-medium rounded-md border border-blue-200">
-            All Events
-          </button>
-          <button className="px-3 py-1.5 bg-white text-gray-600 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-50">
-            Requisition Decision
-          </button>
-          <button className="px-3 py-1.5 bg-white text-gray-600 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-50">
-            QC Override
-          </button>
-          <button className="px-3 py-1.5 bg-white text-gray-600 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-50">
-            Hot Reload
-          </button>
-        </div>
-        
-        <div className="relative w-full md:w-64">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-gray-400" />
-          </div>
-          <input
-            type="text"
-            placeholder="Search audit logs..."
-            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-      </div>
+      {/* Audit Matrix Card */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        {/* Controls Ribbon */}
+        <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4 bg-gray-50/50">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search actor, tool, or summary..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 pr-3 py-1.5 border border-gray-200 rounded-lg text-xs w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-        {events.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event Type</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actor</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Target Resource</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Summary</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {/* Table rows would go here */}
-              </tbody>
-            </table>
+            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+              <Filter className="w-3.5 h-3.5 text-gray-400" />
+              <span>Type:</span>
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="ALL">All Event Types</option>
+                <option value="WEAR_CONFIRMED">Wear Confirmed</option>
+                <option value="FALSE_ALARM_FLAGGED">False Alarm Flagged</option>
+                <option value="MODEL_PROMOTED">Model Promoted</option>
+                <option value="RETRAIN_TRIGGERED">Retrain Triggered</option>
+              </select>
+            </div>
+          </div>
+
+          <span className="text-xs font-mono text-gray-400">Total Entries: {events.length}</span>
+        </div>
+
+        {/* Audit Table or Empty State */}
+        {filteredEvents.length === 0 ? (
+          <div className="py-14">
+            <EmptyState
+              icon={History}
+              title="No Audit Trail Records"
+              description="Human-in-the-loop tool inspections, engineer sign-offs, and system governance events will be securely recorded here in real-time."
+            />
           </div>
         ) : (
-          <div className="p-8">
-            <EmptyState 
-              icon={FileText}
-              title="No audit events recorded" 
-              description="System activities will be logged automatically." 
-            />
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-400 font-semibold border-b border-gray-100">
+                <tr>
+                  <th className="px-5 py-3">Event ID</th>
+                  <th className="px-4 py-3">Timestamp</th>
+                  <th className="px-4 py-3">Event Type</th>
+                  <th className="px-4 py-3">Actor</th>
+                  <th className="px-4 py-3">Target Resource</th>
+                  <th className="px-5 py-3">Summary</th>
+                  <th className="px-4 py-3 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 font-mono">
+                {filteredEvents.map((ev) => (
+                  <tr key={ev.id} className="hover:bg-gray-50/70 transition">
+                    <td className="px-5 py-3.5 font-bold text-gray-900">{ev.id}</td>
+                    <td className="px-4 py-3.5 text-gray-500">{ev.timestamp}</td>
+                    <td className="px-4 py-3.5">
+                      <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-bold text-[10px]">
+                        {ev.eventType}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 font-sans font-medium text-gray-900">{ev.actor}</td>
+                    <td className="px-4 py-3.5 text-indigo-600 font-bold">{ev.targetResource}</td>
+                    <td className="px-5 py-3.5 font-sans text-gray-600 max-w-xs truncate">{ev.summary}</td>
+                    <td className="px-4 py-3.5 text-right font-sans">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        {ev.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -92,4 +120,4 @@ export default function AuditLog() {
   );
 }
 
-export const AuditLogPage = AuditLog;
+export default AuditLogPage;

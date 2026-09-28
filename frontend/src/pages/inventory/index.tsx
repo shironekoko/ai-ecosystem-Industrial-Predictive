@@ -1,199 +1,199 @@
 import React, { useState } from 'react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { EmptyState } from '../../components/common/EmptyState';
-import { UploadCloud, Package, Search, Lock } from 'lucide-react';
-import { PartCatalogItem } from '../../types';
+import { Wrench, Search, Package, Plus } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
-export default function Inventory() {
+export interface CuttingToolItem {
+  sku: string;
+  name: string;
+  category: string;
+  teethCount: number;
+  diameterMm: number;
+  fluteLengthMm: number;
+  stockQty: number;
+  updatedAt: string;
+}
+
+export function InventoryPage() {
   const { isAuthenticated } = useAuth();
-  const [parts, setParts] = useState<PartCatalogItem[]>([]);
-  
-  const [category, setCategory] = useState('Screw (General)');
+  const [tools, setTools] = useState<CuttingToolItem[]>([]);
+  const [search, setSearch] = useState('');
+
+  const [category, setCategory] = useState('Face Mill (4-Flute)');
   const [sku, setSku] = useState('');
   const [name, setName] = useState('');
-  const [specs, setSpecs] = useState('');
-  const [search, setSearch] = useState('');
+  const [diameter, setDiameter] = useState(25);
+  const [teeth, setTeeth] = useState(4);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!sku || !name) return;
-    
-    const newPart: PartCatalogItem = {
+
+    const newTool: CuttingToolItem = {
       sku,
       name,
       category,
-      specifications: specs,
-      minioObjectPath: `s3://industrial-datasets/screw/${sku.toLowerCase()}.png`,
-      stockQty: 0,
-      updatedAt: new Date().toISOString()
+      teethCount: teeth,
+      diameterMm: diameter,
+      fluteLengthMm: 45,
+      stockQty: 1,
+      updatedAt: new Date().toISOString(),
     };
 
-    setParts(prev => [...prev, newPart]);
+    setTools((prev) => [...prev, newTool]);
     setSku('');
     setName('');
-    setSpecs('');
   };
 
-  const filteredParts = parts.filter(p => 
-    p.sku.toLowerCase().includes(search.toLowerCase()) || 
-    p.name.toLowerCase().includes(search.toLowerCase())
+  const filteredTools = tools.filter(
+    (t) =>
+      t.sku.toLowerCase().includes(search.toLowerCase()) ||
+      t.name.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
     <div className="space-y-6">
-      <PageHeader 
-        title="Parts Catalog" 
-        subtitle="Screw component registry and MinIO object storage" 
+      <PageHeader
+        title="Cutting Tool Inventory & Presets"
+        subtitle="Milling cutter catalog, insert specifications, and tool magazine registry"
       />
 
       <div className="grid grid-cols-12 gap-6">
         {/* Registration Form */}
         <div className="col-span-12 lg:col-span-5 flex flex-col">
-          <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-              <h3 className="font-semibold text-gray-800">Register New Component</h3>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+              <h3 className="font-semibold text-gray-900 text-sm">Register Milling Cutter Preset</h3>
             </div>
-            
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                <select 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                <label className="block font-medium text-gray-700 mb-1">Cutter Category</label>
+                <select
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   value={category}
-                  onChange={e => setCategory(e.target.value)}
+                  onChange={(e) => setCategory(e.target.value)}
                 >
-                  <option>Screw (General)</option>
-                  <option>Screw - Thread Type</option>
-                  <option>Screw - Head Type</option>
+                  <option>Face Mill (4-Flute)</option>
+                  <option>Solid Carbide End Mill</option>
+                  <option>Ball Nose End Mill</option>
+                  <option>Indexable Insert (ISO APKT)</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Part SKU</label>
-                <input 
-                  type="text" 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g. SCR-M4-16-PH"
+                <label className="block font-medium text-gray-700 mb-1">Tool SKU / Preset ID</label>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. MILL-FM-25-4T"
                   value={sku}
-                  onChange={e => setSku(e.target.value)}
+                  onChange={(e) => setSku(e.target.value)}
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Component Name</label>
-                <input 
-                  type="text" 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g. M4 × 16mm Phillips Head Screw"
+                <label className="block font-medium text-gray-700 mb-1">Tool Description</label>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. 25mm 4-Flute High-Feed Cutter"
                   value={name}
-                  onChange={e => setName(e.target.value)}
+                  onChange={(e) => setName(e.target.value)}
                   required
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Specifications</label>
-                <input 
-                  type="text" 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g. DIN 965, A2 Stainless Steel"
-                  value={specs}
-                  onChange={e => setSpecs(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Reference Image</label>
-                <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:bg-gray-50 cursor-pointer">
-                  <div className="space-y-1 text-center">
-                    <UploadCloud className="mx-auto h-8 w-8 text-gray-400" />
-                    <div className="flex text-sm text-gray-600 justify-center">
-                      <span className="relative cursor-pointer bg-transparent rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none">
-                        Click to upload reference image
-                      </span>
-                    </div>
-                  </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-gray-700 mb-1">Diameter (mm)</label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono"
+                    value={diameter}
+                    onChange={(e) => setDiameter(Number(e.target.value))}
+                    min="1"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-gray-700 mb-1">Flutes / Teeth</label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono"
+                    value={teeth}
+                    onChange={(e) => setTeeth(Number(e.target.value))}
+                    min="1"
+                    max="12"
+                  />
                 </div>
               </div>
 
               <div className="pt-2">
-                <button 
+                <button
                   type="submit"
-                  disabled={!isAuthenticated}
-                  title={!isAuthenticated ? 'Sign in required to register components' : ''}
-                  className={`w-full flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-lg text-sm font-medium transition shadow-sm ${
-                    !isAuthenticated
-                      ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
-                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                  }`}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center justify-center gap-1.5"
                 >
-                  {!isAuthenticated && <Lock className="w-4 h-4" />}
-                  <span>{isAuthenticated ? 'Register Component' : 'Sign In Required to Register'}</span>
+                  <Plus className="w-4 h-4" />
+                  <span>Register Tool Preset</span>
                 </button>
               </div>
             </form>
           </div>
         </div>
 
-        {/* Catalog Table */}
+        {/* Tools Catalog Table */}
         <div className="col-span-12 lg:col-span-7 flex flex-col">
-          <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex-1 flex flex-col">
-            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-              <h3 className="font-semibold text-gray-800">Catalog Items</h3>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex-1 flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h3 className="font-semibold text-gray-900 text-sm">Registered Tool Spares</h3>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Search className="h-4 w-4 text-gray-400" />
-                </div>
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Search parts..."
-                  className="pl-9 pr-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Search SKU..."
                   value={search}
-                  onChange={e => setSearch(e.target.value)}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-8 pr-3 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
             </div>
-            
-            <div className="flex-1 min-h-[400px]">
-              {filteredParts.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Updated</th>
+
+            {filteredTools.length === 0 ? (
+              <div className="py-16 flex-1 flex items-center justify-center">
+                <EmptyState
+                  icon={Wrench}
+                  title="No Cutting Tools in Catalog"
+                  description="Register tool presets using the form or connect to toolroom ERP inventory API."
+                />
+              </div>
+            ) : (
+              <div className="overflow-x-auto flex-1">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-400 font-semibold border-b border-gray-100">
+                    <tr>
+                      <th className="px-5 py-3">SKU</th>
+                      <th className="px-4 py-3">Name</th>
+                      <th className="px-4 py-3">Category</th>
+                      <th className="px-4 py-3">Geometry</th>
+                      <th className="px-4 py-3 text-right">Stock</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredTools.map((t) => (
+                      <tr key={t.sku} className="hover:bg-gray-50/70 transition">
+                        <td className="px-5 py-3.5 font-bold text-gray-900">{t.sku}</td>
+                        <td className="px-4 py-3.5 font-sans font-medium text-gray-800">{t.name}</td>
+                        <td className="px-4 py-3.5 text-gray-500">{t.category}</td>
+                        <td className="px-4 py-3.5 text-gray-600">Ø{t.diameterMm}mm · {t.teethCount}T</td>
+                        <td className="px-4 py-3.5 text-right font-bold text-indigo-600">{t.stockQty}</td>
                       </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {filteredParts.map((part) => (
-                        <tr key={part.sku}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{part.sku}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{part.name}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{part.category}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{part.stockQty || 0}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {new Date(part.updatedAt || '').toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="h-full flex items-center justify-center p-6">
-                  <EmptyState 
-                    icon={Package}
-                    title="No components registered" 
-                    description="Use the form to add your first screw part." 
-                  />
-                </div>
-              )}
-            </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -201,5 +201,4 @@ export default function Inventory() {
   );
 }
 
-export const InventoryPage = Inventory;
-
+export default InventoryPage;

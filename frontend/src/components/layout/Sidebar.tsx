@@ -3,15 +3,13 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   Activity,
-  ClipboardCheck,
   ScanEye,
-  PackagePlus,
   BrainCircuit,
   History,
   Bell,
   Users,
   BarChart3,
-  Shield,
+  Cpu,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -24,7 +22,6 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
-  pendingReqCount,
   retrainQueueCount,
   unreadAlertCount,
 }) => {
@@ -55,7 +52,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {!collapsed && <span className="truncate">{label}</span>}
       </div>
       {!collapsed && badge !== undefined && badge > 0 && (
-        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold leading-none">
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-600 font-semibold leading-none">
           {badge}
         </span>
       )}
@@ -78,30 +75,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
       } border-r border-gray-200 bg-white flex flex-col shrink-0 select-none transition-all duration-200 ease-in-out`}
     >
       <div className="p-2 space-y-0.5 overflow-y-auto flex-1">
-        <SectionLabel>Operations</SectionLabel>
-        <NavItem to="/dashboard" icon={LayoutDashboard} label="Dashboard" />
-        <NavItem to="/machine-monitoring" icon={Activity} label="Machine Monitoring" />
-        <NavItem to="/requisitions" icon={ClipboardCheck} label="Requisitions" badge={pendingReqCount} />
+        <SectionLabel>CNC Operations</SectionLabel>
+        <NavItem to="/dashboard" icon={LayoutDashboard} label="Fleet Dashboard" />
+        <NavItem to="/machine-monitoring" icon={Activity} label="Live Telemetry (1D-Forces)" />
+        <NavItem to="/visual-qc" icon={ScanEye} label="Tool Verification (Dual-AI)" />
 
-        <SectionLabel>Quality Control</SectionLabel>
-        <NavItem to="/visual-qc" icon={ScanEye} label="Inspection Console" />
-        <NavItem to="/inventory" icon={PackagePlus} label="Parts Catalog" />
-        <NavItem to="/active-learning" icon={BrainCircuit} label="Model Registry" badge={retrainQueueCount} />
-
-        <SectionLabel>Governance</SectionLabel>
+        <SectionLabel>MLOps & Governance</SectionLabel>
+        <NavItem to="/notifications" icon={Bell} label="Alarm & Alerts" badge={unreadAlertCount} />
+        <NavItem to="/active-learning" icon={BrainCircuit} label="Model Registry & MLOps" badge={retrainQueueCount} />
         <NavItem to="/audit-log" icon={History} label="Audit Trail" />
-        <NavItem to="/notifications" icon={Bell} label="Notifications" badge={unreadAlertCount} />
+        <NavItem to="/reports" icon={BarChart3} label="Degradation Reports" />
+
         {/* Only visible to System Administrators */}
         {isAdmin && (
-          <NavItem to="/user-management" icon={Users} label="Users & Roles" />
+          <>
+            <SectionLabel>System Admin</SectionLabel>
+            <NavItem to="/user-management" icon={Users} label="Users & Access" />
+          </>
         )}
-        <NavItem to="/reports" icon={BarChart3} label="Reports" />
       </div>
 
-      {/* Footer Version */}
+      {/* Footer Branding */}
       {!collapsed && (
-        <div className="p-3 border-t border-gray-100">
-          <p className="text-[10px] text-gray-400 text-center">v0.1.0 · Pre-release</p>
+        <div className="p-3 border-t border-gray-100 bg-gray-50/50">
+          <div className="flex items-center gap-2">
+            <Cpu className="w-3.5 h-3.5 text-indigo-500" />
+            <p className="text-[11px] font-medium text-gray-600">Nonastreda CNC AI</p>
+          </div>
+          <p className="text-[10px] text-gray-400 mt-0.5">v2.0 · Predictive PdM</p>
         </div>
       )}
     </aside>

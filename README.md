@@ -53,9 +53,8 @@ Trainer Worker ──เทรนโมเดล──▶ MLflow (log param/metr
 ├── frontend/           # โค้ด React + TypeScript + Tailwind (PdM & QC Web Platform)
 │   ├── src/            # Source code (Components, Pages, Context, Types)
 │   └── README.md       # คู่มืออธิบายทั้ง 11 หน้าเว็บและ API Integration
-├── dataset/            # ข้อมูลสำหรับเทรนและทดสอบระบบ
-│   ├── timeseries/     # NASA C-MAPSS Turbofan (FD001-FD004) สำหรับ BiLSTM RUL
-│   └── non-timeseries/ # MVTec AD Screw สำหรับ PatchCore Anomaly Detection
+├── dataset/            # ข้อมูล Nonastreda Multimodal สำหรับฝึกโมเดล PdM & Dual-AI QC
+│   └── README.md       # คู่มือและลิงก์ดาวน์โหลดชุดข้อมูล Mendeley Data
 ├── README.md           # ไฟล์อธิบายโปรเจกต์หลัก (ไฟล์นี้)
 └── compose.yml         # ไฟล์กำหนด Container Services
 ```
@@ -83,19 +82,20 @@ Trainer Worker ──เทรนโมเดล──▶ MLflow (log param/metr
    npm install
    npm run dev
    ```
-   > 📖 **ดูคู่มือ Frontend และข้อกำหนด API ทั้ง 11 หน้าได้ที่:** [`frontend/README.md`](file:///c:/Users/Klong/OneDrive/เอกสาร/Code/ai-ecosystem-Industrial-Predictive/frontend/README.md)
+   > 📖 **ดูคู่มือ Frontend และข้อกำหนด API ทุกหน้าได้ที่:** [`frontend/API_INTEGRATION_GUIDE.md`](frontend/API_INTEGRATION_GUIDE.md)
 
 ## 📦 Datasets (ชุดข้อมูลที่ใช้)
-โฟลเดอร์ `dataset/` ถูกตั้งค่าให้อยู่ใน `.gitignore` เนื่องจากขนาดไฟล์ใหญ่เกินโควตาของ GitHub หากต้องการนำข้อมูลมาเทรนหรือรันระบบ ให้ดาวน์โหลดและจัดวางตามโครงสร้างดังนี้:
+โฟลเดอร์ `dataset/` ถูกตั้งค่าให้อยู่ใน `.gitignore` เนื่องจากขนาดไฟล์ใหญ่เกินโควตาของ GitHub (~1.5 GB uncompressed)
 
-1. **NASA Turbofan Engine Degradation Simulation (C-MAPSS Timeseries):**
-   - **Download Link:** [NASA Turbofan Dataset on Kaggle](https://www.kaggle.com/datasets/bishals098/nasa-turbofan-engine-degradation-simulation/data)
-   - นำไฟล์ทั้งหมด (`train_FD*.txt`, `test_FD*.txt`, `RUL_FD*.txt`) วางไว้ที่: `dataset/timeseries/`
-2. **MVTec Anomaly Detection (Screw Category):**
-   - **Download Link:** [MVTec AD Dataset on Kaggle](https://www.kaggle.com/datasets/ipythonx/mvtec-ad/data)
-   - นำเฉพาะโฟลเดอร์ `screw/` วางไว้ที่: `dataset/non-timeseries/screw/`
+* **Nonastreda Multimodal Dataset for Identifying Tool Wear Condition:**
+  * **Download Link:** [Mendeley Data Repository (V1)](https://data.mendeley.com/datasets/m892d2wtzh/1)
+  * ประกอบด้วย:
+    * `forces_xyz_raw.mat`: ข้อมูลแรงตัด 3 แกน ($F_x, F_y, F_z$) สดจาก Kistler Dynamometer ที่ 1,000 Hz
+    * `tool/`: ภาพถ่ายส่องกล้องขยายหน้ามีดตัด (Flank Face Microscope) สำหรับวัดรอยสึก $V_b$
+    * `labels.csv` & `labels_reg.csv`: ป้ายกำกับคลาส SHARP/USED/DULLED และขนาดการสึกหรอจริง (ISO 8688-2)
+  * ดาวน์โหลดและแตกไฟล์ไว้ที่: `dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition/`
 
-> 📖 **ดูโครงสร้างโฟลเดอร์และรายละเอียดชุดข้อมูลทั้งหมดได้ที่:** [`dataset/README.md`](file:///c:/Users/Klong/OneDrive/เอกสาร/Code/ai-ecosystem-Industrial-Predictive/dataset/README.md)
+> 📖 **ดูโครงสร้างโฟลเดอร์และคำแนะนำการติดตั้งอย่างละเอียดได้ที่:** [`dataset/README.md`](dataset/README.md)
 
 ## API Documentation
 เมื่อระบบรันสำเร็จ สามารถเข้าดูเอกสาร API ได้ที่:

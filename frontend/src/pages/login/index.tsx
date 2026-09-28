@@ -64,10 +64,10 @@ export function LoginPage() {
             <Cpu className="w-6 h-6 text-white" />
           </div>
           <h1 className="text-xl font-bold tracking-tight text-gray-900">
-            Industrial PdM Platform
+            Nonastreda CNC AI Platform
           </h1>
           <p className="mt-1 text-xs text-gray-500">
-            Predictive Maintenance & Visual Quality Control System
+            Milling Tool Wear PdM & Dual-AI Quality Control
           </p>
 
           {/* Mode Switcher Tabs */}
@@ -204,6 +204,7 @@ export function LoginPage() {
                 <span>Sign In to System</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+
 
               <div className="text-center pt-2">
                 <button

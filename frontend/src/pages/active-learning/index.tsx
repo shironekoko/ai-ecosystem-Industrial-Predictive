@@ -1,93 +1,284 @@
-import React from 'react';
+import React, { useState } from 'react';
+import {
+  BrainCircuit,
+  RefreshCw,
+  Database,
+  CheckCircle2,
+  Lock,
+  Cpu,
+  Layers,
+  Sparkles,
+  GitBranch,
+  ArrowUpRight,
+  TrendingUp,
+  BarChart2,
+  AlertCircle,
+} from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { StatCard } from '../../components/common/StatCard';
+import { StatusBadge } from '../../components/common/StatusBadge';
 import { EmptyState } from '../../components/common/EmptyState';
-import { BrainCircuit, RefreshCw, Database, CheckCircle2, Lock } from 'lucide-react';
-import { DeflexQueueItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
+import { ModelRegistryItem } from '../../types';
 
 export function ActiveLearningPage() {
-  const { isAuthenticated } = useAuth();
-  const queueItems: DeflexQueueItem[] = [];
-  const isQueueEmpty = queueItems.length === 0;
+  const { isAuthenticated, user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
-  const Actions = (
-    <button
-      disabled={!isAuthenticated || isQueueEmpty}
-      title={!isAuthenticated ? 'Sign in required to trigger retraining' : undefined}
-      className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md shadow-sm border ${
-        !isAuthenticated || isQueueEmpty 
-          ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' 
-          : 'bg-indigo-600 text-white border-transparent hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
-      }`}
-    >
-      {!isAuthenticated ? <Lock className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
-      <span>{!isAuthenticated ? 'Sign In to Retrain' : 'Trigger Retrain'}</span>
-    </button>
-  );
+  // Model Registry state - Initialized empty awaiting MLflow API
+  const [models] = useState<ModelRegistryItem[]>([]);
+  const [verifiedSamplesCount] = useState<number>(0);
+
+  // Retraining state
+  const [isRetraining, setIsRetraining] = useState<boolean>(false);
+  const [retrainError, setRetrainError] = useState<string | null>(null);
+  const [successBanner, setSuccessBanner] = useState<string | null>(null);
+
+  const handleTriggerRetrain = async () => {
+    if (!isAdmin) {
+      alert('Access Denied: Only System Administrators can trigger retraining pipelines.');
+      return;
+    }
+
+    if (verifiedSamplesCount === 0) {
+      alert('No verified human ground-truth samples available in the retraining pool.');
+      return;
+    }
+
+    setIsRetraining(true);
+    setRetrainError(null);
+    setSuccessBanner(null);
+
+    try {
+      const res = await api.enqueueTraining('YOLOv8-cls', 'MinIO-Verified-GroundTruth');
+      setSuccessBanner(res.message || 'Fine-tuning job enqueued successfully.');
+    } catch {
+      setRetrainError('MLOps Retrain Service (/api/v1/training/queue) is offline.');
+    } finally {
+      setIsRetraining(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
-      <PageHeader 
-        title="Model Registry & Active Learning" 
-        subtitle="Manage PatchCore versions and process inspector overrides" 
-        actions={Actions}
+      <PageHeader
+        title="Model Registry & Active Learning"
+        subtitle="Dual-AI continuous learning pipelines · MLflow model registry and human-in-the-loop retraining"
+        actions={
+          <div className="flex items-center gap-2">
+            <StatusBadge
+              status={models.length > 0 ? 'connected' : 'disconnected'}
+              label={models.length > 0 ? 'MLflow: Connected' : 'MLflow: Standby'}
+            />
+            <span className="text-xs px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 font-semibold border border-purple-200">
+              Active Learning Loop
+            </span>
+          </div>
+        }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Retrain Alert Banners */}
+      {retrainError && (
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>{retrainError}</span>
+          </div>
+          <button onClick={() => setRetrainError(null)} className="text-amber-700 underline text-[11px]">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {successBanner && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{successBanner}</span>
+          </div>
+          <button onClick={() => setSuccessBanner(null)} className="text-emerald-700 underline text-[11px]">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard
-          label="Active Model"
-          value="--"
+          label="Registered Models"
+          value={models.length > 0 ? `${models.length} Models` : '0 Models'}
           icon={BrainCircuit}
-          accent="indigo"
-        />
-        <StatCard
-          label="Retrain Queue"
-          value={0}
-          icon={RefreshCw}
-          accent="amber"
-        />
-        <StatCard
-          label="Coreset Memory Bank"
-          value="--"
-          unit="vectors"
-          icon={Database}
           accent="purple"
+          trend="neutral"
+          trendLabel="MLflow tracking"
+        />
+        <StatCard
+          label="Verified Ground Truth"
+          value={`${verifiedSamplesCount} Samples`}
+          icon={Database}
+          accent="blue"
+          trend="neutral"
+          trendLabel="Awaiting human sign-offs"
+        />
+        <StatCard
+          label="Active Retrain Worker"
+          value="Redis / ARQ"
+          icon={Cpu}
+          accent="amber"
+          trend="neutral"
+          trendLabel="Worker Status: Idle"
+        />
+        <StatCard
+          label="Continuous Learning"
+          value="Dual Modality"
+          icon={TrendingUp}
+          accent="emerald"
+          trend="neutral"
+          trendLabel="1D-Forces + Vision"
         />
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden flex flex-col min-h-[400px]">
-        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-          <h3 className="text-lg font-medium text-gray-900">Active Learning Queue</h3>
-        </div>
-        
-        <div className="overflow-x-auto flex-1">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sample ID</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Part SKU</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">AI Verdict</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ground Truth</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Inspector Note</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Queued At</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {/* Empty body */}
-            </tbody>
-          </table>
-          
-          <div className="h-full flex items-center justify-center p-12 mt-10">
-             <EmptyState
-                icon={CheckCircle2}
-                title="Queue is empty"
-                description="No inspector overrides pending for retraining."
-              />
+      {/* Dual AI Pipelines Definition Overview */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Pipeline 1: 1D-CNN + BiLSTM */}
+        <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+                <Cpu className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-gray-900">Force Sensor AI Pipeline</h4>
+                <p className="text-xs text-gray-500">1D-CNN + BiLSTM Network Architecture</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-bold">
+              Time-Series Modality
+            </span>
+          </div>
+          <p className="text-xs text-gray-600 leading-relaxed">
+            Consumes high-frequency 3-axis dynamometer forces (Fx, Fy, Fz). Classifies cutter wear state in-process and flags tool degradation before surface chatter damages workpieces.
+          </p>
+          <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs font-mono text-gray-500">
+            <span>Input: 1000 Hz dynamometer vector</span>
+            <span>Target: ISO 8688 Flank Wear ($V_b$)</span>
           </div>
         </div>
+
+        {/* Pipeline 2: YOLOv8-cls */}
+        <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-gray-900">Optical Vision AI Pipeline</h4>
+                <p className="text-xs text-gray-500">YOLOv8-cls Transfer Learning</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-bold">
+              Microscope Modality
+            </span>
+          </div>
+          <p className="text-xs text-gray-600 leading-relaxed">
+            Performs post-cut optical flank face inspection. Provides Grad-CAM Explainable AI (XAI) attention heatmaps for human engineer verification on dismounted tool cutters.
+          </p>
+          <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs font-mono text-gray-500">
+            <span>Input: Keyence 1550×500 px scan</span>
+            <span>Target: SHARP / USED / DULLED</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Retraining Dispatch Console */}
+      <div className="p-6 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h4 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-purple-600" />
+            <span>Human-in-the-Loop Active Retraining Queue</span>
+          </h4>
+          <p className="text-xs text-gray-500 mt-1 max-w-xl leading-relaxed">
+            When QC engineers confirm or correct tool wear classifications in the Verification Station, ground-truth samples are staged for model fine-tuning.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            disabled={isRetraining || verifiedSamplesCount === 0 || !isAdmin}
+            onClick={handleTriggerRetrain}
+            className={`flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-xs font-bold shadow-sm transition ${
+              isRetraining || verifiedSamplesCount === 0 || !isAdmin
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200'
+                : 'bg-purple-600 hover:bg-purple-700 text-white'
+            }`}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRetraining ? 'animate-spin' : ''}`} />
+            <span>{isRetraining ? 'Enqueueing Job...' : 'Trigger Fine-Tuning Job'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Models Directory Table */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+          <div>
+            <h3 className="font-bold text-gray-900 text-sm">MLflow Registered Model Checkpoints</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Model version history and evaluation metrics</p>
+          </div>
+          <span className="text-xs font-mono text-gray-400">Total Models: {models.length}</span>
+        </div>
+
+        {models.length === 0 ? (
+          <div className="py-14">
+            <EmptyState
+              icon={BrainCircuit}
+              title="No Models Registered in MLflow"
+              description="Trained model checkpoints and validation F1-scores will appear here once connected to the MLflow model registry API."
+            />
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs font-mono">
+              <thead className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-400 font-semibold border-b border-gray-100">
+                <tr>
+                  <th className="px-6 py-3">Model Name</th>
+                  <th className="px-4 py-3">Architecture</th>
+                  <th className="px-4 py-3">Modality</th>
+                  <th className="px-4 py-3">Accuracy</th>
+                  <th className="px-4 py-3">F1-Score</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-6 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {models.map((m) => (
+                  <tr key={m.id} className="hover:bg-gray-50/70 transition">
+                    <td className="px-6 py-4 font-sans font-bold text-gray-900">{m.name}</td>
+                    <td className="px-4 py-4 text-gray-600">{m.architecture}</td>
+                    <td className="px-4 py-4 text-gray-500">{m.modality}</td>
+                    <td className="px-4 py-4 font-bold text-emerald-600">{m.accuracy}%</td>
+                    <td className="px-4 py-4 text-gray-800">{m.f1Score}</td>
+                    <td className="px-4 py-4 font-sans">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        {m.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right font-sans">
+                      <button className="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+                        Inspect
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+export default ActiveLearningPage;

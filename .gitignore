@@ -9,9 +9,11 @@ frontend/node_modules/
 frontend/dist/
 dist/
 
-# Python Bytecode
+# Python Bytecode & Artifacts
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
 
 # Logs
 logs/*
@@ -22,6 +24,22 @@ backend/logs/*
 # Datasets (Large binary & telemetry files excluded from Git)
 dataset/*
 !dataset/README.md
+!dataset/.gitkeep
+*.mat
+*.h5
+*.pt
+*.pth
+*.onnx
+*.zip
+*.tar.gz
+*.7z
+data/raw/
+data/processed/
+
+# MLflow and Storage
+mlruns/
+minio_data/
+redis_data/
 
 # Testing and Sandbox
 .pytest_cache/

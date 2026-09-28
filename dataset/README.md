@@ -1,102 +1,100 @@
-# Industrial Predictive Maintenance & Visual QC Datasets
+# Nonastreda Multimodal Tool Wear Dataset
 
-โฟลเดอร์นี้ถูกตั้งค่าให้อยู่ใน `.gitignore` เนื่องจากข้อมูลชุดฝึกสอนและรูปภาพมีขนาดใหญ่เกินกว่าขีดจำกัดของ GitHub (100MB per file / repository quotas)
+This repository uses the **Nonastreda Multimodal Dataset for Identifying Tool Wear Condition** for industrial predictive maintenance, cutting dynamics analysis, and dual-AI computer vision quality control.
 
-คู่มือนี้จะอธิบายขั้นตอนการดาวน์โหลดและจัดเตรียมโครงสร้างโฟลเดอร์ `dataset/` ให้ระบบสามารถรันการเทรนและการจำลอง (Simulation) ได้อย่างถูกต้อง
-
----
-
-## 1. แหล่งดาวน์โหลด Dataset (Download Sources)
-
-### 📊 1.1 Timeseries Dataset — NASA Turbofan Engine Degradation (C-MAPSS)
-- **วัตถุประสงค์:** ใช้สำหรับเทรนโมเดล BiLSTM / RUL Prognostics และเป็นแหล่งข้อมูลสตรีมมิ่งในหน้า **Machine Monitoring**
-- **แหล่งดาวน์โหลด (Kaggle):**  
-  👉 **[NASA Turbofan Engine Degradation Simulation on Kaggle](https://www.kaggle.com/datasets/bishals098/nasa-turbofan-engine-degradation-simulation/data)**
-- **ตำแหน่งติดตั้ง:** นำไฟล์ทั้งหมดแตก zip วางไว้ที่ `dataset/timeseries/`
-- **ไฟล์สำคัญ:**
-  - `train_FD001.txt` ถึง `train_FD004.txt` (Run-to-failure training data)
-  - `test_FD001.txt` ถึง `test_FD004.txt` (Operational telemetry test data)
-  - `RUL_FD001.txt` ถึง `RUL_FD004.txt` (Ground-truth Remaining Useful Life)
-  - `readme.txt`
+Due to file size constraints (over 1.5 GB uncompressed, with `forces_xyz_raw.mat` being ~270 MB), raw dataset files are **excluded from Git tracking via `.gitignore`**.
 
 ---
 
-### 🔍 1.2 Non-Timeseries Dataset — MVTec Anomaly Detection (Screw Category)
-- **วัตถุประสงค์:** ใช้สำหรับเทรนโมเดล PatchCore (Unsupervised Anomaly Detection & Localization) สำหรับระบบ Visual QC Inspection
-- **แหล่งดาวน์โหลด (Kaggle):**  
-  👉 **[MVTec Anomaly Detection (MVTec AD) on Kaggle](https://www.kaggle.com/datasets/ipythonx/mvtec-ad/data)**
-- **ตำแหน่งติดตั้ง:** นำเฉพาะโฟลเดอร์ `screw/` มาวางไว้ที่ `dataset/non-timeseries/screw/`
-- **หมวดหมู่ข้อบกพร่อง (Defect Types):**
-  - `train/good/`: ภาพสกรูปกติ (ไม่มีตำหนิ) จำนวน 320 ภาพ สำหรับสร้าง Memory Bank
-  - `test/`: ประกอบด้วยโฟลเดอร์ย่อย:
-    - `good/` (ภาพปกติสำหรับประเมินผล)
-    - `manipulated_front/` (ข้อบกพร่องด้านหน้า)
-    - `scratch_head/` (รอยขีดข่วนที่หัวสกรู)
-    - `scratch_neck/` (รอยขีดข่วนที่คอสกรู)
-    - `thread_side/` (เกลียวด้านข้างชำรุด)
-    - `thread_top/` (เกลียวด้านบนชำรุด)
-  - `ground_truth/`: Binary Mask แสดงตำแหน่งรอยตำหนิที่แท้จริง
+## 📥 Dataset Download Link
+
+* **Official Mendeley Data Repository:**  
+  👉 **[https://data.mendeley.com/datasets/m892d2wtzh/1](https://data.mendeley.com/datasets/m892d2wtzh/1)**
+
+* **Dataset Citation:**  
+  *Václav, et al.* (2025). *Nonastreda Multimodal Dataset for Identifying Tool Wear Condition*, Mendeley Data, V1, doi: 10.17632/m892d2wtzh.1
 
 ---
 
-## 2. โครงสร้างโฟลเดอร์ที่ถูกต้อง (Directory Structure)
+## 📁 Installation & Directory Structure
 
-เมื่อจัดเตรียมไฟล์เสร็จเรียบร้อย โครงสร้างโฟลเดอร์จะต้องเป็นดังนี้:
+Download the dataset archive from the link above and extract the contents directly into the `dataset/` directory.
 
-```
-dataset/
-├── README.md
-├── timeseries/
-│   ├── train_FD001.txt
-│   ├── train_FD002.txt
-│   ├── train_FD003.txt
-│   ├── train_FD004.txt
-│   ├── test_FD001.txt
-│   ├── test_FD002.txt
-│   ├── test_FD003.txt
-│   ├── test_FD004.txt
-│   ├── RUL_FD001.txt
-│   ├── RUL_FD002.txt
-│   ├── RUL_FD003.txt
-│   ├── RUL_FD004.txt
-│   └── readme.txt
-└── non-timeseries/
-    └── screw/
-        ├── train/
-        │   └── good/                  # ภาพสกรูปกติ 320 ภาพ
-        ├── test/
-        │   ├── good/
-        │   ├── manipulated_front/
-        │   ├── scratch_head/
-        │   ├── scratch_neck/
-        │   ├── thread_side/
-        │   └── thread_top/
-        ├── ground_truth/
-        │   ├── manipulated_front/
-        │   ├── scratch_head/
-        │   ├── scratch_neck/
-        │   ├── thread_side/
-        │   └── thread_top/
-        ├── license.txt
-        └── readme.txt
+The resulting folder structure should look like this:
+
+```text
+ai-ecosystem-Industrial-Predictive/
+├── dataset/
+│   ├── README.md                                                        <- This instruction file
+│   └── Nonastreda Multimodal Dataset for Identifying Tool Wear Condition/
+│       ├── forces_xyz_raw.mat    (269.9 MB)  <- Raw 3-axis dynamometer forces at 1 kHz (Fx, Fy, Fz)
+│       ├── labels.csv            (7.9 KB)    <- Discrete wear classification (SHARP, USED, DULLED)
+│       ├── labels_reg.csv        (12.6 KB)   <- Continuous flank wear ground truth (Vb in µm)
+│       ├── tool/                             <- Flank face microscope photos (T{tool}R{run}B{blade}.jpg)
+│       ├── chip/                             <- Metal cutting chip morphology photos
+│       ├── scal/                             <- Optical scale calibration images (100 µm target)
+│       ├── spec/                             <- Audio acoustic emission spectrograms
+│       └── work/                             <- Milled workpiece surface roughness photos
 ```
 
 ---
 
-## 3. คำสั่งสร้างโฟลเดอร์เบื้องต้น (Setup Commands)
+## 🔬 Dataset Specification & File Descriptions
 
-หากเพิ่ง Clone repository มาใหม่ สามารถรันคำสั่งด้านล่างเพื่อสร้างโครงสร้างโฟลเดอร์รอไว้ได้:
+### 1. `forces_xyz_raw.mat` (Dynamometer Cutting Forces)
+* **Sampling Rate:** $1,000 \text{ Hz}$ ($1 \text{ kHz}$).
+* **Sensors:** 3-Axis Piezoelectric Table Dynamometer (Kistler).
+* **Format:** MATLAB v7 workspace structure.
+* **Fields:** Contains cutting force time-series arrays for each tool cut pass:
+  * `Fx`: Feed force ($\text{N}$) - Direction of table movement.
+  * `Fy`: Normal force ($\text{N}$) - Perpendicular to table feed.
+  * `Fz`: Axial / Thrust force ($\text{N}$) - Parallel to spindle axis (most sensitive indicator of flank wear).
+  * $F_{res} = \sqrt{F_x^2 + F_y^2 + F_z^2}$: Instantaneous resultant cutting force.
 
-### บน Windows (PowerShell):
-```powershell
-New-Item -ItemType Directory -Force -Path "dataset/timeseries"
-New-Item -ItemType Directory -Force -Path "dataset/non-timeseries/screw"
-```
+### 2. `tool/` (Microscope Flank Face Photos)
+* **Camera / Fixture:** Industrial Tool Presetter / Optical Microscope.
+* **Resolution:** $1550 \times 500 \text{ pixels}$.
+* **File Naming Convention:** `T{tool}R{run}B{blade}.jpg`
+  * Example: `T10R12B2.jpg` = **Tool #10**, **Cut/Pass Cycle #12**, **Blade/Flute #2**.
+* **Ground Truth Features:** Flank wear land ($V_b$), notch wear, burrs, and micro-chipping.
 
-### บน Linux / macOS (Bash):
+### 3. `labels.csv` & `labels_reg.csv` (Ground Truth Annotations)
+* **`labels.csv` (3-Class Categorical):**
+  * `SHARP` ($V_b < 70\ \mu\text{m}$): Fresh cutting edge, steady cutting forces.
+  * `USED` ($70\ \mu\text{m} \le V_b < 125\ \mu\text{m}$): Moderate flank wear land, elevated friction.
+  * `DULLED` ($V_b \ge 125\ \mu\text{m}$ or catastrophic edge failure): ISO 8688-2 tool life criterion reached, spindle halt required.
+* **`labels_reg.csv` (Regression Targets):**
+  * `flank_wear_um`: Exact physical flank wear land width ($V_b$) measured in micrometers ($\mu\text{m}$).
+  * `chipping_gap_um`: Cutting edge irregular gap width ($\mu\text{m}$).
+  * `overhang_um`: Built-Up Edge (BUE) overhang width ($\mu\text{m}$).
+
+---
+
+## 🛠️ Verification Script
+
+To verify that your dataset is correctly extracted and readable by the Python backend:
+
 ```bash
-mkdir -p dataset/timeseries
-mkdir -p dataset/non-timeseries/screw
-```
+# Run from repository root
+python -c "
+import os
+import scipy.io as sio
+import pandas as pd
 
-หลังจากนั้นให้ดาวน์โหลดไฟล์จาก Kaggle ตามลิงก์ในข้อ 1 แล้วนำไฟล์มาวางตามโครงสร้างในข้อ 2 ระบบ Backend, Worker และ Model Trainer จะสามารถเข้าถึงข้อมูลเพื่อทำการประมวลผลได้ทันที
+dataset_path = 'dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition'
+mat_file = os.path.join(dataset_path, 'forces_xyz_raw.mat')
+labels_file = os.path.join(dataset_path, 'labels.csv')
+
+print('Verifying Dataset...')
+if os.path.exists(mat_file):
+    print(f'✅ Found forces_xyz_raw.mat ({os.path.getsize(mat_file) / 1024 / 1024:.1f} MB)')
+else:
+    print('❌ forces_xyz_raw.mat missing!')
+
+if os.path.exists(labels_file):
+    df = pd.read_csv(labels_file)
+    print(f'✅ Found labels.csv ({len(df)} records)')
+else:
+    print('❌ labels.csv missing!')
+"
+```

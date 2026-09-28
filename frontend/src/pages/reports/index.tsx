@@ -1,140 +1,121 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { StatCard } from '../../components/common/StatCard';
 import { EmptyState } from '../../components/common/EmptyState';
-import { Clock, TrendingUp, Cpu, RefreshCw, BarChart3, PieChart, Download, Lock } from 'lucide-react';
+import {
+  Clock,
+  TrendingUp,
+  BarChart3,
+  Download,
+  AlertTriangle,
+  Layers,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
-export default function ReportsPage() {
+export function ReportsPage() {
   const { isAuthenticated } = useAuth();
+  const [period, setPeriod] = useState<string>('30D');
+
+  // Reports data state - Initialized empty awaiting real analytics API
+  const [reportRuns] = useState<any[]>([]);
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Reports & Analytics"
-        subtitle="Plant reliability metrics, defect distributions, and model performance"
+        title="Tool Degradation & Reliability Reports"
+        subtitle="Milling tool lifecycle analytics · ISO 8688 Flank Wear ($V_b$) Weibull reliability distributions"
         actions={
-          <div className="flex items-center gap-4">
-            <div className="inline-flex rounded-md shadow-sm" role="group">
-              {['7D', '30D', '90D', 'YTD'].map((period, idx) => (
+          <div className="flex items-center gap-3">
+            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm text-xs font-semibold">
+              {['7D', '30D', '90D', 'All'].map((p) => (
                 <button
-                  key={period}
-                  type="button"
-                  className={`
-                    px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 
-                    ${idx === 0 ? 'rounded-l-lg' : ''} 
-                    ${idx === 3 ? 'rounded-r-lg' : ''} 
-                    ${idx !== 0 ? '-ml-px' : ''}
-                    hover:bg-gray-100 hover:text-indigo-700 focus:z-10 focus:ring-2 focus:ring-indigo-500 focus:text-indigo-700
-                    ${period === '30D' ? 'bg-gray-50 text-indigo-700' : ''}
-                  `}
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`px-3 py-1.5 rounded-md transition ${
+                    period === p ? 'bg-indigo-50 text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+                  }`}
                 >
-                  {period}
+                  {p}
                 </button>
               ))}
             </div>
             <button
-              disabled={!isAuthenticated}
-              title={!isAuthenticated ? 'Sign in required to export CSV' : ''}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium shadow-sm ring-1 ring-inset ${
-                !isAuthenticated
-                  ? 'bg-gray-100 text-gray-400 ring-gray-200 cursor-not-allowed'
-                  : 'bg-white text-gray-700 ring-gray-300 hover:bg-gray-50'
+              disabled={reportRuns.length === 0}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold shadow-sm transition ${
+                reportRuns.length === 0
+                  ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
               }`}
             >
-              {!isAuthenticated ? <Lock className="h-4 w-4" /> : <Download className="h-4 w-4" />}
-              CSV
-            </button>
-            <button
-              disabled={!isAuthenticated}
-              title={!isAuthenticated ? 'Sign in required to export PDF' : ''}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium shadow-sm ring-1 ring-inset ${
-                !isAuthenticated
-                  ? 'bg-gray-100 text-gray-400 ring-gray-200 cursor-not-allowed'
-                  : 'bg-white text-gray-700 ring-gray-300 hover:bg-gray-50'
-              }`}
-            >
-              {!isAuthenticated ? <Lock className="h-4 w-4" /> : <Download className="h-4 w-4" />}
-              PDF
+              <Download className="w-4 h-4" />
+              <span>Export PDF Report</span>
             </button>
           </div>
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard
-          label="Plant MTBF"
-          value="--"
-          unit="hrs"
+          label="Mean Tool Life (MTTF)"
+          value="-- Cuts"
           icon={Clock}
           accent="blue"
+          trend="neutral"
+          trendLabel="Awaiting lifecycle data"
         />
         <StatCard
-          label="MTTR"
-          value="--"
-          unit="hrs"
+          label="Overall Machine OEE"
+          value="-- %"
           icon={TrendingUp}
           accent="emerald"
+          trend="neutral"
+          trendLabel="Spindle utilization"
         />
         <StatCard
-          label="Model F1-Score"
-          value="--"
-          icon={Cpu}
+          label="AI False Alarm Rate"
+          value="-- %"
+          icon={AlertTriangle}
           accent="purple"
+          trend="neutral"
+          trendLabel="Awaiting inspector sign-offs"
         />
         <StatCard
-          label="False Positive Rate"
-          value="--"
-          icon={RefreshCw}
+          label="Mean Replace Time"
+          value="-- min"
+          icon={Layers}
           accent="amber"
+          trend="neutral"
+          trendLabel="Downtime benchmark"
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 flex flex-col min-h-[400px]">
+      {/* Main Reports Matrix or Empty State */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
           <div>
-            <h3 className="text-base font-semibold leading-6 text-gray-900">Equipment MTBF Comparison</h3>
-            <p className="text-sm text-gray-500">Mean Time Between Failures across key plant equipment</p>
+            <h3 className="font-bold text-gray-900 text-sm">Tool Wear Progression Analytics</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Historical degradation curves and Weibull reliability models</p>
           </div>
-          <div className="mt-6 flex-1 border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center">
+          <span className="text-xs font-mono text-gray-400">Period: {period}</span>
+        </div>
+
+        {reportRuns.length === 0 ? (
+          <div className="py-16">
             <EmptyState
               icon={BarChart3}
-              title="No data available"
-              description="Sufficient operational data is required to render the MTBF comparison."
+              title="No Degradation Reports Available"
+              description="Tool wear curves, cutting force distributions, and Weibull survival models will be generated automatically once milling cycles are recorded in the database."
             />
           </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 flex flex-col min-h-[400px]">
-          <div>
-            <h3 className="text-base font-semibold leading-6 text-gray-900">Defect Distribution (Screw)</h3>
-            <p className="text-sm text-gray-500">Breakdown of identified defects on screw components</p>
+        ) : (
+          <div className="p-6">
+            {/* Real report visualization when data exists */}
           </div>
-          <div className="mt-6 flex-1 border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center">
-            <EmptyState
-              icon={PieChart}
-              title="No data available"
-              description="Vision worker results are required to display defect distribution."
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 flex flex-col min-h-[400px]">
-        <div>
-          <h3 className="text-base font-semibold leading-6 text-gray-900">Model Retraining History</h3>
-          <p className="text-sm text-gray-500">Historical performance metrics and dataset drift indicators</p>
-        </div>
-        <div className="mt-6 flex-1 border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center">
-          <EmptyState
-            icon={Cpu}
-            title="No history available"
-            description="Continuous learning cycles have not yet been executed on the current models."
-          />
-        </div>
+        )}
       </div>
     </div>
   );
 }
 
-export { ReportsPage };
+export default ReportsPage;

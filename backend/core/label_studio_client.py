@@ -13,7 +13,10 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from label_studio_sdk import LabelStudio
+try:
+    from label_studio_sdk import LabelStudio
+except ImportError:
+    LabelStudio = None
 
 # Load .env from project root  (backend/../.env)
 _ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -26,8 +29,10 @@ LABEL_STUDIO_API_KEY = os.getenv("LABEL_STUDIO_API_KEY", "")
 def get_client(
     url: str | None = None,
     api_key: str | None = None,
-) -> LabelStudio:
-    """Return a connected LabelStudio client."""
+):
+    """Return a connected LabelStudio client if available."""
+    if LabelStudio is None:
+        return None
     return LabelStudio(
         base_url=url or LABEL_STUDIO_URL,
         api_key=api_key or LABEL_STUDIO_API_KEY,

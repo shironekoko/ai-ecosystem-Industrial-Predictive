@@ -3,6 +3,13 @@
 .venv
 backend/.venv
 
+# Local SQLite Databases
+*.db
+*.sqlite
+*.sqlite3
+app.db
+backend/app.db
+
 # Node / Frontend
 node_modules/
 frontend/node_modules/

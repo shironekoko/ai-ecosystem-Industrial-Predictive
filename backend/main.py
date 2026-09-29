@@ -76,24 +76,24 @@ async def lifespan(app: FastAPI):
 
     try:
         Base.metadata.create_all(bind=engine)
-        print("✅ Database tables created")
+        print("[OK] Database tables created")
     except Exception as e:
-        print(f"⚠️  Database setup failed (server may not be ready): {e}")
+        print(f"[WARN] Database setup failed (server may not be ready): {e}")
 
     try:
         ensure_bucket(settings.minio_profile_bucket)
-        print(f"✅ MinIO bucket '{settings.minio_profile_bucket}' ready")
+        print(f"[OK] MinIO bucket '{settings.minio_profile_bucket}' ready")
         ensure_bucket(settings.minio_datasets_bucket)
-        print(f"✅ MinIO bucket '{settings.minio_datasets_bucket}' ready")
+        print(f"[OK] MinIO bucket '{settings.minio_datasets_bucket}' ready")
         ensure_bucket(settings.minio_models_bucket)
-        print(f"✅ MinIO bucket '{settings.minio_models_bucket}' ready")
+        print(f"[OK] MinIO bucket '{settings.minio_models_bucket}' ready")
     except Exception as e:
-        print(f"⚠️  MinIO bucket setup failed (server may not be ready): {e}")
+        print(f"[WARN] MinIO bucket setup failed (server may not be ready): {e}")
 
     yield
 
     # ── Shutdown ──
-    print("👋 Application shutting down")
+    print("[INFO] Application shutting down")
 
 
 # ── สร้าง FastAPI app ──
@@ -145,6 +145,7 @@ app.add_middleware(
 )
 
 # ── Include Routers ──
+from fastapi import APIRouter
 from app.features.health.router import router as health_router
 from app.features.auth.router import router as auth_router
 from app.features.profile.router import router as profile_router
@@ -153,7 +154,16 @@ from app.features.labeling.router import router as labeling_router
 from app.features.workers.router import router as workers_router
 from app.features.training.router import router as training_router
 from app.features.inference.router import router as inference_router
+from app.features.fleet.router import router as fleet_router
+from app.features.qc.router import router as qc_router
+from app.features.telemetry.router import router as telemetry_router
+from app.features.alarms.router import router as alarms_router
+from app.features.models.router import router as models_router
+from app.features.audit.router import router as audit_router
+from app.features.reports.router import router as reports_router
+from app.features.users.router import router as users_router
 
+# Direct mounts
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(profile_router)
@@ -162,6 +172,34 @@ app.include_router(labeling_router)
 app.include_router(workers_router)
 app.include_router(training_router)
 app.include_router(inference_router)
+app.include_router(fleet_router)
+app.include_router(qc_router)
+app.include_router(telemetry_router)
+app.include_router(alarms_router)
+app.include_router(models_router)
+app.include_router(audit_router)
+app.include_router(reports_router)
+app.include_router(users_router)
+
+# Mount all under /api/v1 for Frontend client compatibility
+api_v1 = APIRouter(prefix="/api/v1")
+api_v1.include_router(health_router)
+api_v1.include_router(auth_router)
+api_v1.include_router(profile_router)
+api_v1.include_router(storage_router)
+api_v1.include_router(labeling_router)
+api_v1.include_router(workers_router)
+api_v1.include_router(training_router)
+api_v1.include_router(inference_router)
+api_v1.include_router(fleet_router)
+api_v1.include_router(qc_router)
+api_v1.include_router(telemetry_router)
+api_v1.include_router(alarms_router)
+api_v1.include_router(models_router)
+api_v1.include_router(audit_router)
+api_v1.include_router(reports_router)
+api_v1.include_router(users_router)
+app.include_router(api_v1)
 
 # ── Serve Frontend Web UI Demo ──
 from pathlib import Path

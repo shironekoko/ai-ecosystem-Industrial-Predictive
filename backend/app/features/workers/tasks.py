@@ -421,7 +421,97 @@ async def train_model(ctx: dict, dataset_name: str, model_name: str) -> str:
             host_log_file = os.path.join(host_log_dir, f"train_{model_name}_{timestamp}.log")
             shutil.copy2(log_file, host_log_file)
 
-        return summary
+async def train_yolo_model(
+    ctx: dict,
+    dataset_name: str = "chip",
+    model_name: str = "yolov8_chip_wear",
+    epochs: int = 10,
+    batch_size: int = 16,
+) -> str:
+    """
+    ARQ Task สำหรับ Fine-tune / Retrain โมเดล YOLOv8 Classification (Non-Time Series Vision)
+
+    Flow:
+        1. ค้นหาโฟลเดอร์ dataset (data_yolo_chip หรือ data_yolo_tool)
+        2. รัน Fine-tune YOLOv8-cls (เริ่มจาก best.pt เดิม หรือ yolov8n-cls.pt)
+        3. บันทึกผลลัพธ์ลง MLflow และเก็บไฟล์ weights/best.pt
+        4. Upload โมเดลและผลลัพธ์ขึ้น MinIO (ถ้าพร้อมใช้งาน)
+        5. Return สรุปผลการ Retrain
+    """
+    import asyncio
+    from ultralytics import YOLO
+
+    start_time = time.time()
+    job_id = ctx.get("job_id", "unknown")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    version_path = f"{model_name}/v{timestamp}"
+
+    print(f"🚀 [Job {job_id}] เริ่ม Retrain YOLOv8: dataset={dataset_name}, model={model_name}, epochs={epochs}")
+
+    # หา root path ของ backend
+    backend_dir = Path(__file__).resolve().parent.parent.parent.parent
+    data_dir = backend_dir / f"data_yolo_{dataset_name}"
+
+    if not data_dir.exists() or not (data_dir / "train").exists():
+        raw_dataset_dir = (
+            backend_dir.parent
+            / "dataset"
+            / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition"
+            / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition"
+        )
+        if raw_dataset_dir.exists():
+            from scripts.train_yolov8_chip import prepare_chip_dataset
+            prepare_chip_dataset(str(raw_dataset_dir), str(data_dir))
+        else:
+            raise FileNotFoundError(f"ไม่พบชุดข้อมูลสำหรับเทรนที่: {data_dir}")
+
+    # เลือกว่าจะ fine-tune ต่อจาก best.pt เดิม หรือเริ่มจาก base pretrained
+    existing_best = backend_dir / "models" / model_name / "weights" / "best.pt"
+    base_weights = str(existing_best) if existing_best.exists() else "yolov8n-cls.pt"
+
+    project_dir = str(backend_dir / "models")
+
+    # รัน YOLO training บน thread executor เพื่อไม่ให้บล็อก async event loop
+    loop = asyncio.get_event_loop()
+
+    def _do_train():
+        model = YOLO(base_weights)
+        train_results = model.train(
+            data=str(data_dir),
+            epochs=epochs,
+            imgsz=224,
+            batch=batch_size,
+            project=project_dir,
+            name=model_name,
+            exist_ok=True,
+            workers=2,
+            verbose=True,
+        )
+        return train_results
+
+    results = await loop.run_in_executor(None, _do_train)
+
+    elapsed = time.time() - start_time
+    top1 = getattr(results, "top1", None)
+    top1_str = f"{top1 * 100:.2f}%" if top1 is not None else "N/A"
+
+    best_pt_path = backend_dir / "models" / model_name / "weights" / "best.pt"
+
+    # อัปโหลดขึ้น MinIO ถ้าเปิดใช้งาน
+    models_bucket = settings.minio_models_bucket
+    try:
+        if best_pt_path.exists():
+            ensure_bucket(models_bucket)
+            upload_file(models_bucket, f"{version_path}/best.pt", str(best_pt_path))
+    except Exception as e:
+        print(f"⚠️ MinIO upload warning: {e}")
+
+    summary = (
+        f"✅ Retrain YOLOv8 สำเร็จ: {model_name} (version: v{timestamp}) — "
+        f"Top-1 Accuracy={top1_str} ({epochs} epochs, {elapsed:.1f}s)"
+    )
+    print(f"🎉 {summary}")
+    return summary
 
 
 async def startup(ctx: dict):
@@ -448,7 +538,7 @@ class WorkerSettings:
         docker compose up trainer-worker
     """
 
-    functions = [train_model]
+    functions = [train_model, train_yolo_model]
     redis_settings = get_arq_redis_settings()
     on_startup = startup
     on_shutdown = shutdown

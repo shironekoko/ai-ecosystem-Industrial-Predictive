@@ -14,19 +14,34 @@ class TrainQueueRequest(BaseModel):
     """Request body สำหรับเพิ่มงานเทรนเข้าคิว"""
 
     dataset_name: str = Field(
-        ...,
-        description="ชื่อ dataset ใน MinIO bucket 'datasets' (เช่น 'conll2003')",
-        examples=["conll2003"],
+        default="chip",
+        description="ชื่อ dataset เช่น 'chip' (เศษตัด) หรือ 'tool' (คมมีด)",
+        examples=["chip"],
     )
     model_name: str = Field(
-        ...,
-        description="ชื่อโมเดลที่ต้องการเทรน (ใช้เป็นชื่อโฟลเดอร์ใน MinIO bucket 'models')",
-        examples=["bert-base-ner"],
+        default="yolov8_chip_wear",
+        description="ชื่อโมเดลที่ต้องการเทรน เช่น 'yolov8_chip_wear'",
+        examples=["yolov8_chip_wear"],
     )
-    start_time: datetime = Field(
-        ...,
-        description="เวลาที่ต้องการเริ่มเทรน (ISO-8601 format, ARQ จะ defer job จนถึงเวลานี้)",
-        examples=["2026-09-03T12:00:00"],
+    model_type: str = Field(
+        default="yolov8-cls",
+        description="ประเภทโมเดล: 'yolov8-cls' (Vision Non-Time Series) หรือ 'nlp'",
+        examples=["yolov8-cls"],
+    )
+    epochs: int = Field(
+        default=10,
+        description="จำนวนรอบการเทรน (epochs)",
+        examples=[10],
+    )
+    batch_size: int = Field(
+        default=16,
+        description="ขนาด batch size ในการเทรน",
+        examples=[16],
+    )
+    start_time: Optional[datetime] = Field(
+        default=None,
+        description="เวลาที่ต้องการเริ่มเทรน (ISO-8601). ถ้าเว้นว่างไว้จะเริ่มเทรนทันทีเมื่อกดปุ่ม",
+        examples=["2026-09-29T21:30:00"],
     )
 
 

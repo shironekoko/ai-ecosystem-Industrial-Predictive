@@ -32,6 +32,9 @@ async def queue_training(request: TrainQueueRequest):
         dataset_name=request.dataset_name,
         model_name=request.model_name,
         start_time=request.start_time,
+        model_type=request.model_type,
+        epochs=request.epochs,
+        batch_size=request.batch_size,
     )
     if result.get("status") == "failed":
         raise HTTPException(

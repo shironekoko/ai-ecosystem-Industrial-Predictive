@@ -155,13 +155,21 @@ from app.features.training.router import router as training_router
 from app.features.inference.router import router as inference_router
 
 app.include_router(health_router)
+app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router)
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(profile_router)
+app.include_router(profile_router, prefix="/api/v1")
 app.include_router(storage_router)
+app.include_router(storage_router, prefix="/api/v1")
 app.include_router(labeling_router)
+app.include_router(labeling_router, prefix="/api/v1")
 app.include_router(workers_router)
+app.include_router(workers_router, prefix="/api/v1")
 app.include_router(training_router)
+app.include_router(training_router, prefix="/api/v1")
 app.include_router(inference_router)
+app.include_router(inference_router, prefix="/api/v1")
 
 # ── Serve Frontend Web UI Demo ──
 from pathlib import Path

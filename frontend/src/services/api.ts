@@ -138,17 +138,38 @@ export class ApiService {
   /**
    * Enqueue Model Retraining Job to Redis / ARQ Worker via backend API
    */
-  public async enqueueTraining(modelName: string, datasetName: string) {
+  public async enqueueTraining(
+    modelName: string = 'yolov8_chip_wear',
+    datasetName: string = 'chip',
+    options?: { modelType?: string; epochs?: number; batchSize?: number }
+  ) {
     const res = await fetch(`${API_BASE_URL}/training/queue`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model_name: modelName,
         dataset_name: datasetName,
+        model_type: options?.modelType || 'yolov8-cls',
+        epochs: options?.epochs || 10,
+        batch_size: options?.batchSize || 16,
       }),
     });
     if (!res.ok) {
       throw new Error(`Failed to enqueue training: ${res.statusText}`);
+    }
+    return await res.json();
+  }
+
+  /**
+   * Check Training Job Status from ARQ Worker via backend API
+   */
+  public async getTrainingStatus(jobId: string) {
+    const res = await fetch(`${API_BASE_URL}/training/queue/${jobId}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch training status: ${res.statusText}`);
     }
     return await res.json();
   }

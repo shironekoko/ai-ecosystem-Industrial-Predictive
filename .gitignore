@@ -38,6 +38,13 @@ data/processed/
 
 # MLflow and Storage
 mlruns/
+backend/mlruns/
+backend/runs/
+runs/
+backend/models/
+backend/data_yolo_*/
+data_yolo_*/
+*.cache
 minio_data/
 redis_data/
 

@@ -1,242 +1,197 @@
-# AI Ecosystem Workspace
+# 🏭 Nonastreda CNC Tool Wear PdM & Dual-AI QC Platform
 
-โปรเจกต์ AI Ecosystem เป็นระบบที่มีสถาปัตยกรรมแบบ Feature-Based Architecture สำหรับจัดการและให้บริการทางด้าน AI อย่างครบวงจรตั้งแต่การเตรียมข้อมูล, การ Label, การฝึกโมเดล ไปจนถึงการเสิร์ฟโมเดล
+> **AI Ecosystem สำหรับงานอุตสาหกรรม (Industrial Predictive Maintenance & Quality Control)**  
+> ระบบพยากรณ์อายุการใช้งานของมีดตัด CNC (Remaining Useful Life: RUL), วิเคราะห์แรงตัดแบบ Real-time (Dynamometer Cutting Forces), และตรวจสอบการสึกหรอของคมตัดด้วยภาพถ่ายกล้องจุลทรรศน์ (Dual-AI Visual QC) ตามมาตรฐาน **ISO 8688-2**
 
-## Overview
-โปรเจกต์นี้ประกอบไปด้วยระบบ Backend ที่พัฒนาด้วย **FastAPI** และโครงสร้างพื้นฐานที่สนับสนุนการทำงานต่างๆ ดังนี้:
-- **PostgreSQL** — ฐานข้อมูลหลัก (Port 5432)
-- **Redis** — ระบบ Cache และคิวงาน (Port 6379)
-- **MinIO** — ระบบ Object Storage สำหรับจัดเก็บไฟล์ (Ports 9000/9001)
-- **Label Studio** — แพลตฟอร์มสำหรับ Data Labeling (Port 8080)
-- **MLflow** — Model Tracking, Registry และ Experiment Management (Port 5001)
-- **ARQ** — Background Job Worker ควบคุมด้วย Redis
-- **Inference Worker** — โหลดโมเดลจาก MLflow แล้วรัน prediction ผ่านคิว Redis
+---
 
-## Architecture Diagram
-โครงสร้างการทำงานของระบบ:
+## 🌟 ฟีเจอร์หลักของระบบ (Key Features)
+
+1. **Fleet Monitoring & Digital Twin:** ติดตามสถานะเครื่องจักร CNC ทุกเครื่องในโรงงานแบบ Real-time, ค่า Health Index, และ RUL (Remaining Useful Life)
+2. **High-Frequency Telemetry & Safety Interlock:** สตรีมข้อมูลแรงตัด 3 แกน ($F_x, F_y, F_z$) ผ่าน WebSocket พร้อมระบบตรวจจับ Threshold และสั่ง Safety Interlock Trip อัตโนมัติ
+3. **Dual-AI Quality Control (QC):** ตรวจสอบรอยสึกหน้ามีด ($V_b$ Flank Wear) จากภาพถ่ายกล้องจุลทรรศน์, แบ่งคลาส SHARP / USED / DULLED, พร้อมระบบ Manual Inspector Override
+4. **Alarms & Incident Management:** ระบบแจ้งเตือนระดับ CRITICAL / WARNING / INFO พร้อมบันทึก Acknowledge / Resolve Audit
+5. **Model Registry & Governance:** จัดการเวอร์ชันโมเดล AI (Forces LSTM, Flank Wear ResNet), Rollback / Promote เป็น Production, ติดตาม Drift Score
+6. **Compliance & Audit Trails:** บันทึกประวัติการกระทำของผู้ใช้งาน (Audit Logs) สำหรับมาตรฐานความปลอดภัยอุตสาหกรรม
+7. **Production Reports:** สร้างและดาวน์โหลดรายงานสรุปกะการทำงาน (Shift Report) ในรูปแบบ JSON และ CSV Export
+8. **Role-Based Access Control (RBAC):** กำหนดสิทธิ์ผู้ใช้งาน (`operator`, `technician`, `engineer`, `admin`)
+
+---
+
+## 🏗️ สถาปัตยกรรมระบบ (Architecture Overview)
+
+โปรเจกต์ได้รับการออกแบบด้วยสถาปัตยกรรม **Feature-Based (Vertical Slice Architecture)** ทำให้แต่ละโมดูลสามารถดูแลและขยายได้โดยอิสระ:
+
 ```
-Client ──POST /predict──▶ FastAPI ──Enqueue──▶ Redis ◀──▶ Inference Worker
-                                                              │
-                                                         MLflow Model Registry
-                                                         ┌────┴────┐
-                                                   PostgreSQL    MinIO
-                                                  (backend store) (artifact store)
-
-Trainer Worker ──เทรนโมเดล──▶ MLflow (log param/metric/model + register)
-```
-- **FastAPI → PostgreSQL**: สำหรับบันทึกข้อมูลหลัก
-- **Label Studio → PostgreSQL**: สำหรับจัดการข้อมูลการ Label
-- **MLflow → PostgreSQL** (`mlflow` database): สำหรับเก็บ experiment/run metadata
-- **MLflow → MinIO** (bucket `mlflow-artifacts`): สำหรับเก็บ model artifacts
-
-## Tech Stack
-| เทคโนโลยี | หน้าที่ |
-| --- | --- |
-| **FastAPI** | Web Framework สำหรับสร้าง API |
-| **PostgreSQL** | Relational Database |
-| **Redis** | In-memory Data Structure Store (Cache / Queue) |
-| **MinIO** | S3 Compatible Object Storage |
-| **Label Studio** | Data Annotation Tool |
-| **ARQ** | Async Job Queues in Python |
-| **MLflow** | Model Tracking, Registry & Experiment Management |
-| **uv** | Python Package Manager |
-| **Docker Compose** | จัดการ Container สำหรับ Infrastructure |
-
-## โครงสร้างโปรเจกต์ (Directory Structure)
-```
-.
-├── backend/            # โค้ด FastAPI Backend
-│   ├── app/            # Business Logic ของระบบ
-│   ├── core/           # Infrastructure & Configuration
-│   ├── scripts/        # สคริปต์สำหรับจัดการระบบ
-│   └── utils/          # เครื่องมือและ Utilities ทั่วไป
-├── frontend/           # โค้ด React + TypeScript + Tailwind (PdM & QC Web Platform)
-│   ├── src/            # Source code (Components, Pages, Context, Types)
-│   └── README.md       # คู่มืออธิบายทั้ง 11 หน้าเว็บและ API Integration
-├── dataset/            # ข้อมูล Nonastreda Multimodal สำหรับฝึกโมเดล PdM & Dual-AI QC
-│   └── README.md       # คู่มือและลิงก์ดาวน์โหลดชุดข้อมูล Mendeley Data
-├── README.md           # ไฟล์อธิบายโปรเจกต์หลัก (ไฟล์นี้)
-└── compose.yml         # ไฟล์กำหนด Container Services
+Industrial-Predictive/
+├── backend/                        # FastAPI Backend Application
+│   ├── app/
+│   │   ├── features/               # Feature Modules (Vertical Slices)
+│   │   │   ├── alarms/             # ระบบจัดการและแจ้งเตือน Alarms
+│   │   │   ├── audit/              # บันทึก Audit Logs ความปลอดภัย
+│   │   │   ├── auth/               # ระบบยืนยันตัวตน & JWT Token
+│   │   │   ├── fleet/              # ข้อมูลเครื่องจักร CNC และสถานะ Fleet
+│   │   │   ├── inference/          # AI Prediction (Forces & RUL)
+│   │   │   ├── models/             # Model Registry & Lifecycle
+│   │   │   ├── qc/                 # Dual-AI Visual QC & Image Serving
+│   │   │   ├── reports/            # Shift Summary & Report CSV Export
+│   │   │   ├── telemetry/          # WebSocket Stream & Interlock Trip
+│   │   │   └── users/              # การจัดการผู้ใช้งานและบทบาท (RBAC)
+│   │   └── shared/                 # Data Models & Schemas ส่วนกลาง
+│   ├── core/                       # Database, MinIO, Redis, Observability
+│   │   ├── database.py             # SQLAlchemy Engine (รองรับ SQLite / PostgreSQL)
+│   │   └── minio_setup.py          # Auto-provisioning Storage Buckets
+│   ├── scripts/
+│   │   └── test_connections.py     # Health Check ตรวจสอบการเชื่อมต่อระบบ
+│   └── main.py                     # จุดเริ่มต้น FastAPI Mount ทุก Router ที่ /api/v1
+│
+├── frontend/                       # React 18 + TypeScript + Vite + Tailwind CSS
+│   ├── src/pages/                  # 11 หน้าแดชบอร์ดอุตสาหกรรมครบวงจร
+│   └── README.md                   # คู่มือและสถาปัตยกรรมฝั่ง Frontend
+│
+├── dataset/                        # ชุดข้อมูล Nonastreda Multimodal Dataset
+│   └── README.md                   # รายละเอียดและลิงก์ดาวน์โหลด Dataset
+│
+├── API_SPECIFICATION.md            # Master API Specification (40 Endpoints)
+├── postman_collection.json         # Postman Collection สำหรับนำเข้าและทดสอบ
+└── compose.yml                     # Docker Compose สำหรับ Infrastructure
 ```
 
-## Getting Started (การเริ่มต้นใช้งาน)
-### ข้อกำหนดเบื้องต้น (Prerequisites)
-- Docker และ Docker Compose
-- Python 3.10+ และ `uv` package manager
-- Node.js 18+ และ `npm`
+---
 
-### การติดตั้งและรันระบบ
-1. **รัน Infrastructure Services:**
-   ```bash
-   docker compose up -d
+## 🔌 API Endpoints Summary (`/api/v1`)
+
+ทุก Endpoint ได้รับการรวมเข้าสู่ Prefix มาตรฐาน `/api/v1` ตามตารางด้านล่าง:
+
+| Module | Base Path | Endpoints ตัวอย่าง | รายละเอียด |
+|---|---|---|---|
+| **Auth** | `/api/v1/auth` | `POST /login`, `POST /signup`, `GET /me` | เข้าสู่ระบบและรับ JWT Bearer Token |
+| **Fleet** | `/api/v1/fleet` | `GET /machines`, `GET /machines/{id}`, `GET /machines/{id}/metrics` | ตรวจสอบสุขภาพเครื่องจักร CNC และ RUL |
+| **QC** | `/api/v1/qc` | `GET /records`, `POST /records/{id}/override`, `GET /images/{file}` | ดูผลวิเคราะห์ภาพมีดตัด, เสิร์ฟรูปจริง, และบันทึก Override |
+| **Telemetry** | `/api/v1/telemetry` | `WS /ws`, `POST /machines/{id}/trip` | สตรีมค่าแรงตัดสด และสั่ง Emergency Trip |
+| **Alarms** | `/api/v1/alarms` | `GET /`, `POST /{id}/ack`, `POST /{id}/resolve` | จัดการสัญญาณเตือนและรับทราบเหตุการณ์ |
+| **Models** | `/api/v1/models` | `GET /`, `POST /{id}/promote`, `POST /{id}/rollback` | บริหารจัดการโมเดล AI ในระบบ |
+| **Audit** | `/api/v1/audit` | `GET /logs`, `GET /logs/export` | บันทึกประวัติการกระทำและดาวน์โหลด Audit Trail |
+| **Reports** | `/api/v1/reports` | `GET /shift-summary`, `GET /export/csv` | รายงานสรุปประสิทธิภาพกะและดาวน์โหลด CSV |
+| **Users** | `/api/v1/users` | `GET /`, `POST /`, `PATCH /{id}/role` | จัดการผู้ใช้งานและมอบหมายบทบาท |
+| **Inference** | `/api/v1/inference` | `POST /predict-forces`, `POST /predict` | ส่งข้อมูลแรงตัดเข้าพยากรณ์ผล |
+
+> 📖 **ดูเอกสารข้อกำหนด API ฉบับเต็ม (Request, Response, Payload schemas):** [`API_SPECIFICATION.md`](API_SPECIFICATION.md)
+
+---
+
+## 📮 Postman Collection
+
+ระบบมาพร้อมกับไฟล์ [`postman_collection.json`](postman_collection.json) ซึ่งประกอบด้วยคำขอทดสอบที่ตั้งค่าไว้ล่วงหน้า (Pre-configured) ครบทั้ง 40 endpoints:
+
+### วิธีนำเข้าและใช้งาน:
+1. เปิดโปรแกรม **Postman**
+2. กดปุ่ม **Import** แล้วเลือกไฟล์ `postman_collection.json`
+3. Collection จะสร้างโฟลเดอร์แยกตามฟีเจอร์:
+   - `01. Authentication`
+   - `02. Fleet & Machines`
+   - `03. Quality Control (QC)`
+   - `04. Telemetry & Interlock`
+   - `05. Alarms`
+   - `06. Models Lifecycle`
+   - `07. Audit Trails`
+   - `08. Production Reports`
+   - `09. User Management`
+   - `10. AI Inference`
+4. เมื่อรันคำขอ `Login (Operator / Admin)` ตัวแปร `access_token` จะถูกนำไปแนบใน Authorization Header ของคำขออื่นๆ โดยอัตโนมัติ
+
+---
+
+## 📦 การติดตั้งชุดข้อมูล (Nonastreda Dataset)
+
+ระบบเชื่อมต่อกับข้อมูลจริงจาก **Nonastreda Multimodal Dataset for Identifying Tool Wear Condition** จาก [Mendeley Data](https://data.mendeley.com/datasets/m892d2wtzh/1):
+
+1. ดาวน์โหลดชุดข้อมูลและแตกไฟล์ไว้ที่:
    ```
-2. **รัน Backend:**
-   ```bash
-   cd backend
-   uv sync
-   uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition/
+   ├── forces_xyz_raw.mat
+   ├── labels.csv
+   ├── labels_reg.csv
+   └── tool/
+       ├── 001.jpg
+       ├── 002.jpg
+       └── ...
    ```
-3. **รัน Frontend:**
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-   > 📖 **ดูคู่มือ Frontend และข้อกำหนด API ทุกหน้าได้ที่:** [`frontend/API_INTEGRATION_GUIDE.md`](frontend/API_INTEGRATION_GUIDE.md)
+2. โฟลเดอร์ `dataset/` ได้รับการป้องกันผ่าน `.gitignore` เพื่อไม่ให้ขนาดไฟล์ขนาดใหญ่ถูก commit ขึ้น GitHub
 
-## 📦 Datasets (ชุดข้อมูลที่ใช้)
-โฟลเดอร์ `dataset/` ถูกตั้งค่าให้อยู่ใน `.gitignore` เนื่องจากขนาดไฟล์ใหญ่เกินโควตาของ GitHub (~1.5 GB uncompressed)
+> 📖 **ดูรายละเอียดชุดข้อมูลเพิ่มเติมได้ที่:** [`dataset/README.md`](dataset/README.md)
 
-* **Nonastreda Multimodal Dataset for Identifying Tool Wear Condition:**
-  * **Download Link:** [Mendeley Data Repository (V1)](https://data.mendeley.com/datasets/m892d2wtzh/1)
-  * ประกอบด้วย:
-    * `forces_xyz_raw.mat`: ข้อมูลแรงตัด 3 แกน ($F_x, F_y, F_z$) สดจาก Kistler Dynamometer ที่ 1,000 Hz
-    * `tool/`: ภาพถ่ายส่องกล้องขยายหน้ามีดตัด (Flank Face Microscope) สำหรับวัดรอยสึก $V_b$
-    * `labels.csv` & `labels_reg.csv`: ป้ายกำกับคลาส SHARP/USED/DULLED และขนาดการสึกหรอจริง (ISO 8688-2)
-  * ดาวน์โหลดและแตกไฟล์ไว้ที่: `dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition/`
+---
 
-> 📖 **ดูโครงสร้างโฟลเดอร์และคำแนะนำการติดตั้งอย่างละเอียดได้ที่:** [`dataset/README.md`](dataset/README.md)
+## 🚀 วิธีการติดตั้งและรันระบบ (Quickstart)
 
-## API Documentation
-เมื่อระบบรันสำเร็จ สามารถเข้าดูเอกสาร API ได้ที่:
-- **Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **ReDoc:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
-- **OpenAPI JSON:** [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
-
-## เครื่องมืออื่นๆ
-- **Export API to CSV:** สำหรับนำข้อมูล API ออกมาในรูปแบบ CSV
-  ```bash
-  uv run python scripts/openapi_to_csv.py
-  ```
-
-## 🐳 รันทั้งระบบด้วย Docker Compose (แนะนำ)
-
-รันทั้ง Infrastructure + Backend + Workers ในคำสั่งเดียว:
-
-```bash
-# Build และรันทุก service
-docker compose up --build -d
-
-# ดู logs
-docker compose logs -f backend trainer-worker inference-worker mlflow
-
-# หยุดทุก service
-docker compose down
-```
-
-### Services ที่รัน
-| Service | Port | คำอธิบาย |
-|---------|------|----------|
-| `redis` | 6379 | Redis สำหรับ ARQ queue |
-| `db` | 5432 | PostgreSQL database |
-| `minio` | 9000/9001 | Object Storage (API/Console) |
-| `label-studio` | 8080 | Data annotation |
-| `mlflow` | 5001 | MLflow Tracking Server & Model Registry |
-| `backend` | 8000 | FastAPI API server |
-| `trainer-worker` | — | ARQ worker สำหรับเทรนโมเดล (GPU) |
-| `inference-worker` | — | ARQ worker สำหรับรัน inference จาก MLflow |
-| `minio-init` | — | สร้าง bucket `mlflow-artifacts` (รันครั้งเดียว) |
-
-> **หมายเหตุ:** `trainer-worker` ต้องการ NVIDIA GPU + nvidia-container-toolkit ถ้าไม่มี GPU ให้ comment ส่วน `deploy.resources` ใน `compose.yml` ออก
-
-## 🧠 Training Pipeline
-
-### 1. โหลด Dataset จาก Hugging Face → MinIO
+### 1. ติดตั้ง Dependencies และรัน Backend
 
 ```bash
 cd backend
-uv run python scripts/load_hf_dataset_to_minio.py --dataset conll2003
+
+# สร้าง virtual environment และติดตั้งแพ็กเกจ
+python -m venv .venv
+.\.venv\Scripts\activate      # สำหรับ Windows PowerShell
+# source .venv/bin/activate   # สำหรับ Linux / macOS
+
+pip install fastapi uvicorn pydantic pydantic-settings python-dotenv python-multipart sqlalchemy redis minio bcrypt arq python-jose email-validator
+
+# ทดสอบความพร้อมของการเชื่อมต่อระบบ (DB, Redis, MinIO)
+python scripts/test_connections.py
+
+# รัน Backend Server
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-ดู dataset ใน MinIO Console: http://localhost:9001 → bucket `datasets`
+* **Swagger UI:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+* **ReDoc:** [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
 
-### 2. ส่งงานเทรน (ผ่าน API)
+### 2. เตรียม MinIO Storage Buckets (ทางเลือก)
+
+หากเปิดใช้งาน MinIO ใน Docker:
+```bash
+python -m core.minio_setup
+```
+สคริปต์จะทำการสร้าง Storage Buckets ที่จำเป็นทั้งหมดให้อัตโนมัติ (`qc-images`, `raw-telemetry`, `reports`, `models`, `avatars`, `datasets`)
+
+### 3. รัน Frontend Web Dashboard
 
 ```bash
-curl -X POST http://localhost:8000/training/queue \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_name": "conll2003",
-    "model_name": "bert-base-ner",
-    "start_time": "2026-09-03T12:00:00"
-  }'
+cd frontend
+npm install
+npm run dev
 ```
 
-### 3. เช็คสถานะ
+เข้าใช้งานหน้าเว็บได้ที่: [http://localhost:5173](http://localhost:5173)
+
+---
+
+## 🛠️ โครงสร้าง Infrastructure (Docker Compose)
+
+สำหรับการรัน Infrastructure ครบชุด (PostgreSQL, Redis, MinIO, Label Studio, MLflow):
 
 ```bash
-curl http://localhost:8000/training/queue/{job_id}
+# รัน Infrastructure Services ทั้งหมด
+docker compose up -d
+
+# ตรวจสอบสถานะ Containers
+docker compose ps
+
+# ดู Logs การทำงาน
+docker compose logs -f
 ```
 
-### 4. ดูผลลัพธ์
-- **MLflow UI:** http://localhost:5001 → ดู experiment runs, metrics, registered models
-- **โมเดล:** MinIO Console → bucket `models` → `{model_name}/v{timestamp}/`
-- **MLflow Artifacts:** MinIO Console → bucket `mlflow-artifacts`
-- **Training Log:** อยู่ใน `models/{model_name}/v{timestamp}/train.log` และ `./logs/` บน host
-- **Swagger UI:** http://localhost:8000/docs → section "Training (Model Fine-tuning)"
+| Service | Port | รายละเอียดการใช้งาน |
+|---|---|---|
+| **FastAPI Backend** | 8000 | Core REST & WebSocket API |
+| **PostgreSQL** | 5432 | Primary Relational Database |
+| **Redis** | 6379 | Real-time Cache & Background Job Queue |
+| **MinIO Console** | 9001 (API: 9000) | S3-Compatible Storage สำหรับภาพและโมเดล |
+| **MLflow** | 5001 | Model Tracking & Experiment Management |
+| **Label Studio** | 8080 | เครื่องมือ Data Annotation |
 
-## 🔮 Inference Pipeline
+---
 
-### 1. ส่ง Prediction Request
-
-```bash
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_name": "bert-base-ner",
-    "model_version": "latest",
-    "input_data": {"text": "John works at Google in New York"}
-  }'
-```
-
-Response:
-```json
-{
-  "job_id": "abc123...",
-  "status": "success",
-  "message": "เพิ่มงาน inference สำหรับโมเดล 'bert-base-ner' (version: latest) เข้าคิวเรียบร้อย"
-}
-```
-
-### 2. เช็คผลลัพธ์ด้วย Job ID
-
-```bash
-curl http://localhost:8000/inference/jobs/{job_id}
-```
-
-Response (เมื่อเสร็จ):
-```json
-{
-  "job_id": "abc123...",
-  "status": "complete",
-  "result": {
-    "model_name": "bert-base-ner",
-    "model_version": "latest",
-    "predictions": [...]
-  },
-  "error": null
-}
-```
-
-### 3. ระบุ Version เจาะจง
-
-```bash
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_name": "bert-base-ner",
-    "model_version": "1",
-    "input_data": {"text": "Apple announced new products in Cupertino"}
-  }'
-```
-
-> **หมายเหตุ:** `model_version` รองรับทั้ง `"latest"` (เวอร์ชันล่าสุด) และเลข version เจาะจง (เช่น `"1"`, `"2"`)
-
-## 🔗 Web UIs
-
-| UI | URL | คำอธิบาย |
-|----|-----|----------|
-| Swagger UI | http://localhost:8000/docs | API Documentation & Testing |
-| MLflow UI | http://localhost:5001 | Experiment Tracking & Model Registry |
-| MinIO Console | http://localhost:9001 | Object Storage Management |
-| Label Studio | http://localhost:8080 | Data Annotation |
+## 👥 ผู้พัฒนาและการมีส่วนร่วม
+โปรเจกต์นี้ได้รับการพัฒนาภายใต้มาตรฐานความปลอดภัยระดับอุตสาหกรรม สำหรับคำถามหรือการส่งฟีเจอร์เพิ่มเติม สามารถเปิด Issue หรือ Pull Request ได้ที่ GitHub Repository ครับ

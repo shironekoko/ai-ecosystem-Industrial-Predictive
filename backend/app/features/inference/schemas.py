@@ -56,3 +56,17 @@ class InferenceResultResponse(BaseModel):
         default=None,
         description="ข้อความ error (ถ้ามี)",
     )
+
+
+class ForcePredictionRequest(BaseModel):
+    fx: list[float]
+    fy: list[float]
+    fz: list[float]
+
+
+class ForcePredictionResponse(BaseModel):
+    toolCondition: str
+    confidence: float
+    flankWearEstimateUm: float
+    rulCuts: int
+    resultantForceN: float

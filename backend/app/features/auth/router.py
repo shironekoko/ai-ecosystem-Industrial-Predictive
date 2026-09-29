@@ -39,6 +39,12 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     status_code=status.HTTP_201_CREATED,
     summary="สมัครสมาชิกใหม่",
 )
+@router.post(
+    "/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="สมัครสมาชิกใหม่ (Alias)",
+)
 def signup(body: SignUpRequest, db: Session = Depends(get_db)):
     """
     สร้างบัญชีผู้ใช้ใหม่

@@ -1,0 +1,360 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "Nonastreda CNC Predictive Maintenance & QC Ecosystem",
+    "description": "Postman Collection for Industrial-Predictive API Gateway (/api/v1).\nIntegrates Fleet Command Center, Dual-AI Visual QC, Live Spindle Telemetry, Alarms, MLflow Model Registry, and ISO 8688 Reports.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Health & Diagnostics",
+      "item": [
+        {
+          "name": "Basic Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Component Health Check (DB, Redis, MinIO)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/components",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "components"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Fleet Command Center",
+      "item": [
+        {
+          "name": "Get All CNC Spindles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fleet/spindles",
+              "host": ["{{baseUrl}}"],
+              "path": ["fleet", "spindles"]
+            }
+          }
+        },
+        {
+          "name": "Get Fleet Summary KPIs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fleet/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["fleet", "summary"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Visual QC & Human-in-the-Loop",
+      "item": [
+        {
+          "name": "Get Active Target Tool on Bench",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/qc/target?tool=10&run=12",
+              "host": ["{{baseUrl}}"],
+              "path": ["qc", "target"],
+              "query": [
+                { "key": "tool", "value": "10" },
+                { "key": "run", "value": "12" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Blade Inspection Results (Ground Truth from Dataset)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/qc/tools/10/runs/12/blades/2",
+              "host": ["{{baseUrl}}"],
+              "path": ["qc", "tools", "10", "runs", "12", "blades", "2"]
+            }
+          }
+        },
+        {
+          "name": "Submit Verification Sign-off (Active Learning)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recordId\": \"T10R12B2\",\n  \"toolId\": 10,\n  \"passIndex\": 12,\n  \"bladeIndex\": 2,\n  \"decision\": \"CONFIRMED_WEAR\",\n  \"notes\": \"Flank wear land Vb measured at 120.69 µm\",\n  \"inspectorName\": \"Maintenance Engineer\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/qc/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["qc", "verify"]
+            }
+          }
+        },
+        {
+          "name": "Get Flank Face Microscope Image",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/qc/images/T10R12B2.jpg",
+              "host": ["{{baseUrl}}"],
+              "path": ["qc", "images", "T10R12B2.jpg"]
+            }
+          }
+        },
+        {
+          "name": "Get Grad-CAM Heatmap Image",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/qc/gradcam/T10R12B2.jpg",
+              "host": ["{{baseUrl}}"],
+              "path": ["qc", "gradcam", "T10R12B2.jpg"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Live Spindle Force Telemetry",
+      "item": [
+        {
+          "name": "Snapshot Force Telemetry",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/telemetry/forces?tool_id=10&run=12",
+              "host": ["{{baseUrl}}"],
+              "path": ["telemetry", "forces"],
+              "query": [
+                { "key": "tool_id", "value": "10" },
+                { "key": "run", "value": "12" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Send Spindle Safety Control (E-STOP / RESUME)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"spindleId\": \"CNC-SP-01\",\n  \"action\": \"EMERGENCY_STOP\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/telemetry/spindle/control",
+              "host": ["{{baseUrl}}"],
+              "path": ["telemetry", "spindle", "control"]
+            }
+          }
+        },
+        {
+          "name": "Predict Forces (BiLSTM Soft-Sensor)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fx\": [45.2, 52.1, 48.0, 50.4],\n  \"fy\": [68.0, 71.2, 65.5, 69.1],\n  \"fz\": [115.4, 122.0, 118.6, 120.2]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inference/predict-forces",
+              "host": ["{{baseUrl}}"],
+              "path": ["inference", "predict-forces"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Industrial Alarms",
+      "item": [
+        {
+          "name": "Get All Alarms",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/alarms?severity=ALL",
+              "host": ["{{baseUrl}}"],
+              "path": ["alarms"],
+              "query": [{ "key": "severity", "value": "ALL" }]
+            }
+          }
+        },
+        {
+          "name": "Acknowledge / Mark All Alarms Read",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/alarms/mark-all-read",
+              "host": ["{{baseUrl}}"],
+              "path": ["alarms", "mark-all-read"]
+            }
+          }
+        },
+        {
+          "name": "Delete / Dismiss Alarm",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/alarms/ALM-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["alarms", "ALM-001"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Model Registry & MLOps",
+      "item": [
+        {
+          "name": "Get Registered Models (MLflow)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/models/registry",
+              "host": ["{{baseUrl}}"],
+              "path": ["models", "registry"]
+            }
+          }
+        },
+        {
+          "name": "Get Active Learning Retraining Pool Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/models/retraining-pool/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["models", "retraining-pool", "status"]
+            }
+          }
+        },
+        {
+          "name": "Hot Reload Model Checkpoint",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target_version\": \"latest\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/models/MOD-001/hot-reload",
+              "host": ["{{baseUrl}}"],
+              "path": ["models", "MOD-001", "hot-reload"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Reports & Audit",
+      "item": [
+        {
+          "name": "Get Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/audit-logs?page=1&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["audit-logs"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Degradation Summary (Weibull)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/degradation-summary?period=30D",
+              "host": ["{{baseUrl}}"],
+              "path": ["reports", "degradation-summary"],
+              "query": [{ "key": "period", "value": "30D" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Users & RBAC",
+      "item": [
+        {
+          "name": "Get All Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"]
+            }
+          }
+        },
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Miller\",\n  \"email\": \"john.miller@machinery.internal\",\n  \"password\": \"Secret123!\",\n  \"role\": \"engineer\",\n  \"department\": \"Maintenance\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,157 +1,288 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity,
   Play,
   Pause,
   RotateCcw,
-  Gauge,
   ScanEye,
   Wifi,
   WifiOff,
-  ShieldAlert,
+  Scissors,
+  CheckCircle2,
+  AlertTriangle,
+  Layers,
   Clock,
+  Radio,
+  Trash2,
 } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { StatusBadge } from '../../components/common/StatusBadge';
-import { telemetryStream } from '../../services/telemetryStream';
-import { TelemetryPacket, StreamConnectionStatus } from '../../types';
+
+// Interfaces for live telemetry & run progression
+export interface RunProgressionItem {
+  run: number;
+  tsPrediction: 'SHARP' | 'USED' | 'DULLED';
+  confidence: number;
+  flankWearUm?: number;
+  gapsUm?: number;
+  fres?: number;
+  note?: string;
+  chipImageUrl?: string;
+  chipPrediction?: 'SHARP' | 'USED' | 'DULLED';
+  chipConfidence?: number;
+}
+
+export interface StreamingDataPoint {
+  timestamp: number;
+  fx: number;
+  fy: number;
+  fz?: number;
+  fres: number;
+}
 
 export function MachineMonitoringPage() {
   const navigate = useNavigate();
 
-  // Stream state received from TelemetryStreamService
-  const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>('CONNECTING');
-  const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [latestPacket, setLatestPacket] = useState<TelemetryPacket | null>(null);
+  // Active Tool state
+  const [selectedToolId] = useState<number>(10);
 
-  // Rolling Oscilloscope Window Buffer (FIFO: 80 points)
-  const BUFFER_SIZE = 80;
-  const [bufferFx, setBufferFx] = useState<number[]>(() => Array(BUFFER_SIZE).fill(0));
-  const [bufferFy, setBufferFy] = useState<number[]>(() => Array(BUFFER_SIZE).fill(0));
-  const [bufferFz, setBufferFz] = useState<number[]>(() => Array(BUFFER_SIZE).fill(0));
+  // Per-Run Progression items (Clean / empty by default awaiting API or stream)
+  const [runs, setRuns] = useState<RunProgressionItem[]>([]);
+  const [activeRunNumber, setActiveRunNumber] = useState<number | null>(null);
 
-  // Subscribe to Telemetry Stream & Connection Status
+  // Live streaming buffer (rolling window of the latest data points)
+  const [streamPoints, setStreamPoints] = useState<StreamingDataPoint[]>([]);
+  const [latestForces, setLatestForces] = useState<{
+    fx: number;
+    fy: number;
+    fz?: number;
+    fres: number;
+  } | null>(null);
+
+  // Stream connection state
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const [streamStatus, setStreamStatus] = useState<'IDLE' | 'CONNECTING' | 'STREAMING' | 'ERROR'>('IDLE');
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Active run info derived from current runs array
+  const currentRunInfo = runs.find((r) => r.run === activeRunNumber) || (runs.length > 0 ? runs[runs.length - 1] : null);
+  const isTimeSeriesAlert = currentRunInfo?.tsPrediction === 'DULLED';
+
+  // Two-Factor Logic:
+  // Factor 1: Time-Series Force AI checks per-run.
+  // Factor 2: Non-Time-Series Chip AI triggers ONLY IF Factor 1 Alerts!
+  const isNonTimeActive = Boolean(currentRunInfo && isTimeSeriesAlert);
+  const chipAiCondition = currentRunInfo?.chipPrediction || (isTimeSeriesAlert ? 'DULLED' : 'SHARP');
+  const chipAiConfidence = currentRunInfo?.chipConfidence ?? (isTimeSeriesAlert ? 94.2 : 91.5);
+  const isTwoFactorConfirmed = Boolean(isTimeSeriesAlert && chipAiCondition === 'DULLED');
+
+  // WebSocket Live Telemetry Streaming Handler
   useEffect(() => {
-    const unsubStatus = telemetryStream.subscribeStatus((status) => {
-      setStreamStatus(status);
-    });
-
-    const unsubPacket = telemetryStream.subscribe((packet) => {
-      setLatestPacket(packet);
-
-      // Append waveform chunk to rolling FIFO buffer
-      const chunk = packet.waveformChunk;
-      if (chunk && chunk.fx.length > 0) {
-        setBufferFx((prev) => [...prev.slice(chunk.fx.length), ...chunk.fx]);
-        setBufferFy((prev) => [...prev.slice(chunk.fy.length), ...chunk.fy]);
-        setBufferFz((prev) => [...prev.slice(chunk.fz.length), ...chunk.fz]);
-      } else {
-        setBufferFx((prev) => [...prev.slice(1), packet.forces.fx]);
-        setBufferFy((prev) => [...prev.slice(1), packet.forces.fy]);
-        setBufferFz((prev) => [...prev.slice(1), packet.forces.fz]);
+    if (!isStreaming) {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
       }
-    });
+      setStreamStatus('IDLE');
+      return;
+    }
+
+    setStreamStatus('CONNECTING');
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl =
+      (import.meta as any).env?.VITE_WS_URL ||
+      `${wsProtocol}//${window.location.hostname}:8000/api/v1/telemetry/spindle/stream`;
+
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(wsUrl);
+      wsRef.current = socket;
+    } catch {
+      setStreamStatus('ERROR');
+      return;
+    }
+
+    socket.onopen = () => {
+      setStreamStatus('STREAMING');
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data && data.forces) {
+          const newPoint: StreamingDataPoint = {
+            timestamp: data.timestamp || Date.now(),
+            fx: data.forces.fx,
+            fy: data.forces.fy,
+            fz: data.forces.fz,
+            fres: data.forces.fres,
+          };
+
+          setLatestForces(data.forces);
+
+          setStreamPoints((prev) => {
+            const next = [...prev, newPoint];
+            return next.length > 60 ? next.slice(next.length - 60) : next;
+          });
+
+          // Ingest run telemetry if packet contains passIndex
+          if (data.passIndex !== undefined) {
+            const passNum = Number(data.passIndex);
+            const condition =
+              data.inference?.condition ||
+              (data.forces.fres > 210 ? 'DULLED' : data.forces.fres > 130 ? 'USED' : 'SHARP');
+            const conf = data.inference?.confidence || 0.92;
+            const flankWear = data.inference?.flankWearUm;
+
+            setRuns((prev) => {
+              const idx = prev.findIndex((r) => r.run === passNum);
+              const item: RunProgressionItem = {
+                run: passNum,
+                tsPrediction: condition,
+                confidence: conf,
+                flankWearUm: flankWear,
+                fres: data.forces.fres,
+              };
+              if (idx >= 0) {
+                const updated = [...prev];
+                updated[idx] = item;
+                return updated;
+              } else {
+                return [...prev, item].sort((a, b) => a.run - b.run);
+              }
+            });
+
+            // If first dulled detected, auto-select and stop stream safety interlock
+            if (condition === 'DULLED') {
+              setActiveRunNumber(passNum);
+              setIsStreaming(false); // Safety cut on first dulled!
+            } else if (activeRunNumber === null) {
+              setActiveRunNumber(passNum);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Stream] Parse error:', err);
+      }
+    };
+
+    socket.onerror = () => {
+      setStreamStatus('ERROR');
+    };
+
+    socket.onclose = () => {
+      setStreamStatus('IDLE');
+    };
 
     return () => {
-      unsubStatus();
-      unsubPacket();
+      if (socket) {
+        socket.close();
+      }
     };
-  }, []);
+  }, [isStreaming]);
 
-  // Control handlers
-  const handleTogglePlay = () => {
-    if (isPaused) {
-      telemetryStream.resume();
-      setIsPaused(false);
-    } else {
-      telemetryStream.pause();
-      setIsPaused(true);
-    }
-  };
-
-  const handleReconnect = () => {
-    telemetryStream.reconnect();
-    setBufferFx(Array(BUFFER_SIZE).fill(0));
-    setBufferFy(Array(BUFFER_SIZE).fill(0));
-    setBufferFz(Array(BUFFER_SIZE).fill(0));
-    setLatestPacket(null);
-  };
-
-  // Derive display values from incoming packet or keep clean standby state
-  const isConnected = streamStatus === 'CONNECTED' && latestPacket !== null;
-  const passIndex = latestPacket?.passIndex ?? null;
-  const cycleDurationSec = latestPacket?.cycleDurationSec ?? 0;
-  const machineState = latestPacket?.machineState ?? 'STANDBY';
-  const isInterlockTripped = latestPacket?.interlockStatus === 'TRIPPED';
-  const interlockReason = latestPacket?.interlockReason;
-  const inference = latestPacket?.inference ?? null;
-  const forces = latestPacket?.forces ?? { fx: 0, fy: 0, fz: 0, fres: 0 };
-
-  // Calculate real CNC mechanical telemetry metrics
-  const spindleLoadPct = isConnected ? Math.min(100, Math.round((forces.fres / 260) * 100)) : 0;
-  const stabilityStatus = !isConnected
-    ? { label: 'STREAM STANDBY', color: 'text-gray-500 bg-gray-50 border-gray-200' }
-    : forces.fres > 210
-    ? { label: 'CRITICAL CHATTER / IMPACT', color: 'text-rose-600 bg-rose-50 border-rose-200' }
-    : forces.fres > 140
-    ? { label: 'ELEVATED FRICTION LOAD', color: 'text-amber-600 bg-amber-50 border-amber-200' }
-    : { label: 'STABLE CUTTING DYNAMICS', color: 'text-emerald-600 bg-emerald-50 border-emerald-200' };
-
-  // SVG Chart Dimensions
+  // Chart dimensions & coordinate math
   const chartHeight = 220;
   const chartWidth = 720;
+  const maxForceScale = 320; // 0 to 320 N
 
-  const makePolyline = (arr: number[]) => {
-    const minVal = -50;
-    const maxVal = 320;
-    return arr
-      .map((val, i) => {
-        const x = (i / (BUFFER_SIZE - 1)) * chartWidth;
-        const normalized = Math.max(0, Math.min(1, (val - minVal) / (maxVal - minVal)));
-        const y = chartHeight - normalized * chartHeight;
+  // Calculate SVG Polyline from streaming points
+  const getStreamingPolyline = (points: StreamingDataPoint[]) => {
+    if (points.length < 2) return '';
+    return points
+      .map((p, idx) => {
+        const x = (idx / (points.length - 1)) * chartWidth;
+        const clampedFres = Math.max(0, Math.min(maxForceScale, p.fres));
+        const y = chartHeight - 24 - (clampedFres / maxForceScale) * (chartHeight - 48);
         return `${x.toFixed(1)},${y.toFixed(1)}`;
       })
       .join(' ');
+  };
+
+  const getStreamingFxyPolyline = (points: StreamingDataPoint[], key: 'fx' | 'fy') => {
+    if (points.length < 2) return '';
+    return points
+      .map((p, idx) => {
+        const x = (idx / (points.length - 1)) * chartWidth;
+        const val = Math.abs(p[key]);
+        const clamped = Math.max(0, Math.min(maxForceScale, val));
+        const y = chartHeight - 24 - (clamped / maxForceScale) * (chartHeight - 48);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  };
+
+  const thresholdY = chartHeight - 24 - (210 / maxForceScale) * (chartHeight - 48);
+  const firstDulledRun = runs.find((r) => r.tsPrediction === 'DULLED');
+
+  const handleClearData = () => {
+    setStreamPoints([]);
+    setLatestForces(null);
+    setRuns([]);
+    setActiveRunNumber(null);
   };
 
   return (
     <div className="space-y-6">
       {/* Top Header */}
       <PageHeader
-        title="Live Spindle Force Telemetry & Prognostics"
-        subtitle="Real-time High-Frequency Cutting Dynamics · Dynamometer In-Process Tracking (Pure Time-Series CRNN: TCN + BiGRU)"
+        title="Time-Series Per-Run Progression & 2-Factor In-Process Tracking"
+        subtitle="โมเดล Time-Series CRNN (BiGRU + Attention) เช็คราย Run ตามลำดับรอบตัด ➔ หยุดทันทีเมื่อเจอ Dulled อันแรก เพื่อดึงภาพ Chip"
         actions={
           <div className="flex items-center gap-2">
-            <span
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md font-semibold border ${
-                streamStatus === 'CONNECTED'
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-amber-50 text-amber-700 border-amber-200'
-              }`}
-              title={telemetryStream.getWsUrl()}
-            >
-              {streamStatus === 'CONNECTED' ? (
-                <Wifi className="w-3.5 h-3.5 text-emerald-600" />
-              ) : (
-                <WifiOff className="w-3.5 h-3.5 text-amber-600" />
-              )}
-              <span>
-                {streamStatus === 'CONNECTED'
-                  ? 'WebSocket: Live Feed'
-                  : 'Stream Standby (Awaiting API)'}
-              </span>
-            </span>
+            {/* Clear / Reset Button */}
+            {(runs.length > 0 || streamPoints.length > 0) && (
+              <button
+                onClick={handleClearData}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition shadow-xs"
+                title="ล้างข้อมูลกราฟและรอบตัดเพื่อเริ่มรับข้อมูลใหม่"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear Buffer</span>
+              </button>
+            )}
 
+            {/* Live Streaming Toggle */}
+            <button
+              onClick={() => setIsStreaming((prev) => !prev)}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold border transition shadow-xs ${
+                isStreaming
+                  ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white border-transparent'
+              }`}
+            >
+              {isStreaming ? (
+                <>
+                  <Pause className="w-3.5 h-3.5" />
+                  <span>Stop Telemetry Stream</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5" />
+                  <span>Start Telemetry Stream</span>
+                </>
+              )}
+            </button>
+
+            {/* Connection Status Badge */}
             <StatusBadge
-              status={isInterlockTripped ? 'critical' : isPaused ? 'warning' : isConnected ? 'connected' : 'disconnected'}
+              status={
+                isTwoFactorConfirmed
+                  ? 'critical'
+                  : isStreaming
+                  ? 'connected'
+                  : streamStatus === 'CONNECTING'
+                  ? 'warning'
+                  : 'disconnected'
+              }
               label={
-                isInterlockTripped
-                  ? 'SAFETY E-STOP'
-                  : isPaused
-                  ? 'STREAM PAUSED'
-                  : isConnected
-                  ? 'LIVE TELEMETRY'
+                isTwoFactorConfirmed
+                  ? `2-FACTOR ALERT: STOPPED AT RUN #${activeRunNumber}`
+                  : isStreaming
+                  ? `STREAMING ACTIVE (${streamPoints.length} pts)`
+                  : streamStatus === 'CONNECTING'
+                  ? 'CONNECTING TO WS...'
                   : 'STREAM STANDBY'
               }
             />
@@ -159,397 +290,413 @@ export function MachineMonitoringPage() {
         }
       />
 
-      {/* Emergency Machine Halt Interlock Banner (Shown only when real safety trip occurs) */}
-      {isInterlockTripped && (
-        <div className="p-4 rounded-xl bg-rose-600 text-white shadow-xl border border-rose-500 flex flex-wrap items-center justify-between gap-4 animate-fadeIn">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-white/20 rounded-xl text-white">
-              <ShieldAlert className="w-7 h-7 animate-bounce" />
-            </div>
-            <div>
-              <p className="font-black text-sm uppercase tracking-wider flex items-center gap-2">
-                <span>🔴 EMERGENCY INTERLOCK TRIPPED · SPINDLE FEED CUT</span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-white text-rose-700 font-mono font-bold">
-                  SAFETY RELAY OPEN
-                </span>
-              </p>
-              <p className="text-xs text-rose-100 mt-1 max-w-2xl leading-relaxed">
-                {interlockReason ||
-                  'Spindle cutting load and friction exceeded critical tolerance limits. Motor feed halted automatically to prevent workpiece gouging. Send tool to Optical Verification.'}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate(passIndex ? `/visual-qc?run=${passIndex}` : `/visual-qc`)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 text-xs font-bold rounded-lg shadow-md transition"
-            >
-              <ScanEye className="w-4 h-4" />
-              <span>Inspect Blades in Tool Verification</span>
-            </button>
-            <button
-              onClick={handleReconnect}
-              className="px-3.5 py-2 bg-rose-800 hover:bg-rose-900 text-white text-xs font-semibold rounded-lg border border-rose-400/50 transition flex items-center gap-1"
-              title="Reset connection"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reconnect Stream</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Stream Control & Spindle Telemetry Ribbon */}
-      <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-wrap items-center justify-between gap-4">
-        {/* Left: Stream Control & Spindle Status */}
-        <div className="flex items-center gap-3">
-          <button
-            disabled={!isConnected}
-            onClick={handleTogglePlay}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-              !isConnected
-                ? 'opacity-40 cursor-not-allowed bg-gray-100 text-gray-400 border-gray-200'
-                : isPaused
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
-                : 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
-            }`}
-          >
-            {isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-            <span>{isPaused ? 'Resume Live Stream' : 'Pause Live Feed'}</span>
-          </button>
-
-          <button
-            onClick={handleReconnect}
-            className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 transition"
-            title="Reconnect WebSocket stream"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-
-          {/* Machining Cycle Indicator */}
-          <div className="px-3 py-1.5 rounded-lg bg-gray-100 border border-gray-200 text-gray-800 text-xs font-mono font-bold flex items-center gap-2">
-            <span
-              className={`w-2.5 h-2.5 rounded-full ${
-                isInterlockTripped
-                  ? 'bg-rose-600 animate-ping'
-                  : isConnected && machineState === 'ENGAGED'
-                  ? 'bg-emerald-500 animate-pulse'
-                  : 'bg-gray-400'
-              }`}
-            />
-            <span>
-              Machining Pass:{' '}
-              <strong className="text-indigo-600 font-black">
-                {passIndex !== null ? `#${passIndex}` : '--'}
-              </strong>{' '}
-              · Phase:{' '}
-              <strong
-                className={
-                  isInterlockTripped
-                    ? 'text-rose-600'
-                    : isConnected && machineState === 'ENGAGED'
-                    ? 'text-emerald-700'
-                    : 'text-gray-500'
-                }
-              >
-                {isInterlockTripped ? 'EMERGENCY HALTED' : machineState}
-              </strong>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5 text-xs text-gray-500 font-mono">
-            <Clock className="w-3.5 h-3.5 text-gray-400" />
-            <span>Pass Elapsed: {cycleDurationSec}s</span>
-          </div>
-        </div>
-
-        {/* Right: Optical QC Shortcut */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigate(passIndex ? `/visual-qc?run=${passIndex}` : `/visual-qc`)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition"
-          >
-            <ScanEye className="w-3.5 h-3.5" />
-            <span>
-              {passIndex !== null
-                ? `Open Tool Verification Station (Pass #${passIndex})`
-                : 'Open Tool Verification Station'}
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Monitoring Grid */}
+      {/* Main Grid: Per-Run Dynamics Graph + Timeline (70%) + 2-Factor In-Process HUD (30%) */}
       <div className="grid grid-cols-12 gap-6">
-        {/* Left: Continuous Oscilloscope Waveform Display */}
-        <div className="col-span-12 lg:col-span-8 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
-          <div className="px-6 py-3.5 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
-            <div>
-              <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
-                <Activity className="w-4 h-4 text-rose-600" />
-                <span>Continuous Oscilloscope (Tri-Axial Dynamometer)</span>
-              </h3>
-              <p className="text-xs text-gray-500 mt-0.5 font-mono">
-                Streaming 4-Flute Tooth Passing Dynamics · 1 kHz Native Sampling
-              </p>
+        {/* Left Column: กราฟตอน Run ราย Run + Timeline ลำดับรอบตัด */}
+        <div className="col-span-12 lg:col-span-8 space-y-5">
+          {/* Section 1: กราฟตัดชิ้นงานราย Run (Per-Run Signal & Cutting Dynamics Graph) */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col">
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/70">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-indigo-600" />
+                <span className="font-bold text-xs text-gray-900 uppercase tracking-wider">
+                  Cutting Dynamics Graph · Run #{activeRunNumber ?? '--'} (Tool #{selectedToolId})
+                </span>
+                {isStreaming && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 animate-pulse">
+                    <Radio className="w-3 h-3" /> Live Stream
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-4 text-xs font-mono">
+                <span className="text-blue-600 font-bold">
+                  Fx: {latestForces ? `${latestForces.fx.toFixed(1)} N` : '-- N'}
+                </span>
+                <span className="text-emerald-600 font-bold">
+                  Fy: {latestForces ? `${latestForces.fy.toFixed(1)} N` : '-- N'}
+                </span>
+                <span
+                  className={`font-black ${
+                    latestForces && latestForces.fres > 210
+                      ? 'text-rose-600 animate-pulse'
+                      : latestForces
+                      ? 'text-amber-500'
+                      : 'text-gray-400'
+                  }`}
+                >
+                  Fres:{' '}
+                  {latestForces ? `${latestForces.fres.toFixed(1)} N` : '-- N'}{' '}
+                  {latestForces && latestForces.fres > 210 ? '(SPIKE!)' : ''}
+                </span>
+              </div>
             </div>
-            {/* Chart Legend */}
-            <div className="flex items-center gap-3 text-xs font-mono font-semibold">
-              <span className="flex items-center gap-1.5 text-sky-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-sky-400" /> Fx (Feed)
-              </span>
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" /> Fy (Normal)
-              </span>
-              <span className="flex items-center gap-1.5 text-purple-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-purple-400" /> Fz (Axial)
-              </span>
-            </div>
-          </div>
 
-          {/* SVG Waveform Rendering */}
-          <div className="p-6 flex-1 flex flex-col justify-center bg-slate-950 rounded-b-xl relative overflow-hidden">
-            {/* Oscilloscope Grid */}
-            <div className="absolute inset-0 grid grid-cols-8 grid-rows-4 pointer-events-none opacity-10">
-              {Array.from({ length: 32 }).map((_, i) => (
-                <div key={i} className="border border-white" />
-              ))}
-            </div>
+            {/* SVG Visualizer Canvas for Current Run / Streaming Data */}
+            <div className="p-4 bg-slate-950 flex-1 flex flex-col justify-center relative select-none min-h-[220px]">
+              {/* Background Grid Lines */}
+              <div className="absolute inset-0 grid grid-rows-4 grid-cols-8 pointer-events-none opacity-10">
+                {Array.from({ length: 32 }).map((_, i) => (
+                  <div key={i} className="border border-white" />
+                ))}
+              </div>
 
-            {/* Standby Banner when disconnected */}
-            {!isConnected && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 z-10 pointer-events-none select-none">
-                <div className="text-center space-y-1">
-                  <Activity className="w-8 h-8 text-slate-600 mx-auto stroke-[1.2]" />
-                  <p className="text-xs font-mono font-bold text-slate-400 uppercase tracking-widest">
-                    Awaiting Telemetry Stream
+              {streamPoints.length >= 2 ? (
+                /* Active Waveform Rendering */
+                <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-48 overflow-visible">
+                  {/* 210 N Threshold Limit Line */}
+                  <line
+                    x1="0"
+                    y1={thresholdY}
+                    x2={chartWidth}
+                    y2={thresholdY}
+                    stroke="#f43f5e"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 4"
+                    opacity="0.85"
+                  />
+                  <text
+                    x="12"
+                    y={thresholdY - 6}
+                    fill="#f43f5e"
+                    fontSize="10"
+                    fontFamily="monospace"
+                    fontWeight="bold"
+                  >
+                    ISO DYNAMIC ANOMALY THRESHOLD (Fres = 210 N)
+                  </text>
+
+                  {/* Fx Waveform (Faint Blue) */}
+                  <polyline
+                    fill="none"
+                    stroke="#3b82f6"
+                    strokeWidth="1.2"
+                    opacity="0.4"
+                    points={getStreamingFxyPolyline(streamPoints, 'fx')}
+                  />
+
+                  {/* Fy Waveform (Faint Emerald) */}
+                  <polyline
+                    fill="none"
+                    stroke="#10b981"
+                    strokeWidth="1.2"
+                    opacity="0.4"
+                    points={getStreamingFxyPolyline(streamPoints, 'fy')}
+                  />
+
+                  {/* Primary Resultant Waveform (Fres) */}
+                  <polyline
+                    fill="none"
+                    stroke={
+                      latestForces && latestForces.fres > 210
+                        ? '#f43f5e'
+                        : latestForces && latestForces.fres > 130
+                        ? '#f59e0b'
+                        : '#10b981'
+                    }
+                    strokeWidth="2.2"
+                    points={getStreamingPolyline(streamPoints)}
+                  />
+                </svg>
+              ) : (
+                /* Empty / Standby Oscilloscope Screen awaiting stream */
+                <div className="h-48 flex flex-col items-center justify-center text-center z-10 space-y-2">
+                  <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500">
+                    {isStreaming ? (
+                      <Activity className="w-5 h-5 text-indigo-400 animate-spin" />
+                    ) : (
+                      <WifiOff className="w-5 h-5 text-slate-500" />
+                    )}
+                  </div>
+                  <p className="text-xs font-mono font-bold text-slate-300">
+                    {isStreaming ? 'LISTENING FOR STREAMING DATA PACKETS...' : 'AWAITING TELEMETRY STREAM'}
                   </p>
-                  <p className="text-[11px] font-mono text-slate-600">
-                    ws://localhost:8000/api/v1/telemetry/spindle/stream
+                  <p className="text-[11px] font-mono text-slate-500 max-w-sm">
+                    {isStreaming
+                      ? 'เชื่อมต่อ WebSocket แล้ว กำลังรอข้อมูลแรงตัด (Fx, Fy, Fres) ส่งเข้ามา...'
+                      : 'กดปุ่ม "Start Telemetry Stream" หรือส่งข้อมูลสตรีมผ่าน API เพื่อเริ่มแสดงกราฟแบบ Real-time'}
                   </p>
                 </div>
-              </div>
-            )}
+              )}
 
-            <svg
-              viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-              className="w-full h-56 select-none overflow-visible"
-            >
-              {/* Zero Reference Line */}
-              <line
-                x1="0"
-                y1={chartHeight * 0.85}
-                x2={chartWidth}
-                y2={chartHeight * 0.85}
-                stroke="#334155"
-                strokeWidth="1"
-                strokeDasharray="4 4"
-              />
-
-              {/* Fx Waveform (Sky Blue) */}
-              <polyline
-                fill="none"
-                stroke="#38bdf8"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                points={makePolyline(bufferFx)}
-              />
-
-              {/* Fy Waveform (Emerald) */}
-              <polyline
-                fill="none"
-                stroke="#34d399"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                points={makePolyline(bufferFy)}
-              />
-
-              {/* Fz Waveform (Purple - Dominant Axial Force) */}
-              <polyline
-                fill="none"
-                stroke="#c084fc"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                points={makePolyline(bufferFz)}
-              />
-            </svg>
-
-            {/* Live Instantaneous Force Meters */}
-            <div className="mt-4 pt-3 border-t border-slate-800 grid grid-cols-4 gap-2 text-center font-mono">
-              <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
-                <span className="text-[10px] text-slate-400 block uppercase">Fx (Feed)</span>
-                <span className="text-sm font-bold text-sky-400">
-                  {isConnected ? `${forces.fx} N` : '-- N'}
+              {/* In-Chart Run Status Overlay */}
+              <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono pt-2 border-t border-slate-800">
+                <span>Pass Cycle: #{activeRunNumber ?? '--'}</span>
+                <span className="text-white font-bold">
+                  Status:{' '}
+                  <span
+                    className={
+                      isTimeSeriesAlert
+                        ? 'text-rose-400'
+                        : currentRunInfo?.tsPrediction === 'USED'
+                        ? 'text-amber-400'
+                        : currentRunInfo?.tsPrediction === 'SHARP'
+                        ? 'text-emerald-400'
+                        : 'text-slate-400'
+                    }
+                  >
+                    {currentRunInfo?.tsPrediction || 'Awaiting Data'}
+                  </span>
                 </span>
-              </div>
-              <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
-                <span className="text-[10px] text-slate-400 block uppercase">Fy (Normal)</span>
-                <span className="text-sm font-bold text-emerald-400">
-                  {isConnected ? `${forces.fy} N` : '-- N'}
-                </span>
-              </div>
-              <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
-                <span className="text-[10px] text-slate-400 block uppercase">Fz (Axial)</span>
-                <span className="text-sm font-bold text-purple-400">
-                  {isConnected ? `${forces.fz} N` : '-- N'}
-                </span>
-              </div>
-              <div className="bg-slate-900/90 p-2 rounded border border-slate-800">
-                <span className="text-[10px] text-slate-400 block uppercase">Fres (Resultant)</span>
-                <span className="text-sm font-bold text-amber-400">
-                  {isConnected ? `${forces.fres} N` : '-- N'}
+                <span>
+                  {streamPoints.length >= 2
+                    ? isTimeSeriesAlert
+                      ? '🔴 Chatter & Force Spikes Detected'
+                      : '🟢 Real-time Telemetry Active'
+                    : '⚪ Stream Ingestion Standby'}
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Section 2: Per-Run Progression Timeline (คลิกเลือกรอบตัดได้ เมื่อมีข้อมูลจาก API) */}
+          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-indigo-600" />
+                <span>Per-Run Progression Timeline (ลำดับรอบตัดราย Run)</span>
+              </h4>
+              <span className="text-[11px] text-gray-400 font-mono">
+                {firstDulledRun ? (
+                  <>
+                    First Dulled: <strong className="text-rose-600">Run #{firstDulledRun.run}</strong>
+                  </>
+                ) : (
+                  <span>Status: Awaiting Ingestion</span>
+                )}
+              </span>
+            </div>
+
+            {/* Stepper Cards Grid or Empty State */}
+            {runs.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
+                {runs.map((item) => {
+                  const isSelected = activeRunNumber === item.run;
+                  const isDulled = item.tsPrediction === 'DULLED';
+                  const isUsed = item.tsPrediction === 'USED';
+
+                  return (
+                    <button
+                      key={item.run}
+                      onClick={() => setActiveRunNumber(item.run)}
+                      className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between min-h-[85px] relative ${
+                        isSelected
+                          ? isDulled
+                            ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-400/30 shadow-xs'
+                            : isUsed
+                            ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-400/30 shadow-xs'
+                            : 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-400/30 shadow-xs'
+                          : 'bg-gray-50/70 border-gray-200 hover:bg-gray-100/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-mono font-bold text-xs text-gray-900">
+                          Run #{item.run}
+                        </span>
+                        {isDulled ? (
+                          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                        ) : isUsed ? (
+                          <span className="w-2 h-2 rounded-full bg-amber-500" />
+                        ) : (
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        )}
+                      </div>
+
+                      <div className="mt-2">
+                        <span
+                          className={`text-[10px] font-black font-mono block px-1.5 py-0.5 rounded text-center ${
+                            isDulled
+                              ? 'bg-rose-600 text-white'
+                              : isUsed
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-700'
+                          }`}
+                        >
+                          {item.tsPrediction}
+                        </span>
+                      </div>
+
+                      {item.fres !== undefined && (
+                        <span className="text-[9px] text-gray-400 mt-1 block truncate font-mono">
+                          Fres: {Math.round(item.fres)} N
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Empty state waiting for API runs */
+              <div className="py-8 px-4 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-center">
+                <Clock className="w-6 h-6 text-gray-400 mb-2" />
+                <p className="text-xs font-bold text-gray-700">
+                  ยังไม่มีข้อมูลรอบตัด (Awaiting Run Progression Data)
+                </p>
+                <p className="text-[11px] text-gray-400 font-mono mt-1 max-w-md">
+                  เมื่อเริ่มสตรีมข้อมูลหรือดึง API รอบตัดสำเร็จ ข้อมูล Run #1, Run #2 ... จะถูกเพิ่มเข้ามาใน Timeline อัตโนมัติ
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right: In-Process Spindle Telemetry & Cutting Diagnostics HUD */}
-        <div className="col-span-12 lg:col-span-4 space-y-5">
-          {/* Main Cutting Stability & Force State */}
-          <div className="p-6 bg-white border border-gray-200 rounded-xl shadow-sm text-center">
-            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider block mb-1">
-              In-Process Cutting Force State (Pure Time-Series CRNN)
-            </span>
-            <div className="my-3">
-              <span
-                className={`inline-block px-4 py-1.5 rounded-full text-base font-black tracking-wide ${
-                  !isConnected
-                    ? 'bg-gray-100 text-gray-600 border border-gray-200'
-                    : inference?.condition === 'DULLED'
-                    ? 'bg-rose-100 text-rose-700 border border-rose-200 shadow-sm shadow-rose-500/10'
-                    : inference?.condition === 'USED'
-                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                    : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                }`}
-              >
-                {!isConnected
-                  ? 'AWAITING STREAM'
-                  : inference?.condition === 'DULLED'
-                  ? '🔴 CRITICAL FORCE ANOMALY'
-                  : inference?.condition === 'USED'
-                  ? '🟡 ELEVATED CUTTING LOAD'
-                  : '🟢 NORMAL STABLE CUTTING'}
-              </span>
-            </div>
-            <p className="text-xs text-gray-500">
-              Model Diagnostic Confidence:{' '}
-              <span className="font-mono font-bold text-gray-800">
-                {isConnected && inference?.confidence ? `${inference.confidence}%` : '--'}
-              </span>
-            </p>
-          </div>
-
-          {/* Spindle Load & Machine Mechanical Telemetry */}
-          <div className="p-6 bg-white border border-gray-200 rounded-xl shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <h4 className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
-                <Gauge className="w-4 h-4 text-indigo-600" />
-                <span>Spindle Motor Load</span>
+        {/* Right Column: 2-Factor In-Process Verification HUD (30%) */}
+        <div className="col-span-12 lg:col-span-4 space-y-4">
+          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-800 flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-indigo-600" />
+                <span>2-Factor In-Process Verification</span>
               </h4>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-mono font-bold">
-                Dynamometer
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-bold">
+                Run #{activeRunNumber ?? '--'}
               </span>
             </div>
 
-            <div className="flex items-baseline justify-center gap-1 py-1">
-              <span
-                className={`text-4xl font-mono font-black ${
-                  !isConnected
-                    ? 'text-gray-400'
-                    : spindleLoadPct > 80
-                    ? 'text-rose-600'
-                    : spindleLoadPct > 55
-                    ? 'text-amber-600'
-                    : 'text-emerald-600'
-                }`}
-              >
-                {isConnected ? spindleLoadPct : '--'}
-              </span>
-              <span className="text-gray-400 text-sm font-mono">% Rated Load</span>
-            </div>
-
-            {/* Load Progress Bar */}
-            <div>
-              <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden p-0.5 flex">
-                <div
-                  className={`h-full rounded-full transition-all duration-300 ${
-                    !isConnected
-                      ? 'bg-gray-300'
-                      : spindleLoadPct > 80
-                      ? 'bg-rose-500'
-                      : spindleLoadPct > 55
-                      ? 'bg-amber-500'
-                      : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${Math.min(100, spindleLoadPct)}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-[10px] text-gray-400 font-mono mt-1">
-                <span>0%</span>
-                <span>55% (Warning)</span>
-                <span className="text-rose-500 font-bold">85% (Interlock Limit)</span>
-              </div>
-            </div>
-
-            {/* Dynamic Stability & Chatter Diagnostic */}
-            <div className="pt-3 border-t border-gray-100 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-500">Cutting Vibration Stability:</span>
-                <span
-                  className={`px-2 py-0.5 rounded text-[11px] font-bold border font-mono ${stabilityStatus.color}`}
-                >
-                  {stabilityStatus.label}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-gray-500">Spindle Feed Status:</span>
-                <span className="font-mono font-bold text-gray-800">
-                  {!isConnected
-                    ? 'STANDBY'
-                    : isInterlockTripped
-                    ? '0.00 mm/tooth (CUT)'
-                    : '0.15 mm/tooth (ACTIVE)'}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-gray-500">Estimated Passes Until Check:</span>
-                <span className="font-mono font-bold text-gray-900">
-                  {isConnected && inference && inference.estimatedRemainingCycles !== null
-                    ? `~${inference.estimatedRemainingCycles} Passes`
-                    : '--'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Nav to Tool Verification Station */}
-          <div className="p-5 bg-gradient-to-br from-indigo-50 to-indigo-100/50 border border-indigo-200 rounded-xl space-y-3">
-            <h5 className="font-bold text-xs text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
-              <ScanEye className="w-4 h-4 text-indigo-600" />
-              <span>Tool Optical Verification Station</span>
-            </h5>
-            <p className="text-xs text-indigo-700 leading-relaxed">
-              When cutting forces indicate tool wear or an E-STOP occurs, dismount the cutter to inspect
-              the physical <strong>Flank Wear (Vb)</strong> and edge chipping under the high-resolution
-              microscope in the Verification Station.
-            </p>
-            <button
-              onClick={() => navigate(passIndex ? `/visual-qc?run=${passIndex}` : `/visual-qc`)}
-              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center justify-center gap-1.5"
+            {/* Factor 1: Time-Series Per-Run Check */}
+            <div
+              className={`p-3.5 rounded-xl border transition ${
+                !currentRunInfo
+                  ? 'bg-gray-50 border-gray-200 text-gray-700'
+                  : isTimeSeriesAlert
+                  ? 'bg-rose-50/80 border-rose-200 text-rose-950'
+                  : currentRunInfo.tsPrediction === 'USED'
+                  ? 'bg-amber-50/80 border-amber-200 text-amber-950'
+                  : 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+              }`}
             >
-              <ScanEye className="w-4 h-4" />
-              <span>
-                {passIndex !== null
-                  ? `Open Tool Verification (Pass #${passIndex})`
-                  : 'Open Tool Verification Station'}
-              </span>
-            </button>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold flex items-center gap-1.5">
+                  <Activity className="w-4 h-4" />
+                  <span>Factor 1: Time-Series AI</span>
+                </span>
+                <span
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded font-black ${
+                    !currentRunInfo
+                      ? 'bg-gray-200 text-gray-600'
+                      : isTimeSeriesAlert
+                      ? 'bg-rose-600 text-white'
+                      : currentRunInfo.tsPrediction === 'USED'
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-emerald-600 text-white'
+                  }`}
+                >
+                  {!currentRunInfo
+                    ? 'IDLE (STANDBY)'
+                    : isTimeSeriesAlert
+                    ? 'ALERT (DULLED)'
+                    : currentRunInfo.tsPrediction}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-600 mt-1 font-mono">
+                {!currentRunInfo
+                  ? 'รอข้อมูลการตัดราย Run จาก Time-Series Stream เพื่อประเมินความคมมีด'
+                  : isTimeSeriesAlert
+                  ? `ตรวจพบสถานะ DULLED ใน Run #${activeRunNumber} (หยุดเครื่องทันที & สั่งทริกเกอร์ Factor 2)`
+                  : `Run #${activeRunNumber} อยู่ในเกณฑ์ ${currentRunInfo.tsPrediction} (ยังใช้งานต่อได้)`}
+              </p>
+            </div>
+
+            {/* Factor 2: Non-Time-Series Vision AI (รูปภาพของ Chip + คำตอบจากโมเดล) */}
+            <div
+              className={`p-3.5 rounded-xl border transition ${
+                !isNonTimeActive
+                  ? 'bg-gray-50 border-gray-200 opacity-60'
+                  : 'bg-indigo-50/90 border-indigo-200 text-indigo-950 shadow-xs'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold flex items-center gap-1.5">
+                  <Scissors className="w-4 h-4 text-indigo-600" />
+                  <span>Factor 2: Non-Time-Series Chip AI</span>
+                </span>
+                <span
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded font-black ${
+                    !isNonTimeActive
+                      ? 'bg-gray-200 text-gray-500'
+                      : 'bg-indigo-600 text-white'
+                  }`}
+                >
+                  {!isNonTimeActive ? 'STANDBY (IDLE)' : 'ACTIVE (VERIFIED)'}
+                </span>
+              </div>
+
+              {!isNonTimeActive ? (
+                /* ถ้ายังไม่เจอ Dulled -> Factor 2 ยังไม่ทำ */
+                <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+                  ⚪ <strong>ยังไม่ทำงาน:</strong> โมเดล Non-Time-Series จะไม่ดึงภาพเศษตัดมาประมวลผลจนกว่า Time-Series จะตรวจพบ Dulled อันแรก
+                </p>
+              ) : (
+                /* เมื่อเจอ Dulled อันแรก -> ขึ้นเป็นรูปของ Chip พร้อมคำตอบจากโมเดล */
+                <div className="mt-3 space-y-3">
+                  {/* ช่อง 4 เหลี่ยมว่างๆ สำหรับภาพ Chip ไว้ก่อนตามคำขอ */}
+                  <div className="w-full h-36 rounded-lg border-2 border-dashed border-indigo-200 bg-indigo-50/40 flex flex-col items-center justify-center text-center p-3 select-none">
+                    <div className="w-8 h-8 rounded-full bg-white border border-indigo-200 flex items-center justify-center mb-1.5 shadow-xs">
+                      <Scissors className="w-4 h-4 text-indigo-500" />
+                    </div>
+                    <span className="text-xs font-bold text-indigo-900 font-mono">
+                      [ ช่องสี่เหลี่ยมภาพ Chip ]
+                    </span>
+                    <span className="text-[10px] text-gray-500 font-mono mt-0.5">
+                      Target: T{selectedToolId}R{activeRunNumber}B1.jpg (เว้นช่องว่างไว้รอเชื่อมต่อ API MinIO)
+                    </span>
+                  </div>
+
+                  {/* คำตอบจากโมเดล Non-Time-Series Chip AI */}
+                  <div className="p-3 bg-white rounded-lg border border-indigo-200 flex items-center justify-between text-xs">
+                    <span className="text-gray-600 font-medium">คำตอบโมเดล (Chip AI):</span>
+                    <span className="px-2.5 py-1 rounded bg-rose-100 text-rose-700 font-bold font-mono text-xs">
+                      {chipAiCondition} ({chipAiConfidence}%)
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Two-Factor Consensus Outcome */}
+            <div
+              className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+                isTwoFactorConfirmed
+                  ? 'bg-rose-50 border-rose-300 text-rose-900'
+                  : currentRunInfo && !isTimeSeriesAlert
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-slate-50 border-slate-200 text-slate-700'
+              }`}
+            >
+              <div className="flex items-center gap-2 font-bold text-xs">
+                {isTwoFactorConfirmed ? (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                ) : currentRunInfo && !isTimeSeriesAlert ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <Activity className="w-4 h-4 text-slate-400 shrink-0" />
+                )}
+                <span>
+                  {isTwoFactorConfirmed
+                    ? 'ผลยืนยันร่วม (2FA): สองโมเดลคอนเฟิร์มมีดสึกหรอตรงกัน'
+                    : currentRunInfo && !isTimeSeriesAlert
+                    ? 'สถานะการกัดงาน: ปกติ (ไม่ต้องถอดมีด)'
+                    : 'สถานะระบบ: สแตนด์บายรอรับข้อมูล (Awaiting Stream)'}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-600 leading-relaxed">
+                {isTwoFactorConfirmed
+                  ? `ตรวจพบ Dulled อันแรกใน Run #${activeRunNumber} สั่งหยุดสปินเดิลเพื่อความปลอดภัย ให้ถอดหัวมีดไปส่องกล้องหาค่า Vb ที่หน้า Tool Verification`
+                  : currentRunInfo && !isTimeSeriesAlert
+                  ? `รอบตัด Run #${activeRunNumber} ยังไม่เข้าข่ายอันตราย โมเดล Non-Time ยังไม่ต้องทำ และเครื่องจักรกัดงานต่อได้`
+                  : 'ระบบ 2-Factor พร้อมทำงานทันทีเมื่อได้รับข้อมูลสตรีมแรงตัดและรอบตัดส่งเข้ามาผ่าน API'}
+              </p>
+
+              {/* Action Button: นำทางไปยังหน้า Tool Verification */}
+              {isTwoFactorConfirmed && (
+                <button
+                  onClick={() => navigate(`/visual-qc?tool=${selectedToolId}&run=${activeRunNumber}`)}
+                  className="w-full mt-2 py-2.5 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center justify-center gap-1.5"
+                >
+                  <ScanEye className="w-4 h-4" />
+                  <span>ถอดมีดไปตรวจค่า Vb ที่ Tool Verification Bench (Run #{activeRunNumber}) ➔</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

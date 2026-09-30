@@ -71,13 +71,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside
       className={`${
         collapsed ? 'w-16' : 'w-60'
-      } border-r border-gray-200 bg-white flex flex-col shrink-0 select-none transition-all duration-200 ease-in-out`}
+      } border-r border-gray-200 bg-white flex flex-col shrink-0 select-none transition-all duration-200 ease-in-out h-full sticky top-0`}
     >
       <div className="p-2 space-y-0.5 overflow-y-auto flex-1">
         <SectionLabel>CNC Operations</SectionLabel>
         <NavItem to="/dashboard" icon={LayoutDashboard} label="Fleet Dashboard" />
-        <NavItem to="/machine-monitoring" icon={Activity} label="Live Telemetry (1D-Forces)" />
-        <NavItem to="/visual-qc" icon={ScanEye} label="Tool Verification (Dual-AI)" />
+        <NavItem to="/machine-monitoring" icon={Activity} label="Per-Run Tracking (2FA)" />
+        <NavItem to="/visual-qc" icon={ScanEye} label="Tool Verification (Bench)" />
 
         <SectionLabel>MLOps & Governance</SectionLabel>
         <NavItem to="/notifications" icon={Bell} label="Alarm & Alerts" badge={unreadAlertCount} />

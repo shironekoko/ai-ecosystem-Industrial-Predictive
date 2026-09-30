@@ -12,7 +12,6 @@ import {
   Cpu,
   BrainCircuit,
   ArrowRight,
-  TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -39,9 +38,6 @@ export function Dashboard() {
 
   const criticalCount = fleet.filter((f) => f.status === 'CRITICAL').length;
   const warningCount = fleet.filter((f) => f.status === 'WARNING').length;
-  const avgHealth = fleet.length > 0
-    ? Math.round(fleet.reduce((acc, curr) => acc + curr.healthIndex, 0) / fleet.length)
-    : null;
 
   return (
     <div className="space-y-6">
@@ -62,7 +58,7 @@ export function Dashboard() {
       />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <StatCard
           label="Active Spindles"
           value={fleet.length > 0 ? `${fleet.length} Machines` : '0 Machines'}
@@ -70,14 +66,6 @@ export function Dashboard() {
           accent="blue"
           trend="neutral"
           trendLabel={fleet.length > 0 ? 'Machines connected' : 'Awaiting edge agent'}
-        />
-        <StatCard
-          label="Fleet Tool Health"
-          value={avgHealth !== null ? `${avgHealth}%` : '--'}
-          icon={TrendingUp}
-          accent="purple"
-          trend="neutral"
-          trendLabel="ISO 8688 Metric"
         />
         <StatCard
           label="Critical Wear Alarms"

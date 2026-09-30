@@ -245,7 +245,7 @@ System alarm inbox alerting engineers of threshold trips, cutting chatter, and m
       "severity": "CRITICAL",
       "title": "Emergency Spindle Pause: Force Exceeded",
       "message": "Axial cutting force Fz spiked to 392 N. Spindle paused.",
-      "sourceService": "Force_BiLSTM_Worker",
+      "sourceService": "Force_CRNN_Worker",
       "machineId": "Haas VF-2SS (CNC-SP-01)",
       "toolRef": "T10R12B2",
       "timestamp": "2026-09-28 14:18:22",
@@ -276,18 +276,18 @@ MLflow model registry, version tracking, validation metrics, and triggering back
   ```json
   [
     {
-      "id": "MOD-TS-01",
-      "name": "Cutting Force Wear Predictor",
-      "architecture": "1D-CNN + BiLSTM",
-      "modality": "Time-Series (Forces Fx,Fy,Fz)",
-      "version": "v2.1",
-      "accuracy": 96.2,
-      "f1Score": 0.958,
-      "valLoss": 0.082,
-      "parametersCount": "1.2M params",
+      "id": "MOD-001",
+      "name": "Pure_Time_Series_CRNN_NoTool4",
+      "architecture": "Temporal Conv1D + 2-layer BiGRU + Attention",
+      "modality": "Time-Series (Planar Forces Fx, Fy, Fres + Dynamics)",
+      "version": "v2.2.0 (Tool 4 Excluded)",
+      "accuracy": 87.5,
+      "f1Score": 0.886,
+      "valLoss": 0.118,
+      "parametersCount": "308 KB (.pt)",
       "status": "PRODUCTION",
-      "lastTrainedAt": "2026-09-27 22:15",
-      "datasetTrainedOn": "Nonastreda (Tools 1-9 Leave-One-Out)"
+      "lastTrainedAt": "2026-09-29 23:26",
+      "datasetTrainedOn": "Tools 1,2,3,5,6,7,8,9 (Tool 4 excluded; Tool 10 Held-out 56 cuts)"
     },
     {
       "id": "MOD-VIS-01",

@@ -120,7 +120,7 @@ export function MachineMonitoringPage() {
       {/* Top Header */}
       <PageHeader
         title="Live Spindle Force Telemetry & Prognostics"
-        subtitle="Real-time High-Frequency Cutting Dynamics · Dynamometer In-Process Tracking (1D-CNN + BiLSTM)"
+        subtitle="Real-time High-Frequency Cutting Dynamics · Dynamometer In-Process Tracking (Pure Time-Series CRNN: TCN + BiGRU)"
         actions={
           <div className="flex items-center gap-2">
             <span
@@ -412,7 +412,7 @@ export function MachineMonitoringPage() {
           {/* Main Cutting Stability & Force State */}
           <div className="p-6 bg-white border border-gray-200 rounded-xl shadow-sm text-center">
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider block mb-1">
-              In-Process Cutting Force State (1D-CNN + BiLSTM)
+              In-Process Cutting Force State (Pure Time-Series CRNN)
             </span>
             <div className="my-3">
               <span

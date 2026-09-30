@@ -90,16 +90,16 @@ export interface VerificationRecord {
 export interface ModelRegistryItem {
   id: string;
   name: string;
-  architecture: '1D-CNN + BiLSTM' | 'YOLOv8-cls (Transfer Learning)' | 'ResNet34';
-  modality: 'Time-Series (Forces Fx,Fy,Fz)' | 'Non-Time-Series (Tool Images)';
+  architecture: string;
+  modality: string;
   version: string;
   accuracy: number;
   f1Score: number;
   valLoss: number;
   parametersCount: string;
   status: 'PRODUCTION' | 'STAGING' | 'ARCHIVED';
-  lastTrainedAt: string;
-  datasetTrainedOn: string;
+  lastTrainedAt?: string;
+  datasetTrainedOn?: string;
 }
 
 export interface ActiveLearningPoolItem {
@@ -126,7 +126,7 @@ export interface AuditEvent {
 export interface AlertNotification {
   id: string;
   severity: 'CRITICAL' | 'WARNING' | 'INFO';
-  sourceService: 'Force_BiLSTM_Worker' | 'Vision_YOLO_Worker' | 'Redis_Broker' | 'System_Core';
+  sourceService: 'Force_CRNN_Worker' | 'Vision_YOLO_Worker' | 'Redis_Broker' | 'System_Core' | string;
   title: string;
   message: string;
   timestamp: string;

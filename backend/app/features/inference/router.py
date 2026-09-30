@@ -63,7 +63,7 @@ async def get_inference_result(job_id: str):
     "/inference/predict-forces",
     response_model=ForcePredictionResponse,
     summary="Predict tool condition from forces chunk",
-    description="Run BiLSTM inference on instantaneous cutting forces chunk",
+    description="Run Pure Time-Series CRNN (TCN + BiGRU) inference on instantaneous cutting forces chunk",
 )
 async def predict_forces(req: ForcePredictionRequest):
     import math

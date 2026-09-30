@@ -259,14 +259,14 @@ export function VisualQcPage() {
               </span>
             </h4>
 
-            {/* Model 1: Sensor AI (1D-CNN + BiLSTM - Captured in-process during cutting) */}
+            {/* Model 1: Force Sensor AI (Pure Time-Series CRNN: TCN + BiGRU - Captured in-process during cutting) */}
             <div className="p-3.5 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-between">
               <div>
                 <span className="text-[11px] font-bold text-gray-500 block">
-                  1. Force Sensor AI (1D-CNN + BiLSTM)
+                  1. Force Sensor AI (Pure Time-Series CRNN: TCN + BiGRU)
                 </span>
                 <span className="text-xs text-gray-400 font-mono">
-                  In-Process Thrust Force: -- N
+                  In-Process Planar Dynamics (Fx, Fy, Fres)
                 </span>
               </div>
               <div className="text-right">

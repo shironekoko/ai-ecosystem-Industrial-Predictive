@@ -124,7 +124,7 @@ frontend/src/
 
 ### 4. Dual-AI Tool Verification & Sign-off (`/visual-qc`)
 * **หน้าที่:** สถานีส่องกล้องขยายตรวจสอบหัวกัดที่ถูกถอดออกมาพักตรวจ (Dismounted Tool) บนโต๊ะตรวจสอบ Off-line
-* **จุดเด่น:** เปรียบเทียบผลระหว่าง **Sensor AI (1D-CNN + BiLSTM)** กับ **Optical Vision AI (YOLOv8-cls)** พร้อมภาพ Grad-CAM XAI และวัดขนาดรอยสึก Flank Wear ($V_b$) ในหน่วย $\mu\text{m}$ ตามมาตรฐาน ISO 8688-2
+* **จุดเด่น:** เปรียบเทียบผลระหว่าง **Force Sensor AI (Pure Time-Series CRNN: Conv1D + BiGRU + Attention)** กับ **Optical Vision AI (YOLOv8-cls)** พร้อมภาพ Grad-CAM XAI และวัดขนาดรอยสึก Flank Wear ($V_b$) ในหน่วย $\mu\text{m}$ ตามมาตรฐาน ISO 8688-2
 * **API Endpoints:**
   * `GET /api/v1/qc/target` ➔ คืนค่าข้อมูลหัวกัดที่ตั้งอยู่บนโต๊ะตรวจเช็ค (`toolId`, `passIndex`, `originSpindle`)
   * `GET /api/v1/qc/tools/{toolId}/runs/{passIndex}/blades/{bladeIndex}` ➔ ข้อมูลภาพกล้องและผลวิเคราะห์ใบมีด 1–4
@@ -145,7 +145,7 @@ frontend/src/
 ### 6. Model Registry & Active Learning (`/active-learning`)
 * **หน้าที่:** จัดการเวอร์ชันโมเดล AI ในระบบ (เชื่อมต่อ MLflow) และส่งคิวตัวอย่างที่วิศวกรยืนยันความสึกหรอไปทำการเทรนแบบ Fine-Tuning ในเบื้องหลัง
 * **โมเดลในสถาปัตยกรรมคู่ (Dual-AI):**
-  1. `Force Sensor AI (1D-CNN + BiLSTM)`: โมเดลวิเคราะห์แรงตัดจาก Dynamometer
+  1. `Force Sensor AI (Pure Time-Series CRNN: Temporal Conv1D + 2-layer BiGRU + Attention)`: โมเดลวิเคราะห์แรงตัดจาก Dynamometer
   2. `Optical Vision AI (YOLOv8-cls)`: โมเดลจำแนกภาพถ่ายรอยสึกใบมีด
 * **API Endpoints:**
   * `GET /api/v1/models/registry` ➔ ดึงรายการ Checkpoint และค่าความแม่นยำ (F1-score, Loss) จาก MLflow

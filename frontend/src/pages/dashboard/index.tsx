@@ -111,7 +111,7 @@ export function Dashboard() {
               Live Force Telemetry
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              1D-CNN + BiLSTM stream on spindle forces (Fx, Fy, Fz)
+              Pure Time-Series CRNN (TCN + BiGRU) stream on cutting forces (Fx, Fy, Fres)
             </p>
           </div>
           <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all" />

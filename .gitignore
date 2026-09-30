@@ -48,7 +48,7 @@ mlruns/
 backend/mlruns/
 backend/runs/
 runs/
-backend/models/
+
 backend/data_yolo_*/
 data_yolo_*/
 *.cache

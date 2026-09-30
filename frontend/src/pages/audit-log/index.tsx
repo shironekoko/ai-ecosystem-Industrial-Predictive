@@ -1,29 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { EmptyState } from '../../components/common/EmptyState';
 import { History, Search, Filter } from 'lucide-react';
 import { AuditEvent } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
 
 export function AuditLogPage() {
   const { isAuthenticated } = useAuth();
   const [filterType, setFilterType] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [events, setEvents] = useState<AuditEvent[]>([]);
 
-  // Audit events state - Initialized empty awaiting API log stream
-  const [events] = useState<AuditEvent[]>([]);
+  useEffect(() => {
+    api.getAuditLogs(filterType, searchQuery).then((data) => {
+      if (data && Array.isArray(data.items)) {
+        setEvents(data.items);
+      }
+    });
+  }, [filterType, searchQuery]);
 
-  const filteredEvents = events.filter((ev) => {
-    if (filterType !== 'ALL' && ev.eventType !== filterType) return false;
-    if (searchQuery.trim() === '') return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      ev.id.toLowerCase().includes(query) ||
-      ev.actor.toLowerCase().includes(query) ||
-      ev.summary.toLowerCase().includes(query) ||
-      ev.targetResource.toLowerCase().includes(query)
-    );
-  });
+  const filteredEvents = events;
 
   return (
     <div className="space-y-6">

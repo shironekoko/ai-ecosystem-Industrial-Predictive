@@ -1,107 +1,68 @@
-# 🧠 Training Feature — Fine-tune Token Classification
+# 🧠 Industrial Retraining Feature — Dual-AI PdM Models
 
-ระบบเทรนโมเดล Token Classification ด้วย Hugging Face Transformers + ARQ Scheduled Jobs
+ระบบ Fine-tune / Retrain โมเดลการบำรุงรักษาเชิงพยากรณ์ (Predictive Maintenance) สำหรับเครื่องจักร CNC Milling:
+1. **Time-Series Sensor AI:** Temporal CRNN / BiLSTM (สัญญาณแรงตัดเฉือน 3 แกน $F_x, F_y, F_z$ พร้อม 16 Dynamic Physics Features)
+2. **Non-Time Series Vision AI:** Ultralytics YOLOv8-cls (ภาพถ่ายจุลทรรศน์เศษโลหะ `chip/` และคมมีด `tool/`)
 
-## Flow ภาพรวม
+---
+
+## 🔄 Retraining Flow ภาพรวม
 
 ```
-Client: POST /training/queue (+ start_time)
+Client: POST /api/v1/training/queue
     → FastAPI backend
-    → pool.enqueue_job("train_model", _defer_until=start_time)
+    → pool.enqueue_job("train_timeseries_model" หรือ "train_yolo_model", _defer_until=start_time)
     → Redis (ARQ queue)
     → trainer-worker container หยิบงานไปเทรนตาม schedule
-    → โหลด dataset จาก MinIO (bucket: datasets)
-    → Fine-tune ด้วย HF Trainer
-    → Upload โมเดล + log ไป MinIO (bucket: models)
+    → โหลด Dataset และ Checkpoint เดิม
+    → ดำเนินการ Fine-tuning / Transfer Learning
+    → บันทึกผลลัพธ์และ Metrics ลง MLflow Tracking Server
+    → บันทึก Weights ล่าสุด และอัปโหลดไปยัง MinIO (bucket: models)
 ```
 
-## Endpoints
+---
 
-| Method | Path                        | Description                           |
-|--------|-----------------------------|---------------------------------------|
-| POST   | `/training/queue`           | เพิ่มงานเทรนเข้าคิว (พร้อมตั้งเวลา) |
-| GET    | `/training/queue/{job_id}`  | เช็คสถานะงานเทรน                     |
+## 📌 Endpoints
 
-## ตัวอย่าง Request
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/training/queue` | เพิ่มงาน Retrain เข้าคิว ARQ (พร้อมตั้งเวลาล่วงหน้าได้) |
+| `GET` | `/api/v1/training/queue/{job_id}` | ตรวจสอบสถานะและผลลัพธ์ของงานเทรน |
+| `WS` | `/api/v1/training/live/{job_id}` | สตรีมผล Loss และ Accuracy แบบ Real-time |
 
-### เพิ่มงานเทรน
+---
 
+## 📝 ตัวอย่าง Request
+
+### 1. Retrain โมเดล Time-Series (Force Dynamics CRNN)
 ```json
-POST /training/queue
+POST /api/v1/training/queue
 {
-    "dataset_name": "conll2003",
-    "model_name": "bert-base-ner",
-    "start_time": "2026-09-03T12:00:00"
+    "model_name": "Pure_Time_Series_CRNN_NoTool4",
+    "dataset_name": "forces",
+    "model_type": "timeseries",
+    "epochs": 15,
+    "batch_size": 16
 }
 ```
 
-**Response:**
+### 2. Retrain โมเดล Non-Time Series (YOLOv8-cls Vision)
 ```json
+POST /api/v1/training/queue
 {
-    "job_id": "abc123...",
-    "status": "success",
-    "message": "เพิ่มงานเทรน 'bert-base-ner' ด้วย dataset 'conll2003' เข้าคิวเรียบร้อย (กำหนดเริ่ม: 2026-09-03T12:00:00)"
+    "model_name": "yolov8_chip_wear",
+    "dataset_name": "chip",
+    "model_type": "yolov8-cls",
+    "epochs": 10,
+    "batch_size": 16
 }
 ```
 
-### เช็คสถานะ
+---
 
-```json
-GET /training/queue/abc123...
+## ⚙️ ARQ Worker Details
 
-{
-    "job_id": "abc123...",
-    "status": "complete",
-    "result": "✅ เทรนเสร็จ: bert-base-ner/v20260903_120530 — eval_f1=0.85 (3 epochs, 120.5s)"
-}
-```
-
-## วิธีเตรียม Dataset
-
-1. รัน Infrastructure:
-   ```bash
-   docker compose up -d redis minio
-   ```
-
-2. โหลด dataset จาก Hugging Face → MinIO:
-   ```bash
-   cd backend
-   uv run python scripts/load_hf_dataset_to_minio.py --dataset conll2003
-   ```
-
-3. ตรวจสอบใน MinIO Console (http://localhost:9001) → bucket `datasets` → โฟลเดอร์ `conll2003/`
-
-## วิธีตั้งชื่อโมเดลใน MinIO
-
-โมเดลที่เทรนเสร็จจะถูก upload ไปที่:
-```
-models/{model_name}/v{timestamp}/
-├── config.json
-├── model.safetensors
-├── tokenizer.json
-├── tokenizer_config.json
-├── special_tokens_map.json
-├── vocab.txt
-└── train.log
-```
-
-ตัวอย่าง: `models/bert-base-ner/v20260903_120530/`
-
-## ARQ Queue Details
-
-- **Function name:** `train_model`
-- **Scheduling:** ใช้ ARQ built-in `_defer_until` parameter (ไม่ได้สร้าง queue ใหม่)
-- **Worker:** รันด้วย `arq app.features.workers.tasks.WorkerSettings`
-
-## โครงสร้างไฟล์
-
-```
-training/
-├── __init__.py
-├── README.md       ← ไฟล์นี้
-├── router.py       ← API endpoints
-├── schemas.py      ← Pydantic models
-└── service.py      ← Business logic (enqueue + status)
-```
-
-> **หมายเหตุ:** ตัว train_model function อยู่ที่ `workers/tasks.py` เพราะเป็น ARQ task ที่ worker จะหยิบไปรัน
+- **Worker Settings:** `app.features.workers.tasks.WorkerSettings`
+- **Supported Task Functions:**
+  - `train_timeseries_model`: สำหรับโมเดลสัญญาณแรงตัดเฉือน Time-Series
+  - `train_yolo_model`: สำหรับโมเดล Optical Computer Vision

@@ -12,9 +12,20 @@ import { NotificationsPage } from './pages/notifications';
 import { UserManagementPage } from './pages/user-management';
 import { ReportsPage } from './pages/reports';
 import { UserRole } from './types';
+import { api } from './services/api';
 
 export const App: React.FC = () => {
   const [currentRole, setCurrentRole] = useState<UserRole>('engineer');
+  const [unreadAlertCount, setUnreadAlertCount] = useState<number>(0);
+
+  React.useEffect(() => {
+    api.getAlarms().then((alarms) => {
+      if (Array.isArray(alarms)) {
+        const unread = alarms.filter((a: any) => !a.isRead).length;
+        setUnreadAlertCount(unread);
+      }
+    });
+  }, []);
 
   return (
     <AuthProvider>
@@ -27,7 +38,7 @@ export const App: React.FC = () => {
                 currentRole={currentRole}
                 onRoleChange={setCurrentRole}
                 retrainQueueCount={0}
-                unreadAlertCount={0}
+                unreadAlertCount={unreadAlertCount}
               />
             }
           >

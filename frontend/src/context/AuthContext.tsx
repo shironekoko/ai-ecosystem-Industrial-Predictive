@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
+import { api } from '../services/api';
 
 interface AuthContextType {
   user: User | null;
@@ -38,6 +39,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const isAuthenticated = !!user;
+
+  // Fetch registered users from backend and merge
+  useEffect(() => {
+    api.getUsers().then((backendUsers) => {
+      if (Array.isArray(backendUsers) && backendUsers.length > 0) {
+        setUsersList((prev) => {
+          const existingEmails = new Set(prev.map((u) => u.email.toLowerCase()));
+          const newOnes: User[] = backendUsers
+            .filter((bu: any) => !existingEmails.has(bu.email.toLowerCase()))
+            .map((bu: any) => ({
+              id: bu.id,
+              name: bu.name,
+              email: bu.email,
+              role: bu.role as UserRole,
+              title: bu.title || (bu.role === 'admin' ? 'System Administrator' : 'Maintenance Engineer'),
+              department: bu.department || 'Maintenance Team',
+            }));
+          return [...prev, ...newOnes];
+        });
+      }
+    });
+  }, []);
 
   // Sync usersList to localStorage
   useEffect(() => {
@@ -103,6 +126,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    api.updateUserRole(userId, newRole);
+
     setUsersList((prev) =>
       prev.map((u) => {
         if (u.id === userId) {
@@ -135,6 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    api.deleteUser(userId);
     setUsersList((prev) => prev.filter((u) => u.id !== userId));
   };
 
@@ -144,6 +170,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       alert('Access Denied: Only administrators can create users.');
       return;
     }
+
+    api.createUser(userData);
 
     const newUser: User = {
       id: 'USR-' + Math.random().toString(36).substring(2, 7).toUpperCase(),

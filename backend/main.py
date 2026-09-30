@@ -51,8 +51,8 @@ tags_metadata = [
         "description": "จัดการ Background Jobs ผ่าน ARQ + Redis — สร้าง job, ดูสถานะ, ข้อมูล Redis",
     },
     {
-        "name": "Training (Model Fine-tuning)",
-        "description": "เทรนโมเดล Token Classification — เพิ่มงานเข้าคิว (scheduled), ดูสถานะ, ผลลัพธ์",
+        "name": "Model Retraining (Continuous Active Learning)",
+        "description": "Retrain โมเดลเดิมในระบบ (Time-Series CRNN และ YOLOv8 Vision) เมื่อมีข้อมูลใหม่จาก Active Learning / Human Sign-off",
     },
     {
         "name": "Inference (Model Prediction)",

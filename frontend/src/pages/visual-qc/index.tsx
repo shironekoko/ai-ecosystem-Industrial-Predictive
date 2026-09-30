@@ -139,67 +139,104 @@ export function VisualQcPage() {
   const flankWear = qcData?.tier3ToolEdge.flankWearUm ?? 135.2;
   const gaps = qcData?.tier3ToolEdge.gapsUm ?? 18.4;
   const overhang = qcData?.tier3ToolEdge.overhangUm ?? 14.1;
-  const isBrokenOrWorn = flankWear >= 130.0 || gaps > 15.0; // พังจริง (Vb >= 130 หรือ บิ่นจริง)
+  const isBrokenOrWorn = flankWear >= 130.0 || gaps > 15.0;
 
-  // Automated Physical Verification & Retrain dispatch without manual confirm buttons
-  useEffect(() => {
-    if (!qcData) return;
+  // Active Retraining Queue State
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [activeRetrainJob, setActiveRetrainJob] = useState<{
+    jobId: string;
+    modelName: string;
+    correctedLabel: string;
+    chipImage: string;
+    userAnswer: string;
+    status: 'QUEUED' | 'IN_PROGRESS' | 'COMPLETED';
+    progressMsg?: string;
+  } | null>(null);
 
-    const flankWearVal = qcData.tier3ToolEdge?.flankWearUm ?? 135.2;
-    const gapsVal = qcData.tier3ToolEdge?.gapsUm ?? 18.4;
-    const isBroken = flankWearVal >= 130.0 || gapsVal > 15.0;
-    const currentStatus = verifiedBlades[selectedBlade]?.status;
+  // Human-in-the-Loop Decision Handler
+  // Triggers YOLOv8 Vision Retraining immediately if the human overrides DULLED to SHARP or USED
+  // Retrain คือการนำภาพจาก chip/ ร่วมกับคำตอบที่ผู้ใช้ระบุเป็น Ground Truth
+  const handleHumanSignOff = async (actualCondition: 'SHARP' | 'USED' | 'DULLED') => {
+    setIsSubmitting(true);
+    const engineerName = user?.name ? `${user.name} (QC Inspector)` : 'Senior Tooling Engineer';
+    const isDiscrepancy = actualCondition === 'SHARP' || actualCondition === 'USED';
+    const decision = isDiscrepancy ? 'SEND_TO_RETRAIN' : 'CONFIRMED_WEAR';
 
-    const engineerName = user?.name ? `${user.name} (Automated)` : 'Automated Optical Metrology';
-    const nowTime = new Date().toLocaleTimeString();
+    try {
+      const res = await api.submitVerification(
+        recordId,
+        toolId,
+        passIndex,
+        selectedBlade,
+        decision,
+        isDiscrepancy
+          ? `Human-in-the-Loop: Model predicted DULLED, but inspection confirms blade is actually ${actualCondition}.`
+          : 'Human inspection confirmed wear (DULLED).',
+        engineerName,
+        actualCondition
+      );
 
-    if (isBroken) {
-      // พังจริง -> ผ่านการตรวจ & สั่งเปลี่ยนมีดอัตโนมัติ (ไม่ต้องกดยืนยัน)
-      if (currentStatus !== 'CONFIRMED_WEAR') {
-        setVerifiedBlades((prev) => ({
-          ...prev,
-          [selectedBlade]: {
-            status: 'CONFIRMED_WEAR',
-            verifiedBy: engineerName,
-            verifiedAt: nowTime,
-            message: 'มีดพังจริง (ผ่านเกณฑ์การตรวจ Vb >= 130 µm): สั่งเปลี่ยนมีดอัตโนมัติ',
-          },
-        }));
-        api.submitVerification(
-          recordId,
-          toolId,
-          passIndex,
-          selectedBlade,
-          'CONFIRMED_WEAR',
-          `Automated physical inspection confirmed wear (Vb = ${flankWearVal} µm). Tool replacement approved.`,
-          engineerName
-        );
+      const nowTime = new Date().toLocaleTimeString();
+      setVerifiedBlades((prev) => ({
+        ...prev,
+        [selectedBlade]: {
+          status: isDiscrepancy ? 'RETRAIN_FLAGGED' : 'CONFIRMED_WEAR',
+          verifiedBy: engineerName,
+          verifiedAt: nowTime,
+          message: isDiscrepancy
+            ? `โมเดลบอก DULLED แต่มีดจริงเป็น ${actualCondition} ➔ ดึงภาพ chip/${recordId}.jpg คู่กับคำตอบส่งคิว Retrain YOLOv8 ทันที!`
+            : 'มีดพังจริง (DULLED): อนุมัติคำสั่งเปลี่ยนหัวมีดใหม่',
+        },
+      }));
+
+      if (res?.autoRetrainTriggered && res?.retrainJobId) {
+        const chipImg = res.chipImageRetrained || `chip/${recordId}.jpg`;
+        const userAns = res.userAnswer || actualCondition;
+
+        setActiveRetrainJob({
+          jobId: res.retrainJobId,
+          modelName: res.modelRetrained || 'yolov8_chip_wear',
+          correctedLabel: actualCondition,
+          chipImage: chipImg,
+          userAnswer: userAns,
+          status: 'QUEUED',
+          progressMsg: `นำภาพจาก ${chipImg} คู่กับคำตอบของผู้ใช้ ('${userAns}') เข้าคิว ARQ Worker เรียบร้อย กำลังเริ่ม Fine-tune YOLOv8 Vision...`,
+        });
+
+        showToast(`🚀 นำภาพ ${chipImg} + คำตอบ [${userAns}] สั่ง Retrain YOLOv8 ทันที! (Job ID: ${res.retrainJobId.slice(0, 14)})`);
+
+        // Poll retrain status
+        const pollTimer = window.setInterval(async () => {
+          try {
+            const statusRes = await api.getRetrainStatus(res.retrainJobId);
+            if (statusRes.status === 'complete') {
+              clearInterval(pollTimer);
+              setActiveRetrainJob((prev) => prev ? {
+                ...prev,
+                status: 'COMPLETED',
+                progressMsg: statusRes.result || `Retrain โมเดล YOLOv8 บนภาพ ${chipImg} ด้วยคำตอบ [${userAns}] สำเร็จ!`,
+              } : null);
+              showToast('🎉 Retrain YOLOv8 Vision อัปเกรดสำเร็จ!');
+            } else if (statusRes.status === 'in_progress') {
+              setActiveRetrainJob((prev) => prev ? {
+                ...prev,
+                status: 'IN_PROGRESS',
+                progressMsg: `กำลังเทรน Epochs โมเดล YOLOv8 บนภาพ ${chipImg} คู่กับคำตอบ [${userAns}]...`,
+              } : null);
+            }
+          } catch {
+            // ignore
+          }
+        }, 3000);
+      } else {
+        showToast('✅ ยืนยันมีดพังจริง (DULLED) เรียบร้อย: อนุมัติเปลี่ยนหัวมีด');
       }
-    } else {
-      // ไม่พังจริง -> ส่งเข้า Retrain Pool อัตโนมัติทันที โดยไม่ต้องมีปุ่มยืนยัน
-      if (currentStatus !== 'RETRAIN_FLAGGED') {
-        setVerifiedBlades((prev) => ({
-          ...prev,
-          [selectedBlade]: {
-            status: 'RETRAIN_FLAGGED',
-            verifiedBy: engineerName,
-            verifiedAt: nowTime,
-            message: 'มีดยังไม่พัง (False Alarm): ส่งภาพ Chip เข้า Retrain Pool อัตโนมัติ',
-          },
-        }));
-        api.submitVerification(
-          recordId,
-          toolId,
-          passIndex,
-          selectedBlade,
-          'SEND_TO_RETRAIN',
-          `Automated physical inspection detected intact edge (Vb = ${flankWearVal} µm). Chip image dispatched to Retrain Pool.`,
-          engineerName
-        );
-        showToast(`📦 ส่ง Retrain อัตโนมัติ: Blade #${selectedBlade} มีดยังไม่พัง ส่งภาพ Chip เข้า Retrain Pool เรียบร้อย`);
-      }
+    } catch (err: any) {
+      showToast(`⚠️ เกิดข้อผิดพลาดในการบันทึก: ${err.message || 'Error'}`);
+    } finally {
+      setIsSubmitting(false);
     }
-  }, [qcData, selectedBlade, recordId, toolId, passIndex, user?.name]);
+  };
 
   return (
     <div className="space-y-6">
@@ -411,82 +448,177 @@ export function VisualQcPage() {
             </div>
           </div>
 
-          {/* Card 2: Physical Verification Decision (เช็คว่าพังจริงไหม & ดำเนินการอัตโนมัติ) */}
+          {/* Card 2: Human-in-the-Loop Verification & Automated Retraining Hub */}
           <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <h4 className="font-bold text-xs uppercase tracking-wider text-gray-800 flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                <span>Physical Verification (เช็คว่าพังจริงไหม)</span>
+                <span>Human-in-the-Loop Inspection</span>
               </h4>
               <span
                 className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
-                  isBrokenOrWorn
+                  currentVerified?.status === 'CONFIRMED_WEAR'
                     ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                    : 'bg-amber-100 text-amber-800 border border-amber-200'
+                    : currentVerified?.status === 'RETRAIN_FLAGGED'
+                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                    : 'bg-rose-50 text-rose-700 border border-rose-200 animate-pulse'
                 }`}
               >
-                {isBrokenOrWorn ? 'VERIFICATION PASSED' : 'AUTO-SENT TO RETRAIN'}
+                {currentVerified?.status === 'CONFIRMED_WEAR'
+                  ? 'VERIFIED: WEAR CONFIRMED'
+                  : currentVerified?.status === 'RETRAIN_FLAGGED'
+                  ? 'AUTO-RETRAIN ENQUEUED'
+                  : 'AI PREDICTION: DULLED'}
               </span>
             </div>
 
-            {/* Verdict Explanation Box */}
-            <div
-              className={`p-4 rounded-xl border text-xs space-y-2 ${
-                isBrokenOrWorn
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
-                  : 'bg-amber-50 border-amber-200 text-amber-950'
-              }`}
-            >
-              <div className="flex items-center gap-2 font-bold text-xs">
-                {isBrokenOrWorn ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                ) : (
-                  <Database className="w-4 h-4 text-amber-600 shrink-0" />
-                )}
-                <span>
-                  {isBrokenOrWorn
-                    ? 'ผลการวัดยืนยัน: มีดพังจริง (ผ่านเกณฑ์การตรวจสอบ & สั่งเปลี่ยนมีดอัตโนมัติ)'
-                    : 'ผลการวัด: มีดยังไม่พัง (ส่งภาพ Chip เข้า Retrain Pool อัตโนมัติ)'}
-                </span>
+            {/* AI Prediction Context */}
+            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-white flex items-center justify-between text-xs font-mono">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-rose-400" />
+                <span className="text-slate-300">YOLOv8 Vision Prediction:</span>
               </div>
-              <p className="text-[11px] text-gray-600 leading-relaxed">
-                {isBrokenOrWorn
-                  ? `ค่ารอยสึก Vb = ${flankWear} µm เกินเกณฑ์มาตรฐาน ISO (130 µm) และพบรอยบิ่น ${gaps} µm ยืนยันว่าโมเดลทำนายถูกต้อง ถือว่าผ่านการตรวจ ระบบอนุมัติคำสั่งเปลี่ยนหัวมีดตัดใหม่เรียบร้อย (ไม่ต้องกดยืนยันซ้ำซ้อน)`
-                  : `ค่ารอยสึก Vb = ${flankWear} µm และขอบมีดยังเรียบเนียน ไม่พบรอยบิ่น แสดงว่าโมเดล Non-Time-Series ทำนายคลาดเคลื่อน (False Alarm) ระบบได้ส่งภาพ Chip ในรอบตัดนี้เข้า Retrain Pool อัตโนมัติทันที`}
-              </p>
+              <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40">
+                DULLED (94.2% Conf)
+              </span>
             </div>
 
-            {/* Automated Execution Status Details */}
-            <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-100 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-500 font-medium">สถานะการทำงาน:</span>
-                <span
-                  className={`font-bold font-mono px-2 py-0.5 rounded text-[10px] ${
-                    isBrokenOrWorn
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-amber-100 text-amber-800'
-                  }`}
-                >
-                  {isBrokenOrWorn ? 'APPROVED: TOOL REPLACEMENT' : 'DISPATCHED: RETRAIN POOL'}
+            {/* Live Auto-Retraining Status Banner if Discrepancy Triggered */}
+            {activeRetrainJob && (
+              <div className="p-4 rounded-xl border bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-200 space-y-2.5 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                    <Database className="w-4 h-4 text-indigo-600" />
+                    <span>YOLOv8 Vision Retraining Queue (Active)</span>
+                  </span>
+                  <span
+                    className={`text-[10px] font-mono px-2 py-0.5 rounded font-black ${
+                      activeRetrainJob.status === 'COMPLETED'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-indigo-600 text-white animate-pulse'
+                    }`}
+                  >
+                    {activeRetrainJob.status === 'COMPLETED' ? 'RETRAIN COMPLETED' : 'TRAINING IN PROGRESS'}
+                  </span>
+                </div>
+                <div className="text-[11px] font-mono text-indigo-900 space-y-1.5">
+                  <div className="flex justify-between">
+                    <span>Job ID:</span>
+                    <span className="font-bold">{activeRetrainJob.jobId}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>Retrain Input Image:</span>
+                    <span className="font-bold text-indigo-800 bg-white px-2 py-0.5 rounded border border-indigo-200">
+                      {activeRetrainJob.chipImage}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>Ground Truth (คำตอบผู้ใช้):</span>
+                    <span className="font-bold text-rose-700 bg-white px-2 py-0.5 rounded border border-rose-200">
+                      {activeRetrainJob.userAnswer} (แก้จาก DULLED)
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Target Vision Model:</span>
+                    <span className="font-bold">{activeRetrainJob.modelName}</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-indigo-700 pt-1 border-t border-indigo-100/80">
+                  {activeRetrainJob.progressMsg}
+                </p>
+              </div>
+            )}
+
+            {/* Human Verification Action Buttons */}
+            <div className="space-y-2 pt-1">
+              <span className="text-[11px] font-bold text-gray-700 uppercase tracking-wider block">
+                คำตัดสินของวิศวกรผู้เชี่ยวชาญ (Human-in-the-Loop Sign-off):
+              </span>
+
+              {/* Option A: Confirmed Wear */}
+              <button
+                disabled={isSubmitting}
+                onClick={() => handleHumanSignOff('DULLED')}
+                className="w-full p-2.5 rounded-xl border border-gray-200 hover:border-emerald-400 bg-white hover:bg-emerald-50/50 text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 group-hover:scale-110 transition" />
+                  <div>
+                    <span className="text-xs font-bold text-gray-900 block">
+                      มีดพังจริง (DULLED) · อนุมัติเปลี่ยนหัวมีด
+                    </span>
+                    <span className="text-[10px] text-gray-500 font-mono">
+                      โมเดลทำนายถูกต้อง (Vb ≥ 130 µm) ไม่ต้องส่ง Retrain
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-100 text-gray-600 group-hover:bg-emerald-100 group-hover:text-emerald-800 font-bold">
+                  Approve
                 </span>
-              </div>
-              <div className="flex items-center justify-between text-gray-500 text-[11px] font-mono">
-                <span>Target Flute:</span>
-                <span className="font-bold text-gray-800">{recordId}</span>
-              </div>
-              <div className="flex items-center justify-between text-gray-500 text-[11px] font-mono">
-                <span>Active Learning Pool:</span>
-                <span className="font-bold text-indigo-600">
-                  {isBrokenOrWorn ? 'Ground Truth Confirmed' : 'Retrain Queue (Active)'}
+              </button>
+
+              {/* Option B: Discrepancy -> Real is SHARP (Triggers YOLOv8 Retrain) */}
+              <button
+                disabled={isSubmitting}
+                onClick={() => handleHumanSignOff('SHARP')}
+                className="w-full p-2.5 rounded-xl border border-amber-200 hover:border-amber-400 bg-amber-50/50 hover:bg-amber-100/60 text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-amber-600 group-hover:scale-110 transition" />
+                  <div>
+                    <span className="text-xs font-bold text-amber-950 block">
+                      โมเดลบอก DULLED แต่มีดจริงยังเป็น [ SHARP ]
+                    </span>
+                    <span className="text-[10px] text-amber-700 font-mono">
+                      ⚡ ดึงภาพ chip/{recordId}.jpg คู่กับคำตอบ [ SHARP ] สั่ง Retrain ทันที!
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-200 text-amber-900 font-bold animate-pulse">
+                  Auto Retrain
                 </span>
-              </div>
-              {currentVerified && (
-                <div className="flex items-center justify-between text-gray-400 text-[10px] font-mono pt-1 border-t border-gray-200/60">
-                  <span>Logged At:</span>
+              </button>
+
+              {/* Option C: Discrepancy -> Real is USED (Triggers YOLOv8 Retrain) */}
+              <button
+                disabled={isSubmitting}
+                onClick={() => handleHumanSignOff('USED')}
+                className="w-full p-2.5 rounded-xl border border-indigo-200 hover:border-indigo-400 bg-indigo-50/50 hover:bg-indigo-100/60 text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-indigo-600 group-hover:scale-110 transition" />
+                  <div>
+                    <span className="text-xs font-bold text-indigo-950 block">
+                      โมเดลบอก DULLED แต่มีดจริงยังเป็น [ USED ]
+                    </span>
+                    <span className="text-[10px] text-indigo-700 font-mono">
+                      ⚡ ดึงภาพ chip/{recordId}.jpg คู่กับคำตอบ [ USED ] สั่ง Retrain ทันที!
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-200 text-indigo-900 font-bold animate-pulse">
+                  Auto Retrain
+                </span>
+              </button>
+            </div>
+
+            {/* Current Sign-Off Summary Details */}
+            {currentVerified && (
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 text-[11px] font-mono space-y-1">
+                <div className="flex justify-between text-gray-500">
+                  <span>Inspector Decision:</span>
+                  <span className="font-bold text-gray-900">{currentVerified.status}</span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Sign-Off By:</span>
+                  <span>{currentVerified.verifiedBy}</span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Timestamp:</span>
                   <span>{currentVerified.verifiedAt}</span>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

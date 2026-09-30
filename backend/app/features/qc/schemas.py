@@ -75,6 +75,7 @@ class VerifyQCRequest(BaseModel):
     passIndex: int
     bladeIndex: int
     decision: Literal["CONFIRMED_WEAR", "FALSE_ALARM", "SEND_TO_RETRAIN"]
+    actualCondition: Optional[Literal["SHARP", "USED", "DULLED"]] = None
     notes: Optional[str] = ""
     inspectorName: Optional[str] = "Maintenance Engineer"
 
@@ -86,3 +87,9 @@ class VerifyQCResponse(BaseModel):
     activeLearningPoolSize: int
     verifiedAt: str
     message: str
+    retrainJobId: Optional[str] = None
+    autoRetrainTriggered: bool = False
+    modelRetrained: Optional[str] = None
+    correctedLabel: Optional[str] = None
+    chipImageRetrained: Optional[str] = None
+    userAnswer: Optional[str] = None

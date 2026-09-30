@@ -19,7 +19,7 @@ async def get_blade_qc(tool_id: str, run_index: int, blade_index: int):
 @router.post("/verify", response_model=VerifyQCResponse, summary="Submit engineer sign-off decision")
 async def verify_qc(req: VerifyQCRequest):
     """Submit human verification sign-off (CONFIRMED_WEAR / SEND_TO_RETRAIN / FALSE_ALARM) into MinIO ground truth pool"""
-    return service.verify_blade(req)
+    return await service.verify_blade(req)
 
 @router.get("/images/chip/{record_id}.jpg", summary="Serve metal chip morphology image")
 async def get_chip_image(record_id: str):

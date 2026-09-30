@@ -31,20 +31,6 @@ _MODELS: List[ModelRegistryItem] = [
         lastTrainedAt="2026-09-30 20:30",
         datasetTrainedOn="chip/ 456 Train Images (Tools 1-9) + 56 Val Images (Tool 10)",
     ),
-    ModelRegistryItem(
-        id="MOD-TS-EDGE",
-        name="HistGradientBoosting_Force_Guard",
-        architecture="Histogram-based Gradient Boosting (LOTO)",
-        modality="Physics-Informed Cutting Dynamics (63 Features)",
-        version="v1.2-edge",
-        accuracy=72.1,
-        f1Score=0.748,
-        valLoss=0.142,
-        parametersCount="~4 ms Latency (ONNX)",
-        status="STAGING",
-        lastTrainedAt="2026-09-30 19:40",
-        datasetTrainedOn="Nonastreda 512 Dynamometer Runs (LOTO 10-Fold)",
-    ),
 ]
 
 def get_registered_models() -> List[ModelRegistryItem]:

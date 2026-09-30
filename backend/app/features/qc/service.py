@@ -17,16 +17,27 @@ from .schemas import (
     VerifyQCResponse,
 )
 
-# Base path for dataset
+_BACKEND_DIR = Path(__file__).resolve().parents[3]
+_REPO_DIR = _BACKEND_DIR.parent
+
 _DATASET_CANDIDATES = [
-    Path(__file__).resolve().parents[4] / "dataset" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition",
-    Path(__file__).resolve().parents[4] / "dataset" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition",
+    Path(os.environ.get("DATASET_PATH", "")) if os.environ.get("DATASET_PATH") else None,
+    Path("/dataset"),
+    Path("/dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition"),
+    Path("/dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition"),
+    _REPO_DIR / "dataset" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition",
+    _REPO_DIR / "dataset" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition",
+    _REPO_DIR / "dataset",
 ]
 
 def get_dataset_dir() -> Optional[Path]:
     for p in _DATASET_CANDIDATES:
-        if p.exists() and (p / "labels.csv").exists():
+        if p and p.exists() and (p / "labels.csv").exists():
             return p
+    for p in _DATASET_CANDIDATES:
+        if p and p.exists():
+            for found in p.glob("**/labels.csv"):
+                return found.parent
     return None
 
 # Cache for dataset labels
@@ -335,27 +346,106 @@ def get_blade_qc(tool_id: Any, run_index: int, blade_index: int) -> BladeQCRespo
         verifiedAt=verified_at,
     )
 
-def verify_blade(req: VerifyQCRequest) -> VerifyQCResponse:
+def stage_chip_sample_for_retraining(record_id: str, user_answer: str) -> Optional[Path]:
+    """
+    ดึงภาพถ่ายเศษตัดจากโฟลเดอร์ chip คู่กับคำตอบของผู้ใช้ (Ground Truth)
+    เข้าไปบันทึกไว้ในชุดข้อมูล training data_yolo_chip/train/{user_answer.lower()}/
+    และอัปโหลดเข้า MinIO สำหรับ Active Retraining
+    """
+    import shutil
+    chip_path = get_chip_image_file_path(record_id)
+    if not chip_path or not chip_path.exists():
+        return None
+
+    backend_dir = _BACKEND_DIR
+    data_dir = backend_dir / "data_yolo_chip"
+    u_ans = user_answer.strip().lower()
+    train_cls_dir = data_dir / "train" / u_ans
+    train_cls_dir.mkdir(parents=True, exist_ok=True)
+
+    dest_file = train_cls_dir / f"{record_id}.jpg"
+    shutil.copy2(chip_path, dest_file)
+
+    # ลบไฟล์ออกจากคลาสอื่นหากเคยบันทึกไว้ผิดคลาส
+    for other_cls in ["sharp", "used", "dulled"]:
+        if other_cls != u_ans:
+            for split in ["train", "val"]:
+                old_f = data_dir / split / other_cls / f"{record_id}.jpg"
+                if old_f.exists():
+                    try:
+                        old_f.unlink()
+                    except Exception:
+                        pass
+
+    # พยายามอัปโหลดเข้า MinIO
+    try:
+        from core.config import settings
+        from core.minio_client import ensure_bucket, upload_file
+        bucket = getattr(settings, "minio_datasets_bucket", "datasets")
+        ensure_bucket(bucket)
+        upload_file(bucket, f"active-learning/chip/{u_ans}/{record_id}.jpg", str(dest_file))
+    except Exception as e:
+        pass
+
+    return dest_file
+
+
+async def verify_blade(req: VerifyQCRequest) -> VerifyQCResponse:
     now_iso = datetime.utcnow().isoformat() + "Z"
     minio_path = f"qc-verified/{req.recordId}_{req.decision}_{int(datetime.utcnow().timestamp())}.json"
+
+    actual_cond = req.actualCondition or ("SHARP" if req.decision == "FALSE_ALARM" else "USED")
+    is_discrepancy = req.decision in ("SEND_TO_RETRAIN", "FALSE_ALARM") or req.actualCondition in ("SHARP", "USED")
+
+    chip_file_path = get_chip_image_file_path(req.recordId)
+
     _ACTIVE_LEARNING_VERIFIED[req.recordId] = {
         "recordId": req.recordId,
         "toolId": req.toolId,
         "passIndex": req.passIndex,
         "bladeIndex": req.bladeIndex,
         "decision": req.decision,
+        "actualCondition": actual_cond if is_discrepancy else "DULLED",
+        "imageSource": "chip",
+        "chipImagePath": str(chip_file_path) if chip_file_path else None,
+        "userAnswer": actual_cond if is_discrepancy else "DULLED",
         "notes": req.notes,
         "inspectorName": req.inspectorName,
         "verifiedAt": now_iso,
         "minioPath": minio_path,
     }
 
-    if req.decision == "CONFIRMED_WEAR":
-        msg = f"Blade {req.recordId} wear confirmed. Cutter replacement instruction logged."
-    elif req.decision == "SEND_TO_RETRAIN" or req.decision == "FALSE_ALARM":
-        msg = f"Prediction discrepancy on {req.recordId} logged into MinIO Active Learning pool for model fine-tuning."
+    retrain_job_id = None
+    auto_retrain_triggered = False
+
+    if is_discrepancy:
+        # Human-in-the-Loop Discrepancy: Model predicted DULLED, but user confirmed SHARP or USED!
+        # Retrain คือการนำภาพจาก chip กับคำตอบที่ผู้ใช้ระบุเป็น Ground Truth ส่งคิว Retrain YOLOv8 ทันที
+        stage_chip_sample_for_retraining(req.recordId, actual_cond)
+
+        try:
+            from app.features.training.service import enqueue_retraining
+            retrain_res = await enqueue_retraining(
+                dataset_name="chip",
+                model_name="yolov8_chip_wear",
+                model_type="yolo_vision",
+                epochs=10,
+                batch_size=16,
+                sample_record_id=req.recordId,
+                sample_chip_path=str(chip_file_path) if chip_file_path else None,
+                user_answer=actual_cond.lower(),
+            )
+            retrain_job_id = retrain_res.get("job_id")
+            auto_retrain_triggered = True
+            msg = (
+                f"🚀 Human-in-the-Loop Discrepancy on {req.recordId}! "
+                f"ดึงภาพจาก chip/{req.recordId}.jpg คู่กับคำตอบของผู้ใช้ ('{actual_cond}') "
+                f"เข้าชุดข้อมูล Retrain โมเดล YOLOv8 Vision เรียบร้อย (Job #{retrain_job_id})"
+            )
+        except Exception as e:
+            msg = f"Discrepancy logged for {req.recordId}. Note: Retrain trigger warning: {e}"
     else:
-        msg = f"Verification record saved for {req.recordId}."
+        msg = f"Blade {req.recordId} wear confirmed (DULLED). Cutter replacement instruction logged."
 
     return VerifyQCResponse(
         status="VERIFIED",
@@ -365,4 +455,10 @@ def verify_blade(req: VerifyQCRequest) -> VerifyQCResponse:
         activeLearningPoolSize=len(_ACTIVE_LEARNING_VERIFIED) + 12,
         verifiedAt=now_iso,
         message=msg,
+        retrainJobId=retrain_job_id,
+        autoRetrainTriggered=auto_retrain_triggered,
+        modelRetrained="yolov8_chip_wear",
+        correctedLabel=actual_cond if is_discrepancy else "DULLED",
+        chipImageRetrained=f"chip/{req.recordId}.jpg" if is_discrepancy else None,
+        userAnswer=actual_cond if is_discrepancy else None,
     )

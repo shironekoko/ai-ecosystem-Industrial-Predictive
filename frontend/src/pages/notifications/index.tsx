@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -15,6 +15,7 @@ import { PageHeader } from '../../components/common/PageHeader';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { EmptyState } from '../../components/common/EmptyState';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
 
 export interface AlarmItem {
   id: string;
@@ -34,24 +35,40 @@ export function NotificationsPage() {
   const { isAuthenticated } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'ALL' | 'CRITICAL' | 'WARNING' | 'INFO'>('ALL');
-  // Alarms state - Initialized empty awaiting real alarm stream / API
   const [alarms, setAlarms] = useState<AlarmItem[]>([]);
+
+  useEffect(() => {
+    api.getAlarms(activeTab).then((data) => {
+      if (Array.isArray(data)) {
+        setAlarms(data);
+      }
+    });
+  }, [activeTab]);
 
   const criticalCount = alarms.filter((a) => a.severity === 'CRITICAL').length;
   const warningCount = alarms.filter((a) => a.severity === 'WARNING').length;
   const unreadCount = alarms.filter((a) => !a.isRead).length;
 
-  const filteredAlarms = alarms.filter((a) => {
-    if (activeTab === 'ALL') return true;
-    return a.severity === activeTab;
-  });
+  const filteredAlarms = alarms;
 
-  const handleMarkAllRead = () => {
+  const handleMarkAllRead = async () => {
+    await api.markAllAlarmsRead();
     setAlarms((prev) => prev.map((a) => ({ ...a, isRead: true })));
   };
 
-  const handleDismiss = (id: string) => {
+  const handleDismiss = async (id: string) => {
+    await api.deleteAlarm(id);
     setAlarms((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const handleItemClick = async (alarm: AlarmItem) => {
+    if (!alarm.isRead) {
+      await api.markAlarmRead(alarm.id);
+      setAlarms((prev) => prev.map((a) => (a.id === alarm.id ? { ...a, isRead: true } : a)));
+    }
+    if (alarm.actionUrl) {
+      navigate(alarm.actionUrl);
+    }
   };
 
   return (
@@ -208,8 +225,8 @@ export function NotificationsPage() {
                 <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                   {alarm.actionUrl && (
                     <button
-                      onClick={() => navigate(alarm.actionUrl!)}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg transition"
+                      onClick={() => handleItemClick(alarm)}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg transition cursor-pointer"
                     >
                       <ScanEye className="w-3.5 h-3.5" />
                       <span>Inspect</span>

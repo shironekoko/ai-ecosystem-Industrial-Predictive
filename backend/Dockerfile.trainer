@@ -1,5 +1,5 @@
 # ── Trainer Worker ──
-# ARQ worker สำหรับเทรนโมเดล Token Classification
+# ARQ worker สำหรับเทรนโมเดล Industrial PdM (Time-Series CRNN และ YOLOv8 Vision)
 # Build:  docker compose build trainer-worker
 # Run:    docker compose up trainer-worker
 #

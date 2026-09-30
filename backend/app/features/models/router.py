@@ -11,6 +11,7 @@ async def get_registered_models():
     return service.get_registered_models()
 
 @router.get("/retraining-pool/status", response_model=RetrainingPoolStatus, summary="Get retraining pool status")
+@router.get("/pool-status", response_model=RetrainingPoolStatus, include_in_schema=False)
 async def get_retraining_pool_status():
     """Check how many verified samples are currently staged in MinIO for active learning"""
     return service.get_retraining_pool_status()

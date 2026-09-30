@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { StatusBadge } from '../../components/common/StatusBadge';
+import { api } from '../../services/api';
 
 // Interfaces for live telemetry & run progression
 export interface RunProgressionItem {
@@ -153,12 +154,18 @@ export function MachineMonitoringPage() {
               }
             });
 
-            // If first dulled detected, auto-select and stop stream safety interlock
-            if (condition === 'DULLED') {
+            // Follow active milling run dynamically
+            setActiveRunNumber((prev) => {
+              if (condition === 'DULLED' || data.machineState === 'EMERGENCY_HALTED') {
+                return passNum;
+              }
+              return passNum;
+            });
+
+            // If Time-Series model detects DULLED, auto-stop stream via safety interlock
+            if (condition === 'DULLED' || data.machineState === 'EMERGENCY_HALTED') {
               setActiveRunNumber(passNum);
               setIsStreaming(false); // Safety cut on first dulled!
-            } else if (activeRunNumber === null) {
-              setActiveRunNumber(passNum);
             }
           }
         }
@@ -223,6 +230,22 @@ export function MachineMonitoringPage() {
     setActiveRunNumber(null);
   };
 
+  const handleMountFreshTool = async () => {
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ command: 'MOUNT_FRESH_TOOL' }));
+      }
+      await api.resetMachine();
+    } catch {
+      // ignore
+    }
+    setStreamPoints([]);
+    setLatestForces(null);
+    setRuns([]);
+    setActiveRunNumber(1);
+    setIsStreaming(true);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -231,7 +254,17 @@ export function MachineMonitoringPage() {
         subtitle="โมเดล Time-Series CRNN (BiGRU + Attention) เช็คราย Run ตามลำดับรอบตัด ➔ หยุดทันทีเมื่อเจอ Dulled อันแรก เพื่อดึงภาพ Chip"
         actions={
           <div className="flex items-center gap-2">
-            {/* Clear / Reset Button */}
+            {/* Mount Fresh Tool / Reset Spindle Button */}
+            <button
+              onClick={handleMountFreshTool}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 transition shadow-xs"
+              title="เปลี่ยนหัวมีดใหม่ (Mount Fresh Tool) และรีเซ็ตการตัดเริ่มจาก Run #1"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Mount Fresh Tool (Reset)</span>
+            </button>
+
+            {/* Clear Buffer Button */}
             {(runs.length > 0 || streamPoints.length > 0) && (
               <button
                 onClick={handleClearData}
@@ -628,17 +661,19 @@ export function MachineMonitoringPage() {
               ) : (
                 /* เมื่อเจอ Dulled อันแรก -> ขึ้นเป็นรูปของ Chip พร้อมคำตอบจากโมเดล */
                 <div className="mt-3 space-y-3">
-                  {/* ช่อง 4 เหลี่ยมว่างๆ สำหรับภาพ Chip ไว้ก่อนตามคำขอ */}
-                  <div className="w-full h-36 rounded-lg border-2 border-dashed border-indigo-200 bg-indigo-50/40 flex flex-col items-center justify-center text-center p-3 select-none">
-                    <div className="w-8 h-8 rounded-full bg-white border border-indigo-200 flex items-center justify-center mb-1.5 shadow-xs">
-                      <Scissors className="w-4 h-4 text-indigo-500" />
+                  {/* Image container for real Chip morphology photo */}
+                  <div className="w-full h-40 rounded-lg overflow-hidden border border-indigo-200 bg-slate-900 flex flex-col items-center justify-center relative select-none">
+                    <img
+                      src={`/api/v1/qc/images/chip/T${selectedToolId}R${activeRunNumber}B1.jpg`}
+                      alt={`Chip morphology T${selectedToolId}R${activeRunNumber}`}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                    <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 text-[9px] font-mono text-white">
+                      T{selectedToolId}R{activeRunNumber}B1.jpg
                     </div>
-                    <span className="text-xs font-bold text-indigo-900 font-mono">
-                      [ ช่องสี่เหลี่ยมภาพ Chip ]
-                    </span>
-                    <span className="text-[10px] text-gray-500 font-mono mt-0.5">
-                      Target: T{selectedToolId}R{activeRunNumber}B1.jpg (เว้นช่องว่างไว้รอเชื่อมต่อ API MinIO)
-                    </span>
                   </div>
 
                   {/* คำตอบจากโมเดล Non-Time-Series Chip AI */}

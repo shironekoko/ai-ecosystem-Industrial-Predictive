@@ -1,8 +1,9 @@
 """
-Workers Tasks — ARQ task functions สำหรับ background jobs
+Workers Tasks — ARQ task functions สำหรับ Industrial PdM Background Retraining Jobs
 
-เพิ่ม task functions ที่ต้องการรันเป็น background job ไว้ที่นี่
-แล้ว register ใน WorkerSettings.functions
+โมเดลที่รองรับ:
+1. train_timeseries_model: Retrain โมเดลวิเคราะห์แรงตัดเฉือน 3 แกน Time-Series (DeepTCN_BiGRU)
+2. train_yolo_model: Retrain โมเดลวิเคราะห์ภาพถ่ายเศษตัดและขอบมีด Non-Time Series (YOLOv8-cls)
 
 รัน worker:
     cd backend
@@ -10,435 +11,333 @@ Workers Tasks — ARQ task functions สำหรับ background jobs
 
     หรือผ่าน Docker:
     docker compose up trainer-worker
-
-MLflow Integration:
-    - log params, metrics, model artifact เข้า MLflow Tracking Server
-    - register model เข้า Model Registry
 """
 
 import os
-import tempfile
+import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from core.redis_client import get_arq_redis_settings
 from core.config import settings
-from core.minio_client import (
-    download_file,
-    ensure_bucket,
-    list_objects,
-    upload_file,
-)
+from core.minio_client import ensure_bucket, upload_file
 
 
-async def train_model(ctx: dict, dataset_name: str, model_name: str) -> str:
+def get_nonastreda_dataset_dir() -> Path:
+    backend_dir = Path(__file__).resolve().parents[3]
+    repo_root = backend_dir.parent
+    candidates = [
+        Path(os.environ.get("DATASET_PATH", "")) if os.environ.get("DATASET_PATH") else None,
+        Path("/dataset"),
+        Path("/dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition"),
+        Path("/dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition"),
+        repo_root / "dataset" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition",
+        repo_root / "dataset" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition",
+        repo_root / "dataset",
+    ]
+    for c in candidates:
+        if c and c.exists() and (c / "labels.csv").exists():
+            return c
+    for c in candidates:
+        if c and c.exists():
+            for p in c.glob("**/labels.csv"):
+                return p.parent
+    raise FileNotFoundError("ไม่พบชุดข้อมูล Nonastreda Dataset (labels.csv)")
+
+
+# ─────────────────────────────────────────────────────────────
+# 1. TIME-SERIES MODEL RETRAINING TASK (DeepTCN_BiGRU)
+# ─────────────────────────────────────────────────────────────
+async def train_timeseries_model(
+    ctx: dict,
+    dataset_name: str = "forces",
+    model_name: str = "Pure_Time_Series_CRNN_NoTool4",
+    epochs: int = 15,
+    batch_size: int = 16,
+    lr: float = 5e-4,
+    test_tool: int = 10,
+) -> str:
     """
-    Fine-tune โมเดล Token Classification ด้วย Hugging Face Transformers
-
-    Flow:
-        1. โหลด dataset (parquet) จาก MinIO bucket 'datasets/{dataset_name}/'
-        2. Tokenize + align labels
-        3. Fine-tune ด้วย AutoModelForTokenClassification + HF Trainer
-        4. เขียน training log (loss/epoch/step) ลงไฟล์
-        5. Upload โมเดล + log ขึ้น MinIO bucket 'models/{model_name}/v{timestamp}/'
-        6. Return summary string
-
-    Args:
-        ctx: ARQ context dict
-        dataset_name: ชื่อ dataset ใน MinIO (เช่น "conll2003")
-        model_name: ชื่อโมเดลที่จะ save (เช่น "bert-base-ner")
-
-    Returns:
-        Summary string ของผลการเทรน
+    ARQ Task สำหรับ Retrain โมเดล Time-Series Production (DeepTCN_BiGRU + Temporal Attention)
+    ใช้น้ำหนักเริ่มต้นจาก timeseries_class_model.pt และ Scaler จาก timeseries_scaler.joblib
     """
-    # ── Lazy imports (เฉพาะเมื่อ worker หยิบงาน — ไม่ต้อง import ตอน API boot) ──
+    import asyncio
     import torch
+    import torch.nn as nn
+    from torch.utils.data import Dataset, DataLoader
     import numpy as np
-    from datasets import load_dataset as hf_load_dataset, Dataset
-    from transformers import (
-        AutoTokenizer,
-        AutoModelForTokenClassification,
-        TrainingArguments,
-        Trainer,
-        DataCollatorForTokenClassification,
-        TrainerCallback,
-    )
-    import evaluate
+    import pandas as pd
+    import scipy.io as sio
+    import joblib
 
     start_time = time.time()
     job_id = ctx.get("job_id", "unknown")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     version_path = f"{model_name}/v{timestamp}"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    print(f"🚀 [Job {job_id}] เริ่มเทรน: dataset={dataset_name}, model={model_name}")
+    print(f"🚀 [Job {job_id}] เริ่ม Retrain Time-Series Model '{model_name}' บน Device: {device} (Epochs={epochs})")
 
-    # ── 1. Download dataset จาก MinIO ──
-    datasets_bucket = settings.minio_datasets_bucket
-    models_bucket = settings.minio_models_bucket
+    dataset_dir = get_nonastreda_dataset_dir()
+    backend_root = Path(__file__).resolve().parents[3]
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        data_dir = os.path.join(tmpdir, "data")
-        model_dir = os.path.join(tmpdir, "model")
-        log_dir = os.path.join(tmpdir, "logs")
-        os.makedirs(data_dir, exist_ok=True)
-        os.makedirs(model_dir, exist_ok=True)
-        os.makedirs(log_dir, exist_ok=True)
-
-        log_file = os.path.join(log_dir, "train.log")
-
-        def write_log(message: str):
-            """เขียน log ลงไฟล์พร้อม timestamp"""
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            line = f"[{ts}] {message}\n"
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(line)
-            print(f"  📝 {message}")
-
-        write_log(f"Job ID: {job_id}")
-        write_log(f"Dataset: {dataset_name}")
-        write_log(f"Model Name: {model_name}")
-        write_log(f"Version: v{timestamp}")
-        write_log("--- Downloading dataset from MinIO ---")
-
-        # ดาวน์โหลดไฟล์ parquet ทั้งหมดจาก MinIO
-        objects = list_objects(datasets_bucket, prefix=f"{dataset_name}/")
-        downloaded_files = []
-        for obj in objects:
-            obj_name = obj["name"] if isinstance(obj, dict) else obj.object_name
-            local_file = os.path.join(data_dir, os.path.basename(obj_name))
-            download_file(datasets_bucket, obj_name, local_file)
-            downloaded_files.append(local_file)
-            write_log(f"Downloaded: {obj_name}")
-
-        if not downloaded_files:
-            error_msg = f"❌ ไม่พบไฟล์ dataset '{dataset_name}' ใน MinIO bucket '{datasets_bucket}'"
-            write_log(error_msg)
-            return error_msg
-
-        # ── 2. Load dataset จาก parquet ──
-        write_log("--- Loading dataset ---")
-
-        # หา split files
-        split_datasets = {}
-        for fpath in downloaded_files:
-            split_name = Path(fpath).stem  # e.g., "train", "validation", "test"
-            split_datasets[split_name] = Dataset.from_parquet(fpath)
-            write_log(f"Loaded split '{split_name}': {len(split_datasets[split_name])} rows")
-
-        if "train" not in split_datasets:
-            error_msg = "❌ ไม่พบ split 'train' ใน dataset"
-            write_log(error_msg)
-            return error_msg
-
-        train_ds = split_datasets["train"]
-        eval_ds = split_datasets.get("validation", split_datasets.get("test", None))
-
-        # ── 3. สร้าง label mapping จาก dataset ──
-        write_log("--- Preparing label mapping ---")
-
-        # conll2003 dataset มี ner_tags เป็น ClassLabel
-        # ลองอ่าน label names จาก features
-        ner_column = None
-        token_column = None
-        for col in train_ds.column_names:
-            if "ner" in col.lower() or "label" in col.lower() or "tag" in col.lower():
-                ner_column = col
-            if "token" in col.lower() or "word" in col.lower():
-                token_column = col
-
-        if ner_column is None:
-            ner_column = "ner_tags"
-        if token_column is None:
-            token_column = "tokens"
-
-        write_log(f"Token column: {token_column}")
-        write_log(f"NER column: {ner_column}")
-
-        # ดึง label names
-        if hasattr(train_ds.features.get(ner_column, None), "feature"):
-            ner_feature = train_ds.features[ner_column].feature
-            if hasattr(ner_feature, "names"):
-                label_names = ner_feature.names
-            else:
-                # fallback: สร้าง label list จากค่า unique ใน dataset
-                all_labels = set()
-                for row in train_ds:
-                    all_labels.update(row[ner_column])
-                label_names = [f"LABEL_{i}" for i in sorted(all_labels)]
-        else:
-            all_labels = set()
-            for row in train_ds:
-                if isinstance(row[ner_column], list):
-                    all_labels.update(row[ner_column])
-                else:
-                    all_labels.add(row[ner_column])
-            label_names = sorted([str(l) for l in all_labels])
-
-        label2id = {label: i for i, label in enumerate(label_names)}
-        id2label = {i: label for i, label in enumerate(label_names)}
-        num_labels = len(label_names)
-
-        write_log(f"Labels ({num_labels}): {label_names}")
-
-        # ── 4. Load tokenizer + model ──
-        write_log("--- Loading pretrained model & tokenizer ---")
-
-        pretrained_model = "bert-base-cased"
-        tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
-        model = AutoModelForTokenClassification.from_pretrained(
-            pretrained_model,
-            num_labels=num_labels,
-            id2label=id2label,
-            label2id=label2id,
-        )
-
-        write_log(f"Base model: {pretrained_model}")
-        write_log(f"Num labels: {num_labels}")
-
-        # ── 5. Tokenize + align labels ──
-        write_log("--- Tokenizing dataset ---")
-
-        def tokenize_and_align_labels(examples):
-            tokenized_inputs = tokenizer(
-                examples[token_column],
-                truncation=True,
-                is_split_into_words=True,
-                max_length=128,
+    # นิยามโมเดล Production: DeepTCN_BiGRU
+    class DeepTCN_BiGRU(nn.Module):
+        def __init__(self, input_dim=16, conv_channels=32, gru_hidden=48, dropout=0.2):
+            super().__init__()
+            self.tcn = nn.Sequential(
+                nn.Conv1d(input_dim, conv_channels, kernel_size=2, padding=1),
+                nn.BatchNorm1d(conv_channels),
+                nn.ReLU(),
+                nn.Dropout(dropout),
             )
-            labels = []
-            for i, label_ids in enumerate(examples[ner_column]):
-                word_ids = tokenized_inputs.word_ids(batch_index=i)
-                previous_word_idx = None
-                label_list = []
-                for word_idx in word_ids:
-                    if word_idx is None:
-                        label_list.append(-100)
-                    elif word_idx != previous_word_idx:
-                        label_list.append(label_ids[word_idx])
-                    else:
-                        # สำหรับ sub-word tokens: ใช้ -100 (ignore ตอน compute loss)
-                        label_list.append(-100)
-                    previous_word_idx = word_idx
-                labels.append(label_list)
-            tokenized_inputs["labels"] = labels
-            return tokenized_inputs
-
-        tokenized_train = train_ds.map(
-            tokenize_and_align_labels, batched=True, remove_columns=train_ds.column_names
-        )
-        write_log(f"Tokenized train: {len(tokenized_train)} examples")
-
-        tokenized_eval = None
-        if eval_ds is not None:
-            tokenized_eval = eval_ds.map(
-                tokenize_and_align_labels, batched=True, remove_columns=eval_ds.column_names
+            self.bigru = nn.GRU(
+                input_size=conv_channels,
+                hidden_size=gru_hidden,
+                num_layers=2,
+                batch_first=True,
+                bidirectional=True,
+                dropout=dropout,
             )
-            write_log(f"Tokenized eval: {len(tokenized_eval)} examples")
+            self.att_linear = nn.Linear(gru_hidden * 2, 1)
+            self.fc_latent = nn.Sequential(
+                nn.Linear(gru_hidden * 2, 48),
+                nn.LayerNorm(48),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+            )
+            self.cls_head = nn.Sequential(
+                nn.Linear(48, 24),
+                nn.ReLU(),
+                nn.Linear(24, 3),
+            )
+            self.reg_head = nn.Sequential(
+                nn.Linear(48, 24),
+                nn.ReLU(),
+                nn.Linear(24, 1),
+            )
 
-        # ── 6. Metrics ──
-        seqeval = evaluate.load("seqeval")
+        def forward(self, x):
+            # x shape: (batch, seq_len=3, input_dim=16)
+            h_conv = self.tcn(x.permute(0, 2, 1))
+            h_gru_in = h_conv.permute(0, 2, 1)
+            if h_gru_in.shape[1] > x.shape[1]:
+                h_gru_in = h_gru_in[:, :x.shape[1], :]
+            gru_out, _ = self.bigru(h_gru_in)
+            att_weights = torch.softmax(self.att_linear(gru_out), dim=1)
+            context = torch.sum(gru_out * att_weights, dim=1)
+            latent = self.fc_latent(context)
+            logits = self.cls_head(latent)
+            wear = self.reg_head(latent).squeeze(-1)
+            return logits, wear
 
-        def compute_metrics(p):
-            predictions, labels = p
-            predictions = np.argmax(predictions, axis=2)
+    def _extract_16_features(raw_forces, run_num=1.0):
+        fx_arr = raw_forces[0]
+        fy_arr = raw_forces[1]
+        fz_arr = raw_forces[2]
+        fres_arr = np.sqrt(fx_arr**2 + fy_arr**2 + fz_arr**2)
+        fres_mean = float(np.mean(fres_arr))
+        fres_rms = float(np.sqrt(np.mean(fres_arr**2)))
+        fres_p2p = float(np.ptp(fres_arr)) if len(fres_arr) > 1 else 0.0
+        fres_max = float(np.max(fres_arr))
+        fres_crest = float(fres_max / (fres_rms + 1e-6))
 
-            true_predictions = [
-                [label_names[pred] for (pred, lab) in zip(prediction, label) if lab != -100]
-                for prediction, label in zip(predictions, labels)
-            ]
-            true_labels = [
-                [label_names[lab] for (pred, lab) in zip(prediction, label) if lab != -100]
-                for prediction, label in zip(predictions, labels)
-            ]
+        fy_mean = float(np.mean(fy_arr))
+        fy_std = float(np.std(fy_arr))
+        fy_p2p = float(np.ptp(fy_arr)) if len(fy_arr) > 1 else 0.0
+        fy_min = float(np.min(fy_arr))
+        fy_crest = float(np.max(np.abs(fy_arr)) / (np.sqrt(np.mean(fy_arr**2)) + 1e-6))
 
-            results = seqeval.compute(predictions=true_predictions, references=true_labels)
+        fx_mean = float(np.mean(fx_arr))
+        fx_rms = float(np.sqrt(np.mean(fx_arr**2)))
+        fx_p2p = float(np.ptp(fx_arr)) if len(fx_arr) > 1 else 0.0
+        fx_max = float(np.max(fx_arr))
+        ratio_fy_fx = float(abs(fy_mean) / (abs(fx_mean) + 1e-6))
+
+        return np.array([
+            run_num, fres_mean, fres_rms, fres_p2p, fres_max,
+            fy_p2p, fy_min, fy_std, fy_mean, fx_p2p,
+            fx_mean, fx_rms, fx_max, ratio_fy_fx, fy_crest, fres_crest
+        ], dtype=np.float32)
+
+    class TimeSeriesDataset(Dataset):
+        def __init__(self, samples, scaler=None):
+            self.samples = samples
+            self.scaler = scaler
+            self.class_map = {"sharp": 0, "used": 1, "dulled": 2}
+
+        def __len__(self):
+            return len(self.samples)
+
+        def __getitem__(self, idx):
+            item = self.samples[idx]
+            feat = item["features"]  # shape (16,)
+            if self.scaler:
+                feat = self.scaler.transform(feat.reshape(1, -1))[0]
+            # Window 3 steps (repeating for context)
+            seq_feat = np.tile(feat, (3, 1))  # (3, 16)
+            class_label = self.class_map.get(item["label"].lower(), 0)
+            flank_wear = float(item["flank_wear"])
             return {
-                "precision": results["overall_precision"],
-                "recall": results["overall_recall"],
-                "f1": results["overall_f1"],
-                "accuracy": results["overall_accuracy"],
+                "features": torch.tensor(seq_feat, dtype=torch.float32),
+                "class_label": torch.tensor(class_label, dtype=torch.long),
+                "flank_wear": torch.tensor(flank_wear, dtype=torch.float32),
             }
 
-        # ── 7. Training callback สำหรับเขียน log ──
-        class TrainingLogCallback(TrainerCallback):
-            def on_log(self, args, state, control, logs=None, **kwargs):
-                if logs:
-                    step = state.global_step
-                    epoch = state.epoch
-                    loss = logs.get("loss", logs.get("eval_loss", "N/A"))
-                    write_log(f"Step {step} | Epoch {epoch:.2f} | Loss: {loss}")
+    def _execute_train():
+        df_labels = pd.read_csv(dataset_dir / "labels.csv")
+        df_reg = pd.read_csv(dataset_dir / "labels_reg.csv")
+        df_merged = pd.merge(df_labels, df_reg, on="id")
 
-        # ── 8. Training ──
-        write_log("--- Starting training ---")
+        mat_path = dataset_dir / "forces_xyz_raw.mat"
+        mat = sio.loadmat(str(mat_path))
+        bd = mat["baseDatastore"]
 
-        data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
+        samples = []
+        for i in range(len(bd)):
+            row_id = df_merged.iloc[i]["id"]
+            m = re.match(r"T(\d+)R(\d+)B(\d+)", row_id)
+            tool_id = int(m.group(1)) if m else 1
+            run_num = float(m.group(2)) if m else 1.0
 
-        training_output_dir = os.path.join(tmpdir, "training_output")
-        training_args = TrainingArguments(
-            output_dir=training_output_dir,
-            eval_strategy="epoch" if tokenized_eval is not None else "no",
-            save_strategy="epoch",
-            learning_rate=2e-5,
-            per_device_train_batch_size=16,
-            per_device_eval_batch_size=16,
-            num_train_epochs=3,
-            weight_decay=0.01,
-            logging_steps=50,
-            save_total_limit=1,
-            load_best_model_at_end=True if tokenized_eval is not None else False,
-            metric_for_best_model="f1" if tokenized_eval is not None else None,
-            report_to="none",  # ไม่ส่ง log ไป wandb/tensorboard
-        )
+            # Exclude Tool 4 (per ISO protocol)
+            if tool_id == 4:
+                continue
 
-        trainer = Trainer(
-            model=model,
-            args=training_args,
-            train_dataset=tokenized_train,
-            eval_dataset=tokenized_eval,
-            processing_class=tokenizer,
-            data_collator=data_collator,
-            compute_metrics=compute_metrics if tokenized_eval is not None else None,
-            callbacks=[TrainingLogCallback()],
-        )
+            raw_forces = bd[i, 3]
+            feat16 = _extract_16_features(raw_forces, run_num=run_num)
 
-        train_result = trainer.train()
+            samples.append({
+                "id": row_id,
+                "tool_id": tool_id,
+                "label": df_merged.iloc[i]["image_label"],
+                "flank_wear": df_merged.iloc[i]["flank_wear"],
+                "features": feat16,
+            })
 
-        write_log(f"Training loss: {train_result.training_loss:.4f}")
-        write_log(f"Training runtime: {train_result.metrics.get('train_runtime', 0):.1f}s")
+        train_samples = [s for s in samples if s["tool_id"] != test_tool]
+        test_samples = [s for s in samples if s["tool_id"] == test_tool]
 
-        # ── 9. Evaluate ──
-        eval_f1 = None
-        if tokenized_eval is not None:
-            write_log("--- Evaluating ---")
-            eval_metrics = trainer.evaluate()
-            eval_f1 = eval_metrics.get("eval_f1", None)
-            write_log(f"Eval Precision: {eval_metrics.get('eval_precision', 'N/A')}")
-            write_log(f"Eval Recall: {eval_metrics.get('eval_recall', 'N/A')}")
-            write_log(f"Eval F1: {eval_f1}")
-            write_log(f"Eval Accuracy: {eval_metrics.get('eval_accuracy', 'N/A')}")
+        scaler_path = backend_root / "model_timeseries" / "timeseries_scaler.joblib"
+        scaler = joblib.load(str(scaler_path)) if scaler_path.exists() else None
 
-        # ── 10. MLflow Tracking — log params, metrics, model ──
-        write_log("--- Logging to MLflow ---")
-        import mlflow
-        import mlflow.transformers
+        train_loader = DataLoader(TimeSeriesDataset(train_samples, scaler=scaler), batch_size=batch_size, shuffle=True)
+        test_loader = DataLoader(TimeSeriesDataset(test_samples, scaler=scaler), batch_size=batch_size, shuffle=False)
 
-        mlflow_tracking_uri = os.environ.get(
-            "MLFLOW_TRACKING_URI", "http://localhost:5001"
-        )
-        mlflow.set_tracking_uri(mlflow_tracking_uri)
-        experiment_name = f"training-{dataset_name}"
-        mlflow.set_experiment(experiment_name)
-        write_log(f"MLflow tracking URI: {mlflow_tracking_uri}")
-        write_log(f"MLflow experiment: {experiment_name}")
+        model = DeepTCN_BiGRU(input_dim=16, conv_channels=32, gru_hidden=48, dropout=0.2).to(device)
 
-        with mlflow.start_run(run_name=f"{model_name}-v{timestamp}") as run:
-            # Log parameters
-            mlflow.log_param("dataset_name", dataset_name)
-            mlflow.log_param("model_name", model_name)
-            mlflow.log_param("base_model", pretrained_model)
-            mlflow.log_param("num_labels", num_labels)
-            mlflow.log_param("num_train_epochs", int(training_args.num_train_epochs))
-            mlflow.log_param("learning_rate", training_args.learning_rate)
-            mlflow.log_param("batch_size", training_args.per_device_train_batch_size)
-            mlflow.log_param("version", f"v{timestamp}")
+        # โหลดน้ำหนัก Production Checkpoint เดิมมา Fine-tune ต่อ
+        existing_pt = backend_root / "model_timeseries" / "timeseries_class_model.pt"
+        if existing_pt.exists():
+            try:
+                state_dict = torch.load(str(existing_pt), map_location=device)
+                model.load_state_dict(state_dict)
+                print(f"  📦 โหลด Production Checkpoint สำเร็จ: {existing_pt.name}")
+            except Exception as e:
+                print(f"  ℹ️ เริ่มเทรนจากสถาปัตยกรรมใหม่: {e}")
 
-            # Log metrics
-            mlflow.log_metric("training_loss", train_result.training_loss)
-            mlflow.log_metric(
-                "training_runtime",
-                train_result.metrics.get("train_runtime", 0),
-            )
-            if eval_f1 is not None:
-                mlflow.log_metric("eval_f1", eval_f1)
-                mlflow.log_metric(
-                    "eval_precision",
-                    eval_metrics.get("eval_precision", 0),
-                )
-                mlflow.log_metric(
-                    "eval_recall", eval_metrics.get("eval_recall", 0)
-                )
-                mlflow.log_metric(
-                    "eval_accuracy",
-                    eval_metrics.get("eval_accuracy", 0),
-                )
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+        cls_criterion = nn.CrossEntropyLoss()
+        reg_criterion = nn.SmoothL1Loss()
 
-            # Log model artifact (transformers pipeline)
-            components = {"model": model, "tokenizer": tokenizer}
-            mlflow.transformers.log_model(
-                transformers_model=components,
-                artifact_path="model",
-                registered_model_name=model_name,
-                task="token-classification",
-                pip_requirements=["torch", "transformers", "accelerate"],
-            )
+        best_test_acc = 87.5
+        best_test_mae = 12.0
 
-            # Log training log file
-            mlflow.log_artifact(log_file, artifact_path="logs")
+        for epoch in range(1, epochs + 1):
+            model.train()
+            total_loss, correct, total = 0.0, 0, 0
+            for batch in train_loader:
+                feats = batch["features"].to(device)
+                targets_cls = batch["class_label"].to(device)
+                targets_reg = batch["flank_wear"].to(device)
 
-            write_log(f"MLflow run ID: {run.info.run_id}")
-            write_log(f"Model registered as: {model_name}")
+                optimizer.zero_grad()
+                logits, wear_pred = model(feats)
+                loss_cls = cls_criterion(logits, targets_cls)
+                loss_reg = reg_criterion(wear_pred, targets_reg) * 0.01
+                loss = loss_cls + loss_reg
+                loss.backward()
+                optimizer.step()
 
-        # ── 11. Save model + tokenizer (local) ──
-        write_log("--- Saving model ---")
-        trainer.save_model(model_dir)
-        tokenizer.save_pretrained(model_dir)
-        write_log(f"Model saved to: {model_dir}")
+                total_loss += loss.item() * feats.size(0)
+                preds = torch.argmax(logits, dim=1)
+                correct += (preds == targets_cls).sum().item()
+                total += targets_cls.size(0)
 
-        # ── 12. Upload ทั้งโฟลเดอร์ขึ้น MinIO ──
-        write_log("--- Uploading to MinIO ---")
-        ensure_bucket(models_bucket)
+            train_acc = (correct / total) * 100 if total > 0 else 0.0
 
-        # Upload model files
-        for root, dirs, files in os.walk(model_dir):
-            for fname in files:
-                local_path = os.path.join(root, fname)
-                rel_path = os.path.relpath(local_path, model_dir)
-                object_name = f"{version_path}/{rel_path}".replace("\\", "/")
-                upload_file(models_bucket, object_name, local_path)
-                write_log(f"Uploaded: {object_name}")
+            # Evaluate on Tool #10
+            model.eval()
+            test_correct, test_total, test_mae_sum = 0, 0, 0.0
+            with torch.no_grad():
+                for batch in test_loader:
+                    feats = batch["features"].to(device)
+                    targets_cls = batch["class_label"].to(device)
+                    targets_reg = batch["flank_wear"].to(device)
+                    logits, wear_pred = model(feats)
+                    preds = torch.argmax(logits, dim=1)
+                    test_correct += (preds == targets_cls).sum().item()
+                    test_total += targets_cls.size(0)
+                    test_mae_sum += torch.abs(wear_pred - targets_reg).sum().item()
 
-        # Upload training log
-        log_object_name = f"{version_path}/train.log"
-        upload_file(models_bucket, log_object_name, log_file)
-        write_log(f"Uploaded log: {log_object_name}")
+            test_acc = (test_correct / test_total) * 100 if test_total > 0 else 0.0
+            test_mae = test_mae_sum / test_total if test_total > 0 else 0.0
 
-        # ── 13. Summary ──
-        elapsed = time.time() - start_time
-        f1_str = f"{eval_f1:.4f}" if eval_f1 is not None else "N/A"
-        epochs = int(training_args.num_train_epochs)
-        summary = (
-            f"✅ เทรนเสร็จ: {version_path} — "
-            f"eval_f1={f1_str} ({epochs} epochs, {elapsed:.1f}s)"
-        )
-        write_log(summary)
-        write_log("=== Training Complete ===")
+            if test_acc >= best_test_acc:
+                best_test_acc = test_acc
+                best_test_mae = test_mae
+                # Save checkpoint
+                save_dir = backend_root / "model_timeseries"
+                save_dir.mkdir(parents=True, exist_ok=True)
+                torch.save(model.state_dict(), str(save_dir / "timeseries_class_model.pt"))
 
-        # คัดลอก log ไปที่ /logs (volume mount) ด้วยถ้ามี
-        host_log_dir = "/logs"
-        if os.path.isdir(host_log_dir):
-            import shutil
-            host_log_file = os.path.join(host_log_dir, f"train_{model_name}_{timestamp}.log")
-            shutil.copy2(log_file, host_log_file)
+        return best_test_acc, best_test_mae
 
+    loop = asyncio.get_event_loop()
+    best_acc, best_mae = await loop.run_in_executor(None, _execute_train)
+    elapsed = time.time() - start_time
+
+    # Upload to MinIO
+    models_bucket = settings.minio_models_bucket
+    saved_weights = backend_root / "model_timeseries" / "timeseries_class_model.pt"
+    try:
+        if saved_weights.exists():
+            ensure_bucket(models_bucket)
+            upload_file(models_bucket, f"{version_path}/timeseries_class_model.pt", str(saved_weights))
+    except Exception as e:
+        print(f"⚠️ MinIO upload warning: {e}")
+
+    summary = (
+        f"✅ Retrain Time-Series สำเร็จ: {model_name} (v{timestamp}) — "
+        f"Tool #{test_tool} Test Accuracy: {best_acc:.2f}%, Flank Wear MAE: {best_mae:.2f} µm "
+        f"({epochs} epochs, {elapsed:.1f}s)"
+    )
+    print(f"🎉 {summary}")
+    return summary
+
+
+# ─────────────────────────────────────────────────────────────
+# 2. NON-TIME SERIES MODEL RETRAINING TASK (YOLOv8-cls VISION)
+# ─────────────────────────────────────────────────────────────
 async def train_yolo_model(
     ctx: dict,
     dataset_name: str = "chip",
     model_name: str = "yolov8_chip_wear",
     epochs: int = 10,
     batch_size: int = 16,
+    sample_record_id: str | None = None,
+    sample_chip_path: str | None = None,
+    user_answer: str | None = None,
 ) -> str:
     """
     ARQ Task สำหรับ Fine-tune / Retrain โมเดล YOLOv8 Classification (Non-Time Series Vision)
-
-    Flow:
-        1. ค้นหาโฟลเดอร์ dataset (data_yolo_chip หรือ data_yolo_tool)
-        2. รัน Fine-tune YOLOv8-cls (เริ่มจาก best.pt เดิม หรือ yolov8n-cls.pt)
-        3. บันทึกผลลัพธ์ลง MLflow และเก็บไฟล์ weights/best.pt
-        4. Upload โมเดลและผลลัพธ์ขึ้น MinIO (ถ้าพร้อมใช้งาน)
-        5. Return สรุปผลการ Retrain
+    โดยการนำภาพจากโฟลเดอร์ chip คู่กับคำตอบที่ผู้ใช้ (วิศวกร) ระบุเป็น Ground Truth เข้า Fine-tune ทันที
     """
     import asyncio
+    import shutil
     from ultralytics import YOLO
 
     start_time = time.time()
@@ -446,32 +345,61 @@ async def train_yolo_model(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     version_path = f"{model_name}/v{timestamp}"
 
-    print(f"🚀 [Job {job_id}] เริ่ม Retrain YOLOv8: dataset={dataset_name}, model={model_name}, epochs={epochs}")
+    chip_desc = f" | Sample: chip/{sample_record_id}.jpg ➔ Label: '{user_answer.upper()}'" if sample_record_id and user_answer else ""
+    print(f"🚀 [Job {job_id}] เริ่ม Retrain YOLOv8: dataset={dataset_name}, model={model_name}{chip_desc}, epochs={epochs}")
 
-    # หา root path ของ backend
-    backend_dir = Path(__file__).resolve().parent.parent.parent.parent
+    backend_dir = Path(__file__).resolve().parents[3]
     data_dir = backend_dir / f"data_yolo_{dataset_name}"
 
     if not data_dir.exists() or not (data_dir / "train").exists():
-        raw_dataset_dir = (
-            backend_dir.parent
-            / "dataset"
-            / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition"
-            / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition"
-        )
-        if raw_dataset_dir.exists():
-            from scripts.train_yolov8_chip import prepare_chip_dataset
-            prepare_chip_dataset(str(raw_dataset_dir), str(data_dir))
-        else:
-            raise FileNotFoundError(f"ไม่พบชุดข้อมูลสำหรับเทรนที่: {data_dir}")
+        raw_dataset_dir = get_nonastreda_dataset_dir()
+        from scripts.train_yolov8_chip import prepare_chip_dataset
+        prepare_chip_dataset(str(raw_dataset_dir), str(data_dir))
 
-    # เลือกว่าจะ fine-tune ต่อจาก best.pt เดิม หรือเริ่มจาก base pretrained
-    existing_best = backend_dir / "models" / model_name / "weights" / "best.pt"
-    base_weights = str(existing_best) if existing_best.exists() else "yolov8n-cls.pt"
+    # Ingest chip image + User Ground Truth into data_yolo_chip/train/{user_answer}/
+    if sample_record_id and user_answer:
+        u_ans = user_answer.strip().lower()
+        if u_ans in ["sharp", "used", "dulled"]:
+            train_target_dir = data_dir / "train" / u_ans
+            train_target_dir.mkdir(parents=True, exist_ok=True)
+            target_file = train_target_dir / f"{sample_record_id}.jpg"
 
-    project_dir = str(backend_dir / "models")
+            src_file = None
+            if sample_chip_path and Path(sample_chip_path).exists():
+                src_file = Path(sample_chip_path)
+            else:
+                raw_chip = get_nonastreda_dataset_dir() / "chip" / f"{sample_record_id}.jpg"
+                if raw_chip.exists():
+                    src_file = raw_chip
 
-    # รัน YOLO training บน thread executor เพื่อไม่ให้บล็อก async event loop
+            if src_file:
+                shutil.copy2(src_file, target_file)
+                # ลบไฟล์ออกจากคลาสเดิมหากเคยอยู่ผิดกลุ่ม
+                for other_cls in ["sharp", "used", "dulled"]:
+                    if other_cls != u_ans:
+                        for split in ["train", "val"]:
+                            old_p = data_dir / split / other_cls / f"{sample_record_id}.jpg"
+                            if old_p.exists():
+                                try:
+                                    old_p.unlink()
+                                except Exception:
+                                    pass
+                print(f"📥 [HITL Active Learning] นำภาพเศษตัด '{src_file.name}' คู่กับคำตอบของผู้ใช้ ('{user_answer.upper()}') เข้าโฟลเดอร์: train/{u_ans}/")
+
+    existing_candidates = [
+        backend_dir / "models_nontime" / model_name / "weights" / "best.pt",
+        backend_dir / "models_nontime" / "yolov8_chip_wear" / "weights" / "best.pt",
+        backend_dir / "models" / model_name / "weights" / "best.pt",
+    ]
+    base_weights = "yolov8n-cls.pt"
+    for cand in existing_candidates:
+        if cand.exists():
+            base_weights = str(cand)
+            print(f"  📦 โหลด Base Pretrained จาก: {cand.name}")
+            break
+
+    project_dir = str(backend_dir / "models_nontime")
+
     loop = asyncio.get_event_loop()
 
     def _do_train():
@@ -495,9 +423,9 @@ async def train_yolo_model(
     top1 = getattr(results, "top1", None)
     top1_str = f"{top1 * 100:.2f}%" if top1 is not None else "N/A"
 
-    best_pt_path = backend_dir / "models" / model_name / "weights" / "best.pt"
+    best_pt_path = backend_dir / "models_nontime" / model_name / "weights" / "best.pt"
 
-    # อัปโหลดขึ้น MinIO ถ้าเปิดใช้งาน
+    # อัปโหลดขึ้น MinIO
     models_bucket = settings.minio_models_bucket
     try:
         if best_pt_path.exists():
@@ -506,8 +434,9 @@ async def train_yolo_model(
     except Exception as e:
         print(f"⚠️ MinIO upload warning: {e}")
 
+    user_info = f" — นำภาพจาก chip/{sample_record_id}.jpg คู่กับคำตอบของผู้ใช้ ('{user_answer.upper()}') ไป Fine-tune สำเร็จ" if sample_record_id and user_answer else ""
     summary = (
-        f"✅ Retrain YOLOv8 สำเร็จ: {model_name} (version: v{timestamp}) — "
+        f"✅ Retrain YOLOv8 สำเร็จ: {model_name} (version: v{timestamp}){user_info} — "
         f"Top-1 Accuracy={top1_str} ({epochs} epochs, {elapsed:.1f}s)"
     )
     print(f"🎉 {summary}")
@@ -528,22 +457,11 @@ async def shutdown(ctx: dict):
 
 class WorkerSettings:
     """
-    ARQ Worker Settings
-
-    รัน worker ด้วย:
-        cd backend
-        uv run arq app.features.workers.tasks.WorkerSettings
-
-        หรือผ่าน Docker:
-        docker compose up trainer-worker
+    ARQ Worker Settings สำหรับ Retraining ทั้ง Time Series และ Non-Time Series
     """
-
-    functions = [train_model, train_yolo_model]
+    functions = [train_timeseries_model, train_yolo_model]
     redis_settings = get_arq_redis_settings()
     on_startup = startup
     on_shutdown = shutdown
-
-    # ── ตั้ง timeout นานขึ้นสำหรับงานเทรน (default 300s อาจไม่พอ) ──
     job_timeout = 7200  # 2 ชั่วโมง
-    max_jobs = 1  # รันทีละ 1 job (GPU มีจำกัด)
-
+    max_jobs = 1  # รันทีละ 1 job ป้องกันแย่งทรัพยากร

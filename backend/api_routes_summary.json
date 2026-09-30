@@ -1,0 +1,404 @@
+{
+  "Health Check": [
+    {
+      "method": "GET",
+      "path": "/api/v1/health",
+      "summary": "ตรวจสอบสถานะระบบเบื้องต้น"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/health/components",
+      "summary": "ตรวจสอบสถานะระบบและส่วนประกอบต่างๆ"
+    }
+  ],
+  "Authentication": [
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/register",
+      "summary": "สมัครสมาชิกใหม่ (Alias)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/signup",
+      "summary": "สมัครสมาชิกใหม่"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "summary": "เข้าสู่ระบบ"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "summary": "ออกจากระบบ"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/refresh",
+      "summary": "ต่ออายุ token"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "summary": "ดูข้อมูลผู้ใช้ปัจจุบัน"
+    }
+  ],
+  "Profile": [
+    {
+      "method": "GET",
+      "path": "/api/v1/profile/me",
+      "summary": "ดูข้อมูลโปรไฟล์ตัวเอง"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/profile/me",
+      "summary": "แก้ไขข้อมูลโปรไฟล์"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/profile/me/avatar",
+      "summary": "อัปโหลดรูปโปรไฟล์ (ไฟล์รูป)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/profile/me/avatar",
+      "summary": "ลบรูปโปรไฟล์"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/profile/me/avatar-url",
+      "summary": "ตั้งรูปโปรไฟล์จาก URL (ลิงก์ MinIO)"
+    }
+  ],
+  "Storage (MinIO)": [
+    {
+      "method": "GET",
+      "path": "/api/v1/storage/buckets",
+      "summary": "รายการ Buckets ทั้งหมด"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/storage/buckets",
+      "summary": "สร้าง Bucket ใหม่"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/storage/buckets/{bucket_name}",
+      "summary": "ลบ Bucket"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/storage/buckets/{bucket_name}/objects",
+      "summary": "รายการ Objects ใน Bucket"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/storage/buckets/{bucket_name}/upload",
+      "summary": "อัปโหลด Object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/storage/buckets/{bucket_name}/objects/{object_name}/download",
+      "summary": "ดาวน์โหลด Object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/storage/buckets/{bucket_name}/objects/{object_name}/presigned-url",
+      "summary": "สร้าง Presigned URL"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/storage/buckets/{bucket_name}/objects/{object_name}",
+      "summary": "ลบ Object"
+    }
+  ],
+  "Labeling (Label Studio)": [
+    {
+      "method": "GET",
+      "path": "/api/v1/labeling/projects",
+      "summary": "ดึงรายการโปรเจกต์ทั้งหมด"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/labeling/projects",
+      "summary": "สร้างโปรเจกต์ใหม่"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/labeling/projects/{project_id}",
+      "summary": "ดึงข้อมูลโปรเจกต์"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/labeling/projects/{project_id}",
+      "summary": "ลบโปรเจกต์"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/labeling/projects/{project_id}/tasks",
+      "summary": "ดึงรายการ Tasks ในโปรเจกต์"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/labeling/projects/{project_id}/tasks",
+      "summary": "นำเข้า Tasks แบบกลุ่ม"
+    }
+  ],
+  "Workers (Background Jobs)": [
+    {
+      "method": "POST",
+      "path": "/api/v1/workers/jobs",
+      "summary": "Enqueue a new background job"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workers/jobs/{job_id}",
+      "summary": "Get job status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workers/redis/ping",
+      "summary": "Ping Redis server"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workers/redis/info",
+      "summary": "Get Redis server info"
+    }
+  ],
+  "Model Retraining (Continuous Active Learning)": [
+    {
+      "method": "POST",
+      "path": "/api/v1/training/queue",
+      "summary": "Enqueue a retraining job (legacy alias)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/retrain/trigger",
+      "summary": "Trigger model retraining"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/training/queue/{job_id}",
+      "summary": "Get training job status (legacy alias)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/retrain/status/{job_id}",
+      "summary": "Get retraining job status"
+    }
+  ],
+  "Inference (Model Prediction)": [
+    {
+      "method": "POST",
+      "path": "/api/v1/predict",
+      "summary": "Submit a prediction request"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/inference/jobs/{job_id}",
+      "summary": "Get inference job result"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/inference/predict-forces",
+      "summary": "Predict tool condition from forces chunk"
+    }
+  ],
+  "Fleet Dashboard": [
+    {
+      "method": "GET",
+      "path": "/api/v1/fleet/spindles",
+      "summary": "Get all CNC Spindles"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/fleet/summary",
+      "summary": "Get fleet summary KPIs"
+    }
+  ],
+  "Visual QC & Verification": [
+    {
+      "method": "GET",
+      "path": "/api/v1/qc/target",
+      "summary": "Get active dismounted tool target on bench"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qc/tools/{tool_id}/runs/{run_index}/blades/{blade_index}",
+      "summary": "Get blade inspection results"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/qc/verify",
+      "summary": "Submit engineer sign-off decision"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qc/images/chip/{record_id}.jpg",
+      "summary": "Serve metal chip morphology image"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qc/images/tool/{record_id}.jpg",
+      "summary": "Serve raw tool flank face microscope image"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qc/images/tool-processed/{record_id}.jpg",
+      "summary": "Serve OpenCV edge-processed metrology overlay image"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qc/images/{record_id}.jpg",
+      "summary": "Serve microscope flank face image (backward compatibility)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qc/gradcam/{record_id}.jpg",
+      "summary": "Serve Grad-CAM heatmap visualization"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/qc/inspection-images",
+      "summary": "Ingest optical photo from edge microscope camera"
+    }
+  ],
+  "Live Spindle Telemetry": [
+    {
+      "method": "GET",
+      "path": "/api/v1/telemetry/machine/raw",
+      "summary": "Pull raw sensor frame directly from machine PLC"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/telemetry/machine/stop",
+      "summary": "Stop machine spindle at specific run"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/telemetry/machine/reset",
+      "summary": "Mount fresh tool and reset machine to Run 1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/telemetry/machine/status",
+      "summary": "Get physical machine status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/telemetry/ai/predict",
+      "summary": "Run Time-Series wear prediction for a pass"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/telemetry/spindle/control",
+      "summary": "Send spindle safety control action"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/telemetry/forces",
+      "summary": "Query force telemetry snapshot for a specific pass"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/telemetry/status",
+      "summary": "Get overall machine and tool status"
+    }
+  ],
+  "Industrial Alarms": [
+    {
+      "method": "GET",
+      "path": "/api/v1/alarms",
+      "summary": "Get all industrial alarms"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/alarms/{alarm_id}/read",
+      "summary": "Mark alarm as read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/alarms/mark-all-read",
+      "summary": "Mark all alarms as read"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/alarms/{alarm_id}",
+      "summary": "Delete an alarm"
+    }
+  ],
+  "Model Registry & Active Learning": [
+    {
+      "method": "GET",
+      "path": "/api/v1/models/registry",
+      "summary": "Get registered AI models"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/models/retraining-pool/status",
+      "summary": "Get retraining pool status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/models/{model_id}/hot-reload",
+      "summary": "Hot reload model checkpoint"
+    }
+  ],
+  "Audit Trail": [
+    {
+      "method": "GET",
+      "path": "/api/v1/audit/logs",
+      "summary": "Query audit events (alias)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/audit-logs",
+      "summary": "Query audit events"
+    }
+  ],
+  "Degradation Reports": [
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/degradation-summary",
+      "summary": "Get tool degradation metrics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/shift-summary",
+      "summary": "Get shift performance summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/export/pdf",
+      "summary": "Export degradation report as PDF"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/export/csv",
+      "summary": "Export degradation report as CSV"
+    }
+  ],
+  "Users & RBAC Access Console": [
+    {
+      "method": "GET",
+      "path": "/api/v1/users",
+      "summary": "Get all operators and users"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users",
+      "summary": "Create a new user"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/users/{user_id}/role",
+      "summary": "Change user RBAC role"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/users/{user_id}",
+      "summary": "Delete user account"
+    }
+  ]
+}

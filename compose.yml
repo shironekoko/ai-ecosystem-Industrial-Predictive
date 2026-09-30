@@ -165,6 +165,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://myuser:mypassword@db:5432/mydatabase
       - MINIO_ENDPOINT=minio:9000
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
     depends_on:
       redis:
         condition: service_healthy
@@ -174,6 +175,7 @@ services:
         condition: service_started
     volumes:
       - ./logs:/logs
+      - ./dataset:/dataset:ro
     logging:
       driver: json-file
       options:
@@ -206,6 +208,7 @@ services:
         condition: service_started
     volumes:
       - ./logs:/logs
+      - ./dataset:/dataset:ro
     # ── GPU ──
     deploy:
       resources:
@@ -261,6 +264,10 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
 
 # -------------------------
 # ส่วนประกาศสร้าง Volumes

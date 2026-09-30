@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../../services/api';
 import { PageHeader } from '../../components/common/PageHeader';
 import { StatCard } from '../../components/common/StatCard';
 import { StatusBadge } from '../../components/common/StatusBadge';
@@ -33,8 +34,15 @@ export function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // Fleet state - Initialized empty awaiting API connection
-  const [fleet] = useState<SpindleFleetItem[]>([]);
+  const [fleet, setFleet] = useState<SpindleFleetItem[]>([]);
+
+  useEffect(() => {
+    api.getFleetSpindles().then((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setFleet(data);
+      }
+    });
+  }, []);
 
   const criticalCount = fleet.filter((f) => f.status === 'CRITICAL').length;
   const warningCount = fleet.filter((f) => f.status === 'WARNING').length;

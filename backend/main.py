@@ -163,21 +163,14 @@ from app.features.audit.router import router as audit_router
 from app.features.reports.router import router as reports_router
 from app.features.users.router import router as users_router
 
-# Direct mounts
+# ── Direct mounts for root fallback (legacy backward compatibility) ──
 app.include_router(health_router)
-app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router)
-app.include_router(auth_router, prefix="/api/v1")
 app.include_router(profile_router)
-app.include_router(profile_router, prefix="/api/v1")
 app.include_router(storage_router)
-app.include_router(storage_router, prefix="/api/v1")
 app.include_router(labeling_router)
-app.include_router(labeling_router, prefix="/api/v1")
 app.include_router(workers_router)
-app.include_router(workers_router, prefix="/api/v1")
 app.include_router(training_router)
-app.include_router(training_router, prefix="/api/v1")
 app.include_router(inference_router)
 app.include_router(fleet_router)
 app.include_router(qc_router)
@@ -188,7 +181,7 @@ app.include_router(audit_router)
 app.include_router(reports_router)
 app.include_router(users_router)
 
-# Mount all under /api/v1 for Frontend client compatibility
+# ── Primary API Specification: Mount all under /api/v1 for Frontend client compatibility ──
 api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(health_router)
 api_v1.include_router(auth_router)
@@ -207,7 +200,6 @@ api_v1.include_router(audit_router)
 api_v1.include_router(reports_router)
 api_v1.include_router(users_router)
 app.include_router(api_v1)
-app.include_router(inference_router, prefix="/api/v1")
 
 # ── Serve Frontend Web UI Demo ──
 from pathlib import Path

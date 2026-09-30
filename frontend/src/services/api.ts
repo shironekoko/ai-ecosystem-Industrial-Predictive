@@ -297,6 +297,36 @@ export class ApiService {
     }
     return await res.json();
   }
+
+  /**
+   * Fetch CNC spindle fleet status
+   */
+  public async getFleetSpindles() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/fleet/spindles`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('[API] Backend getFleetSpindles error:', err);
+    }
+    return [];
+  }
+
+  /**
+   * Fetch fleet health summary
+   */
+  public async getFleetSummary() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/fleet/summary`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('[API] Backend getFleetSummary error:', err);
+    }
+    return null;
+  }
 }
 
 export const api = ApiService.getInstance();

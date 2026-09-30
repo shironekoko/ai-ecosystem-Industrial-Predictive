@@ -21,13 +21,20 @@ MINIO_ROOT_PASSWORD = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
 
 
+import urllib3
+
 def get_minio_client() -> Minio:
-    """สร้าง MinIO client สำหรับเชื่อมต่อกับ MinIO server"""
+    """สร้าง MinIO client สำหรับเชื่อมต่อกับ MinIO server พร้อม timeout ป้องกันค้าง"""
+    http_client = urllib3.PoolManager(
+        timeout=urllib3.Timeout(connect=1.0, read=2.0),
+        retries=urllib3.Retry(total=0, connect=0, read=0)
+    )
     return Minio(
         endpoint=MINIO_ENDPOINT,
         access_key=MINIO_ROOT_USER,
         secret_key=MINIO_ROOT_PASSWORD,
         secure=MINIO_SECURE,
+        http_client=http_client,
     )
 
 

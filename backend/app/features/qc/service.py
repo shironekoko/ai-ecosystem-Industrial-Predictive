@@ -181,9 +181,14 @@ def generate_tool_processed_image(record_id: str) -> Optional[bytes]:
         return image_bytes
     return None
 
-def get_blade_qc(tool_id: int, run_index: int, blade_index: int) -> BladeQCResponse:
+def get_blade_qc(tool_id: Any, run_index: int, blade_index: int) -> BladeQCResponse:
     _load_labels()
-    record_id = f"T{tool_id}R{run_index}B{blade_index}"
+    if isinstance(tool_id, str):
+        clean_id = "".join(c for c in str(tool_id) if c.isdigit())
+        tool_id_num = int(clean_id) if clean_id else 1
+    else:
+        tool_id_num = int(tool_id)
+    record_id = f"T{tool_id_num}R{run_index}B{blade_index}"
     verified_record = _ACTIVE_LEARNING_VERIFIED.get(record_id)
 
     data = _LABELS_CACHE.get(record_id)

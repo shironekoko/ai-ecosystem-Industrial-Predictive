@@ -12,7 +12,7 @@ async def get_qc_target(tool: Optional[int] = Query(None), run: Optional[int] = 
     return service.get_qc_target(tool, run)
 
 @router.get("/tools/{tool_id}/runs/{run_index}/blades/{blade_index}", response_model=BladeQCResponse, summary="Get blade inspection results")
-async def get_blade_qc(tool_id: int, run_index: int, blade_index: int):
+async def get_blade_qc(tool_id: str, run_index: int, blade_index: int):
     """Retrieve multi-tier inspection: Tier 1 Force Alert, Tier 2 Chip AI, Tier 3 Tool Edge Metrology, and Consensus"""
     return service.get_blade_qc(tool_id, run_index, blade_index)
 

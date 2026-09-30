@@ -26,52 +26,9 @@ export function ActiveLearningPage() {
   const { isAuthenticated, user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
-  // Model Registry state - Initialized with production registered models
-  const [models, setModels] = useState<ModelRegistryItem[]>([
-    {
-      id: 'MOD-001',
-      name: 'Pure_Time_Series_CRNN_NoTool4',
-      architecture: 'Temporal Conv1D + 2-layer BiGRU + Attention',
-      modality: 'Time-Series (Planar Forces Fx, Fy, Fres + Dynamics)',
-      version: 'v2.2.0 (Tool 4 Excluded)',
-      accuracy: 87.5,
-      f1Score: 0.886,
-      valLoss: 0.118,
-      parametersCount: '308 KB (.pt)',
-      status: 'PRODUCTION',
-      lastTrainedAt: '2026-09-29T23:26:00Z',
-      datasetTrainedOn: 'Tools 1,2,3,5,6,7,8,9 (Tool 4 excluded; Tool 10 Held-out 56 cuts)',
-    },
-    {
-      id: 'MOD-002',
-      name: 'Vision-YOLOv8-FlankWear',
-      architecture: 'YOLOv8-cls (Transfer Learning)',
-      modality: 'Non-Time-Series (Tool Images)',
-      version: 'v1.4.0',
-      accuracy: 96.1,
-      f1Score: 0.958,
-      valLoss: 0.089,
-      parametersCount: '3.2M',
-      status: 'PRODUCTION',
-      lastTrainedAt: '2026-09-28T14:00:00Z',
-      datasetTrainedOn: 'Nonastreda Microscope 1550x500 (ISO 8688-2)',
-    },
-    {
-      id: 'MOD-003',
-      name: 'Pure_TimeSeries_TCN_BiGRU_Legacy',
-      architecture: 'Temporal Conv1D + BiGRU (All Tools incl. Tool 4)',
-      modality: 'Time-Series (Forces Fx, Fy, Fz)',
-      version: 'v1.0.0',
-      accuracy: 92.86,
-      f1Score: 0.912,
-      valLoss: 0.142,
-      parametersCount: '1.2M',
-      status: 'ARCHIVED',
-      lastTrainedAt: '2026-09-29T10:00:00Z',
-      datasetTrainedOn: 'Tools 1-9 incl. Tool 4 (Cross-tool RUL baseline)',
-    },
-  ]);
-  const [verifiedSamplesCount, setVerifiedSamplesCount] = useState<number>(14);
+  // Model Registry state - Initialized empty awaiting MinIO / MLflow API
+  const [models, setModels] = useState<ModelRegistryItem[]>([]);
+  const [verifiedSamplesCount, setVerifiedSamplesCount] = useState<number>(0);
 
   useEffect(() => {
     api.getRegisteredModels().then((data) => {

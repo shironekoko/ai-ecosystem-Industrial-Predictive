@@ -15,17 +15,23 @@ from core.redis_client import get_arq_redis_settings
 
 
 async def enqueue_training(
-    dataset_name: str,
-    model_name: str,
-    start_time: datetime,
+    dataset_name: str = "chip",
+    model_name: str = "yolov8_chip_wear",
+    start_time: datetime | None = None,
+    model_type: str = "yolov8-cls",
+    epochs: int = 10,
+    batch_size: int = 16,
 ) -> dict[str, Any]:
     """
-    เพิ่มงานเทรนเข้าคิว ARQ พร้อมตั้งเวลาเริ่มด้วย _defer_until
+    เพิ่มงานเทรนเข้าคิว ARQ รองรับทั้ง YOLOv8-cls (Non-Time Series Vision) และ Hugging Face
 
     Args:
-        dataset_name: ชื่อ dataset ใน MinIO (เช่น "conll2003")
-        model_name: ชื่อโมเดลที่จะ save (เช่น "bert-base-ner")
-        start_time: เวลาที่ต้องการเริ่มเทรน
+        dataset_name: ชื่อ dataset (เช่น "chip", "tool", หรือ MinIO dataset)
+        model_name: ชื่อโมเดลที่จะบันทึก (เช่น "yolov8_chip_wear")
+        start_time: เวลาที่ต้องการเริ่มเทรน (ถ้าเว้นว่างจะรันทันที)
+        model_type: "yolov8-cls" หรือ "nlp"
+        epochs: จำนวนรอบในการเทรน
+        batch_size: ขนาด batch size
 
     Returns:
         dict with job_id, status, message
@@ -33,23 +39,32 @@ async def enqueue_training(
     pool: ArqRedis = await create_pool(get_arq_redis_settings())
     try:
         kwargs: dict[str, Any] = {}
-        now = datetime.now(start_time.tzinfo) if start_time.tzinfo else datetime.now()
-        if start_time > now:
-            kwargs["_defer_until"] = start_time
+        if start_time:
+            now = datetime.now(start_time.tzinfo) if start_time.tzinfo else datetime.now()
+            if start_time > now:
+                kwargs["_defer_until"] = start_time
+
+        # ตัดสินใจเลือก Task ตามประเภทโมเดล
+        if model_type == "yolov8-cls" or "yolo" in model_name.lower():
+            task_func = "train_yolo_model"
+            task_args = (dataset_name, model_name, epochs, batch_size)
+        else:
+            task_func = "train_model"
+            task_args = (dataset_name, model_name)
 
         job = await pool.enqueue_job(
-            "train_model",
-            dataset_name,
-            model_name,
+            task_func,
+            *task_args,
             **kwargs,
         )
         if job:
+            start_str = start_time.isoformat() if start_time else "ทันที"
             return {
                 "job_id": job.job_id,
                 "status": "success",
                 "message": (
-                    f"เพิ่มงานเทรน '{model_name}' ด้วย dataset '{dataset_name}' "
-                    f"เข้าคิวเรียบร้อย (กำหนดเริ่ม: {start_time.isoformat()})"
+                    f"เพิ่มงาน Retrain '{model_name}' (type: {model_type}) "
+                    f"เข้าคิวเรียบร้อย (กำหนดเริ่ม: {start_str})"
                 ),
             }
         else:

@@ -165,12 +165,19 @@ from app.features.users.router import router as users_router
 
 # Direct mounts
 app.include_router(health_router)
+app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router)
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(profile_router)
+app.include_router(profile_router, prefix="/api/v1")
 app.include_router(storage_router)
+app.include_router(storage_router, prefix="/api/v1")
 app.include_router(labeling_router)
+app.include_router(labeling_router, prefix="/api/v1")
 app.include_router(workers_router)
+app.include_router(workers_router, prefix="/api/v1")
 app.include_router(training_router)
+app.include_router(training_router, prefix="/api/v1")
 app.include_router(inference_router)
 app.include_router(fleet_router)
 app.include_router(qc_router)
@@ -200,6 +207,7 @@ api_v1.include_router(audit_router)
 api_v1.include_router(reports_router)
 api_v1.include_router(users_router)
 app.include_router(api_v1)
+app.include_router(inference_router, prefix="/api/v1")
 
 # ── Serve Frontend Web UI Demo ──
 from pathlib import Path

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     # ── Database ──
-    database_url: str
+    database_url: str = "postgresql://myuser:mypassword@localhost:5432/mydatabase"
 
     # ── MinIO ──
     minio_endpoint: str = "localhost:9000"

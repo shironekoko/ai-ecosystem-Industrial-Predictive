@@ -33,14 +33,14 @@ Every page in the frontend is a **production-ready component shell** awaiting re
 | Page Path | Page Name | Protocol | Primary Endpoints |
 | :--- | :--- | :---: | :--- |
 | `/dashboard` | Fleet Command Center | REST | `GET /api/v1/fleet/spindles`<br>`GET /api/v1/fleet/summary` |
-| `/machine-monitoring` | Live Spindle Telemetry | **WebSocket** + REST | `WS /api/v1/telemetry/spindle/stream`<br>`POST /api/v1/telemetry/spindle/control` |
-| `/visual-qc` | Dual-AI Tool Verification | REST | `GET /api/v1/qc/target`<br>`GET /api/v1/qc/tools/{tool_id}/blades/{blade_id}`<br>`POST /api/v1/qc/verify` |
+| `/machine-monitoring` | Live Spindle Telemetry | **WebSocket** + REST | `WS /api/v1/telemetry/spindle/stream`<br>`POST /api/v1/telemetry/spindle/control`<br>`GET /api/v1/telemetry/forces` |
+| `/visual-qc` | Dual-AI Tool Verification | REST | `GET /api/v1/qc/target`<br>`GET /api/v1/qc/tools/{tool_id}/runs/{run_index}/blades/{blade_index}`<br>`POST /api/v1/qc/verify`<br>`GET /api/v1/qc/images/tool/...`<br>`GET /api/v1/qc/images/chip/...` |
 | `/notifications` | Alarms & Alerts | REST + (SSE/WS) | `GET /api/v1/alarms`<br>`PATCH /api/v1/alarms/{id}/read`<br>`POST /api/v1/alarms/mark-all-read`<br>`DELETE /api/v1/alarms/{id}` |
-| `/active-learning` | Model Registry & MLOps | REST | `GET /api/v1/models/registry`<br>`GET /api/v1/models/retraining-pool`<br>`POST /api/v1/training/queue` |
-| `/audit-log` | Audit Trail & Sign-offs | REST | `GET /api/v1/audit-logs` |
-| `/reports` | Tool Degradation Reports | REST | `GET /api/v1/reports/degradation-summary`<br>`GET /api/v1/reports/export/pdf` |
+| `/active-learning` | Model Registry & MLOps | REST + **WS** | `GET /api/v1/models/registry`<br>`GET /api/v1/models/retraining-pool/status`<br>`POST /api/v1/training/queue`<br>`WS /api/v1/training/live/{job_id}` |
+| `/audit-log` | Audit Trail & Sign-offs | REST | `GET /api/v1/audit-logs` (alias `/api/v1/audit/logs`) |
+| `/reports` | Tool Degradation Reports | REST | `GET /api/v1/reports/degradation-summary`<br>`GET /api/v1/reports/shift-summary`<br>`GET /api/v1/reports/export/pdf`<br>`GET /api/v1/reports/export/csv` |
 | `/user-management` | Users & RBAC | REST | `GET /api/v1/users`<br>`POST /api/v1/users`<br>`PATCH /api/v1/users/{id}/role`<br>`DELETE /api/v1/users/{id}` |
-| `/login` | Authentication | REST | `POST /api/v1/auth/login`<br>`POST /api/v1/auth/register`<br>`GET /api/v1/auth/me` |
+| `/login` | Authentication | REST | `POST /api/v1/auth/login`<br>`POST /api/v1/auth/register`<br>`GET /api/v1/auth/me`<br>`POST /api/v1/auth/refresh`<br>`POST /api/v1/auth/logout` |
 
 ---
 
@@ -384,6 +384,24 @@ Executive OEE and reliability reporting using Weibull distribution analysis and 
 
 ### 7.2 `GET /api/v1/reports/export/pdf`
 * **Response:** Binary PDF stream (`Content-Type: application/pdf`).
+
+### 7.3 `GET /api/v1/reports/shift-summary`
+* **Query Parameters:** `?shift=current` (Optional)
+* **Response `200 OK`:**
+  ```json
+  {
+    "shift": "current",
+    "activeTools": 4,
+    "completedCuts": 142,
+    "oeePct": 88.5,
+    "alertsTriggered": 2,
+    "averageWearUm": 74.2
+  }
+  ```
+
+### 7.4 `GET /api/v1/reports/export/csv`
+* **Query Parameters:** `?period=7D|30D|90D|All`
+* **Response:** CSV formatted stream (`Content-Type: text/csv`).
 
 ---
 

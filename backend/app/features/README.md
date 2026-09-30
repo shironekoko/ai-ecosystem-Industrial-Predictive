@@ -8,12 +8,22 @@ Feature Module คือการแบ่งโครงสร้างขอ�
 - หากลบฟีเจอร์หนึ่งทิ้งไป ฟีเจอร์อื่น ๆ จะต้องไม่ได้รับผลกระทบ (หรือกระทบน้อยที่สุด)
 
 ## รายการฟีเจอร์ (Feature Modules)
-- **`auth/`** - Authentication & Authorization (การยืนยันและตรวจสอบสิทธิ์, JWT)
-- **`profile/`** - User Profile Management (จัดการโปรไฟล์, รูปอวตาร)
-- **`storage/`** - MinIO Object Storage Integration (ระบบอัปโหลดและดาวน์โหลดไฟล์)
-- **`labeling/`** - Label Studio Integration (เชื่อมโยงโปรเจกต์การ Label ข้อมูล)
-- **`workers/`** - Background Jobs (ทำงานเบื้องหลังผ่าน ARQ/Redis)
-- **`health/`** - Health Check (ตรวจสอบสถานะการทำงานของระบบ)
+- **`health/`** - Health Check & Concurrent Component Diagnostics
+- **`auth/`** - Authentication & Session Management (JWT Access & Refresh Token)
+- **`profile/`** - User Profile & Avatar Management (MinIO Storage)
+- **`fleet/`** - CNC Spindle Fleet Monitoring & Overall Factory KPI Summary
+- **`qc/`** - 3-Tier Multi-Modal Visual QC (Force Alert, Chip AI, Tool Edge Metrology, Consensus)
+- **`telemetry/`** - High-Frequency Dynamometer Force Telemetry (WebSocket) & Safety Interlock Trip
+- **`alarms/`** - Industrial Alarms & Event Dispatching
+- **`models/`** - MLflow Model Registry, Retraining Pool Monitoring & Model Hot-Reload
+- **`training/`** - ARQ/Redis Retraining Pipeline & Live WebSocket Metrics Stream
+- **`inference/`** - Pure Time-Series CRNN Force Inference (16 Physics Dynamic Features)
+- **`audit/`** - Immutable Action Audit Trail & Verification Logs
+- **`reports/`** - Tool Degradation Weibull Analytics, Shift Summary & PDF/CSV Export
+- **`storage/`** - MinIO Object Storage Integration (Datasets, Models, Profile Images)
+- **`labeling/`** - Label Studio Integration & Active Learning
+- **`users/`** - User Directory & Role-Based Access Control (Admin / Engineer RBAC)
+- **`workers/`** - ARQ Asynchronous Background Jobs & Redis Monitoring
 
 ## โครงสร้างมาตรฐานของแต่ละฟีเจอร์
 แต่ละโฟลเดอร์ฟีเจอร์จะมีไฟล์หลักๆ ดังนี้:

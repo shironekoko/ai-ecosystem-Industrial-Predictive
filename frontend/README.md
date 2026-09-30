@@ -165,7 +165,9 @@ frontend/src/
 * **หน้าที่:** วิเคราะห์สถิติความเชื่อถือได้ (Reliability) ของหัวกัดตลอดอายุการใช้งาน วิเคราะห์การแจกแจงแบบไวบูลล์ (Weibull Distribution) และคำนวณ Mean Tool Life (MTTF)
 * **API Endpoints:**
   * `GET /api/v1/reports/degradation-summary?period={7D|30D|90D|All}`
+  * `GET /api/v1/reports/shift-summary?shift={current|morning|night}`
   * `GET /api/v1/reports/export/pdf` ➔ ส่งออกไฟล์รายงาน PDF
+  * `GET /api/v1/reports/export/csv` ➔ ส่งออกไฟล์รายงาน CSV
 
 ---
 

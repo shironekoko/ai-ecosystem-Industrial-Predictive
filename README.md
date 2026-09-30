@@ -65,16 +65,19 @@ Industrial-Predictive/
 
 | Module | Base Path | Endpoints ตัวอย่าง | รายละเอียด |
 |---|---|---|---|
-| **Auth** | `/api/v1/auth` | `POST /login`, `POST /signup`, `GET /me` | เข้าสู่ระบบและรับ JWT Bearer Token |
-| **Fleet** | `/api/v1/fleet` | `GET /machines`, `GET /machines/{id}`, `GET /machines/{id}/metrics` | ตรวจสอบสุขภาพเครื่องจักร CNC และ RUL |
-| **QC** | `/api/v1/qc` | `GET /records`, `POST /records/{id}/override`, `GET /images/{file}` | ดูผลวิเคราะห์ภาพมีดตัด, เสิร์ฟรูปจริง, และบันทึก Override |
-| **Telemetry** | `/api/v1/telemetry` | `WS /ws`, `POST /machines/{id}/trip` | สตรีมค่าแรงตัดสด และสั่ง Emergency Trip |
-| **Alarms** | `/api/v1/alarms` | `GET /`, `POST /{id}/ack`, `POST /{id}/resolve` | จัดการสัญญาณเตือนและรับทราบเหตุการณ์ |
-| **Models** | `/api/v1/models` | `GET /`, `POST /{id}/promote`, `POST /{id}/rollback` | บริหารจัดการโมเดล AI ในระบบ |
-| **Audit** | `/api/v1/audit` | `GET /logs`, `GET /logs/export` | บันทึกประวัติการกระทำและดาวน์โหลด Audit Trail |
-| **Reports** | `/api/v1/reports` | `GET /shift-summary`, `GET /export/csv` | รายงานสรุปประสิทธิภาพกะและดาวน์โหลด CSV |
-| **Users** | `/api/v1/users` | `GET /`, `POST /`, `PATCH /{id}/role` | จัดการผู้ใช้งานและมอบหมายบทบาท |
-| **Inference** | `/api/v1/inference` | `POST /predict-forces`, `POST /predict` | ส่งข้อมูลแรงตัดเข้าพยากรณ์ผล |
+| **Health** | `/api/v1/health` | `GET /`, `GET /components` | Liveness probe และตรวจสถานะ DB, Redis, MinIO, Label Studio แบบขนาน |
+| **Auth** | `/api/v1/auth` | `POST /login`, `POST /register`, `GET /me`, `POST /refresh`, `POST /logout` | เข้าสู่ระบบและจัดการ JWT Bearer Token |
+| **Fleet** | `/api/v1/fleet` | `GET /spindles`, `GET /summary` | ตรวจสอบสุขภาพเครื่องจักร CNC และ RUL แบบ Real-time |
+| **QC (Dual-AI)** | `/api/v1/qc` | `GET /target`, `GET /tools/{id}/runs/{r}/blades/{b}`, `POST /verify`, `GET /images/tool/...`, `GET /images/chip/...` | ระบบตรวจ 3-Tier (Force Alert, Chip AI, Tool Edge Metrology, Consensus) |
+| **Telemetry** | `/api/v1/telemetry` | `WS /spindle/stream`, `POST /spindle/control`, `GET /forces` | สตรีมคลื่นแรงตัดสดผ่าน WebSocket และระบบ Safety Interlock Trip |
+| **Alarms** | `/api/v1/alarms` | `GET /`, `POST /mark-all-read`, `PATCH /{id}/read`, `DELETE /{id}` | จัดการสัญญาณเตือนและรับทราบเหตุการณ์ |
+| **Models** | `/api/v1/models` | `GET /registry`, `GET /retraining-pool/status`, `POST /{id}/hot-reload` | บริหารจัดการโมเดล AI ในระบบ และดึง Metrics จาก MLflow |
+| **Training** | `/api/v1/training` | `POST /queue`, `GET /queue/{id}`, `WS /live/{id}` | คิวเทรน Fine-tune โมเดลด้วย ARQ + Redis พร้อม WebSocket สตรีมกราฟ |
+| **Inference** | `/api/v1/inference` | `POST /predict-forces`, `POST /predict`, `GET /jobs/{id}` | รัน Pure Time-Series CRNN (16 Dynamic Features) พร้อม Local Fallback |
+| **Audit** | `/api/v1/audit` | `GET /audit-logs`, `GET /audit/logs` | บันทึกประวัติการกระทำและดาวน์โหลด Audit Trail ปลอดภัย |
+| **Reports** | `/api/v1/reports` | `GET /degradation-summary`, `GET /shift-summary`, `GET /export/pdf`, `GET /export/csv` | รายงานสรุปความเชื่อถือได้ Weibull และ Export ไฟล์ PDF / CSV |
+| **Storage** | `/api/v1/storage` | `GET /buckets`, `POST /buckets/{name}/upload`, `GET /download` | จัดการ MinIO Object Storage สำหรับ Datasets, Models, Profile Images |
+| **Users** | `/api/v1/users` | `GET /`, `POST /`, `PATCH /{id}/role`, `DELETE /{id}` | จัดการผู้ใช้งานและมอบหมายบทบาท RBAC |
 
 > 📖 **ดูเอกสารข้อกำหนด API ฉบับเต็ม (Request, Response, Payload schemas):** [`API_SPECIFICATION.md`](API_SPECIFICATION.md)
 

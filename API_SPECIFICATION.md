@@ -61,6 +61,7 @@
 |---|---|---|---|---|---|
 | **WS** | `/api/v1/telemetry/spindle/stream` | สตรีมคลื่นแรงตัด 3 แกน + ผล Real-time AI Inference | **Client Command:**<br>`{"command": "PAUSE_STREAM"}` หรือ `{"command": "RESUME_STREAM"}` | **Server Stream (~10–15 Hz):**<br>`{"forces": {"fx", "fy", "fz", "fres"}, "waveformChunk": [{"fx", "fy", "fz", "fres"}], "interlockStatus": "NORMAL"\|"TRIPPED", "machineState", "inference": {"condition", "confidence", "flankWearUm", "estimatedRemainingCycles"}}`<br>*(เงื่อนไข: $F_{res} > 240\text{ N} \rightarrow$ Interlock TRIPPED อัตโนมัติ)* | Guide (Phase 1) |
 | **POST** | `/api/v1/telemetry/spindle/control` | สั่งควบคุมความปลอดภัยของ Spindle | `{"spindleId", "action": "EMERGENCY_STOP"\|"RESUME"\|"MOUNT_FRESH_TOOL"}` | `200 OK`:<br>`{"success": true, "spindleId", "action", "executedAt"}` | Guide (Phase 1) |
+| **GET** | `/api/v1/telemetry/forces` | ดึงสแนปช็อตค่าแรงตัดรอบล่าสุดของหัวกัด | Query: `tool_id: int?`, `run: int?` | `200 OK`:<br>`{"toolId", "runIndex", "dominantForceN", "fx", "fy", "fz", "fres"}` | Guide (Phase 1) |
 
 ---
 
@@ -69,11 +70,14 @@
 | Method | Endpoint | คำอธิบาย | Request Payload / Params | Response หลัก / Status Code | สถานะ / Phase |
 |---|---|---|---|---|---|
 | **GET** | `/api/v1/qc/target` | ข้อมูลหัวกัดที่กำลังรอตรวจที่โต๊ะ QC | Query: `tool?`, `run?` | `200 OK`:<br>`{"toolId", "passIndex", "teethCount", "originSpindle", "dispatchReason", "dispatchedAt"}`<br>*(หากโต๊ะว่าง คืน `{"toolId": null}`)* | Guide (Phase 1) |
-| **GET** | `/api/v1/qc/tools/{tool_id}/runs/{run_index}/blades/{blade_index}` | ผลตรวจภาพใบมีดเดี่ยว + Sensor vs Vision AI | Path: `tool_id`, `run_index`, `blade_index` | `200 OK`:<br>`{"recordId", "imageUrl", "gradCamUrl", "visionPrediction": "SHARP"\|"USED"\|"DULLED", "visionConfidence", "flankWearUm", "gapsUm", "overhangUm", "status", "sensorAiAssessment": {"condition", "confidence", "flankWearUm"}}` | Guide (Phase 1) |
-| **POST** | `/api/v1/qc/verify` | วิศวกรตรวจยืนยัน / แย้งผลโมเดล AI | `{"recordId", "toolId", "passIndex", "bladeIndex", "decision": "CONFIRMED_WEAR"\|"FALSE_ALARM", "notes", "inspectorName"}` | `200 OK`:<br>`{"status": "VERIFIED", "loggedToMinio": true, "minioObjectPath", "activeLearningPoolSize", "verifiedAt"}` | Guide (Phase 1) |
+| **GET** | `/api/v1/qc/tools/{tool_id}/runs/{run_index}/blades/{blade_index}` | ผลตรวจ 3-Tier Multi-Modal (Force Alert, Chip AI, Tool Edge Metrology, Consensus) | Path: `tool_id` (int หรือ "tool_01"), `run_index`, `blade_index` | `200 OK`:<br>`{"recordId", "imageUrl", "chipImageUrl", "toolImageUrl", "toolProcessedImageUrl", "tier1ForceAlert", "tier2ChipAi", "tier3ToolEdge", "consensus", "visionPrediction", "visionConfidence", "flankWearUm", "gapsUm", "overhangUm", "status"}` | Guide (Phase 1) |
+| **POST** | `/api/v1/qc/verify` | วิศวกรตรวจยืนยัน / แย้งผลโมเดล AI เข้า MinIO Ground Truth Pool | `{"recordId", "toolId", "passIndex", "bladeIndex", "decision": "CONFIRMED_WEAR"\|"FALSE_ALARM"\|"SEND_TO_RETRAIN", "notes", "inspectorName"}` | `200 OK`:<br>`{"status": "VERIFIED", "loggedToMinio": true, "minioObjectPath", "activeLearningPoolSize", "verifiedAt"}` | Guide (Phase 1) |
 | **POST** | `/api/v1/qc/inspection-images` | รับภาพถ่ายจากกล้องส่องมีดเข้าคิวตรวจ | `multipart/form-data`:<br>`image: File`, `toolId: int`, `passIndex: int`, `bladeIndex: int` | `202 Accepted`:<br>`{"job_id", "status": "QUEUED", "recordId", "message": "Queued for Dual-AI assessment"}` | **เพิ่ม** (Phase 1) |
-| **GET** | `/api/v1/qc/images/{record_id}.jpg` | ดึงภาพใบมีดความละเอียดสูง | Path: `record_id` | `200 OK` (Stream ไฟล์ภาพ `image/jpeg` หรือ Presigned Redirect) | Guide (Phase 1) |
-| **GET** | `/api/v1/qc/gradcam/{record_id}.jpg` | ดึงภาพ Heatmap Grad-CAM XAI | Path: `record_id` | `200 OK` (Stream ไฟล์ภาพ `image/jpeg` หรือ Presigned Redirect) | Guide (Phase 1) |
+| **GET** | `/api/v1/qc/images/chip/{record_id}.jpg` | ดึงภาพถ่ายเศษผงโลหะ (Tier 2 Chip Morphology Photo) | Path: `record_id` | `200 OK` (Stream ไฟล์ภาพ `image/jpeg`) | **เพิ่ม** (Phase 1) |
+| **GET** | `/api/v1/qc/images/tool/{record_id}.jpg` | ดึงภาพถ่ายคมตัดมีดจริง (Tier 3 Tool Flank Face Photo) | Path: `record_id` | `200 OK` (Stream ไฟล์ภาพ `image/jpeg`) | **เพิ่ม** (Phase 1) |
+| **GET** | `/api/v1/qc/images/tool-processed/{record_id}.jpg` | ดึงภาพประมวลผลขอบ OpenCV Canny Edge Metrology Overlay | Path: `record_id` | `200 OK` (Stream ไฟล์ภาพ `image/jpeg`) | **เพิ่ม** (Phase 1) |
+| **GET** | `/api/v1/qc/images/{record_id}.jpg` | ดึงภาพใบมีดความละเอียดสูง (Backward Compatibility) | Path: `record_id`, Query: `type: "tool"\|"chip"` | `200 OK` (Stream ไฟล์ภาพ `image/jpeg`) | Guide (Phase 1) |
+| **GET** | `/api/v1/qc/gradcam/{record_id}.jpg` | ดึงภาพ Heatmap Grad-CAM XAI | Path: `record_id` | `200 OK` (Stream ไฟล์ภาพ `image/jpeg`) | Guide (Phase 1) |
 
 ---
 
@@ -94,8 +98,9 @@
 |---|---|---|---|---|---|
 | **GET** | `/api/v1/models/registry` | รายการโมเดลและ Metrics จาก MLflow | – | `200 OK`:<br>`[{"id", "name", "architecture", "modality": "FORCE_TIME_SERIES"\|"OPTICAL_IMAGE", "version", "accuracy", "f1Score", "valLoss", "status": "ACTIVE"\|"STAGING"\|"ARCHIVED", "lastTrainedAt", "datasetTrainedOn"}]` | Guide (Phase 1) |
 | **GET** | `/api/v1/models/retraining-pool/status` | เช็คจำนวนข้อมูล Ground Truth ใน MinIO | – | `200 OK`:<br>`{"verifiedSamplesCount", "minSamplesThreshold": 50, "canRetrain": bool, "lastRetrainedAt"}` | Guide (Phase 1) |
-| **POST** | `/api/v1/training/queue` | สั่งคิวเทรน Fine-tune โมเดล (ARQ) | `{"modelName", "datasetName", "start_time"?}` | `202 Accepted`:<br>`{"job_id", "status": "success", "queuePosition": 1, "message": "Enqueued"}` | Guide + เดิม (Phase 1) |
+| **POST** | `/api/v1/training/queue` | สั่งคิวเทรน Fine-tune โมเดล (ARQ + Redis พร้อม Local Fallback) | `{"model_name", "dataset_name", "model_type"?, "epochs"?, "batch_size"?}` | `200 OK`:<br>`{"job_id", "status": "success", "message": "Enqueued"}` | Guide + เดิม (Phase 1) |
 | **GET** | `/api/v1/training/queue/{job_id}` | ตรวจสอบสถานะและผลการเทรน | Path: `job_id` | `200 OK`:<br>`{"job_id", "status": "pending"\|"in_progress"\|"complete"\|"failed", "result", "error"}` | เดิม (Phase 1) |
+| **WS** | `/api/v1/training/live/{job_id}` | สตรีมผล Loss และ Accuracy ระหว่างเทรนแบบ Real-time | Path: `job_id` | **Server Stream:**<br>`{"epoch", "train_loss", "val_loss", "val_acc", "progress_pct"}` | **เพิ่ม** (Phase 1) |
 | **POST** | `/api/v1/models/{id}/hot-reload` | สั่ง Worker โหลดโมเดลเวอร์ชันใหม่ทันที | `{"target_version": "latest" \| "2"}` | `200 OK`:<br>`{"status": "RELOADED", "model_id": id, "active_version", "reloadedAt"}` | **เพิ่ม** (Phase 2) |
 
 ---
@@ -105,8 +110,11 @@
 | Method | Endpoint | คำอธิบาย | Request Payload / Params | Response หลัก / Status Code | สถานะ / Phase |
 |---|---|---|---|---|---|
 | **GET** | `/api/v1/audit-logs` | ดึงประวัติกิจกรรมและ Sign-off (Immutable) | Query: `eventType?`, `search?`, `page: int = 1`, `limit: int = 50` | `200 OK`:<br>`{"items": [{"id", "timestamp", "eventType", "actor", "role", "targetResource", "summary", "status"}], "total", "page", "limit"}` | Guide (Phase 1) |
+| **GET** | `/api/v1/audit/logs` | ดึงประวัติกิจกรรมและ Sign-off (URL Alias) | Query: `eventType?`, `search?`, `page: int = 1`, `limit: int = 50` | `200 OK` (เหมือน `/audit-logs`) | **เพิ่ม** (Phase 1) |
 | **GET** | `/api/v1/reports/degradation-summary` | สถิติความเชื่อถือได้ (Weibull Reliability & MTTF) | Query: `period: "7D"\|"30D"\|"90D"\|"All"` | `200 OK`:<br>`{"meanToolLifeCuts", "overallMachineOeePct", "falseAlarmRatePct", "meanReplaceTimeMin", "weibullBeta", "weibullEtaCuts"}` | Guide (Phase 1) |
+| **GET** | `/api/v1/reports/shift-summary` | รายงานสรุปประสิทธิภาพกะและสถานะการผลิต | Query: `shift: str = "current"` | `200 OK`:<br>`{"shift", "activeTools", "completedCuts", "oeePct", "alertsTriggered", "averageWearUm"}` | **เพิ่ม** (Phase 1) |
 | **GET** | `/api/v1/reports/export/pdf` | ส่งออกรายงาน Degradation Report เป็น PDF | Query: `period: "7D"\|"30D"\|"90D"\|"All"` | `200 OK`:<br>Binary PDF Stream (`application/pdf`, Content-Disposition attachment) | Guide (Phase 1) |
+| **GET** | `/api/v1/reports/export/csv` | ส่งออกรายงานประวัติการสึกหรอเป็นไฟล์ CSV | Query: `period: "7D"\|"30D"\|"90D"\|"All"` | `200 OK`:<br>CSV Text Stream (`text/csv`, Content-Disposition attachment) | **เพิ่ม** (Phase 1) |
 
 ---
 
@@ -142,9 +150,26 @@
 
 ---
 
-## 11. Generic Inference & Job Status (`features/inference` / Testing)
+## 11. Edge AI Inference & Queue Management (`features/inference`)
 
 | Method | Endpoint | คำอธิบาย | Request Payload / Params | Response หลัก / Status Code | สถานะ / Phase |
 |---|---|---|---|---|---|
-| **POST** | `/api/v1/predict` | ทดสอบส่ง Inference งานเดี่ยว | `{"model_name", "model_version": "latest", "input_data": {...}}` | `200 OK`:<br>`{"job_id", "status": "success", "message": "Enqueued"}` | เดิม (Phase 2) |
-| **GET** | `/api/v1/inference/jobs/{job_id}` | ตรวจสอบผลลัพธ์ของ Generic Prediction Job | Path: `job_id` | `200 OK`:<br>`{"job_id", "status": "complete"\|"pending", "result": {...}, "error": null}` | เดิม (Phase 2) |
+| **POST** | `/api/v1/inference/predict-forces` | พยากรณ์สภาพมีดตัดจากแรงตัดด้วย CRNN (16 Dynamic Physics Features) | `{"fx": [float], "fy": [float], "fz": [float]}` | `200 OK`:<br>`{"toolCondition": "SHARP"\|"USED"\|"DULLED", "confidence", "flankWearEstimateUm", "rulCuts", "resultantForceN"}` | **เพิ่ม** (Phase 1) |
+| **POST** | `/api/v1/predict` | ทดสอบส่ง Inference งานเดี่ยวเข้าคิว ARQ (พร้อม Local Fallback) | `{"model_name", "model_version": "latest", "input_data": {...}}` | `200 OK`:<br>`{"job_id", "status": "success", "message": "Enqueued"}` | เดิม (Phase 1) |
+| **GET** | `/api/v1/inference/jobs/{job_id}` | ตรวจสอบสถานะและผลลัพธ์ของ Prediction Job | Path: `job_id` | `200 OK`:<br>`{"job_id", "status": "complete"\|"pending", "result": {...}, "error": null}` | เดิม (Phase 1) |
+
+---
+
+## 12. Storage & System Health (`features/storage` & `features/health`)
+
+| Method | Endpoint | คำอธิบาย | Request Payload / Params | Response หลัก / Status Code | สถานะ / Phase |
+|---|---|---|---|---|---|
+| **GET** | `/api/v1/health` | ตรวจสอบสถานะ API เบื้องต้น (Fast Liveness Probe) | – | `200 OK`:<br>`{"status": "healthy", "timestamp", "version": "1.0.0"}` | Core (Phase 1) |
+| **GET** | `/api/v1/health/components` | ตรวจสอบสถานะทุกส่วนประกอบแบบขนาน (Database, Redis, MinIO, Label Studio) | – | `200 OK`:<br>`{"status": "healthy"\|"degraded", "timestamp", "version", "components": [{"name", "status", "latency_ms", "details"}]}` | Core (Phase 1) |
+| **GET** | `/api/v1/storage/buckets` | รายการ Buckets ใน MinIO Object Storage | – | `200 OK`:<br>`{"buckets": [{"name", "creation_date"}], "total": int}` | Storage (Phase 1) |
+| **POST** | `/api/v1/storage/buckets` | สร้าง Bucket ใหม่ใน MinIO | `{"name": str}` | `200 OK`:<br>`{"message": "สร้าง Bucket สำเร็จ"}` | Storage (Phase 1) |
+| **GET** | `/api/v1/storage/buckets/{bucket_name}/objects` | รายการไฟล์ใน Bucket | Path: `bucket_name`, Query: `prefix?` | `200 OK`:<br>`{"bucket", "objects": [...], "total", "prefix"}` | Storage (Phase 1) |
+| **POST** | `/api/v1/storage/buckets/{bucket_name}/upload` | อัปโหลดไฟล์เข้า MinIO Bucket | `multipart/form-data`:<br>`file: UploadFile` | `200 OK`:<br>`{"message", "bucket", "object_name"}` | Storage (Phase 1) |
+| **GET** | `/api/v1/storage/buckets/{bucket_name}/objects/{object_name}/download` | ดาวน์โหลดไฟล์จาก MinIO | Path: `bucket_name`, `object_name` | `200 OK` (Binary Stream) | Storage (Phase 1) |
+| **GET** | `/api/v1/storage/buckets/{bucket_name}/objects/{object_name}/presigned-url` | สร้าง Presigned URL สำหรับดาวน์โหลดชั่วคราว | Path: `bucket_name`, `object_name`, Query: `expires_seconds: int = 3600` | `200 OK`:<br>`{"url", "expires_in_seconds"}` | Storage (Phase 1) |
+| **DELETE** | `/api/v1/storage/buckets/{bucket_name}/objects/{object_name}` | ลบไฟล์ออกจาก MinIO | Path: `bucket_name`, `object_name` | `200 OK`:<br>`{"message": "ลบไฟล์สำเร็จ"}` | Storage (Phase 1) |

@@ -61,9 +61,11 @@
 }
 ```
 
-## วิธีการทำงานของ Component Checks
-- **PostgreSQL**: ทำการรันคำสั่ง `SELECT 1` ผ่าน SQLAlchemy engine
-- **Redis**: เรียกใช้ฟังก์ชัน `check_redis_connection`
-- **MinIO**: เรียกใช้คำสั่ง `list_buckets()` ของ MinIO client
-- **Label Studio**: ทดลองดึงข้อมูลโปรเจคด้วย `get_projects()` ของ Label Studio SDK
-- ทั้งหมดจะมีการจับเวลาเพื่อวัด `latency_ms`
+## วิธีการทำงานของ Component Checks (Concurrent & Non-Blocking)
+- **สถาปัตยกรรมทำงานแบบขนาน**: เรียกใช้ `ThreadPoolExecutor(max_workers=4)` เพื่อรันตรวจสอบ 4 Services พร้อมกัน ช่วยลดเวลาตอบสนองรวมจาก >25 วินาที เหลือเพียง ~0.6 วินาที
+- **Fast TCP Reachability**: ก่อนจะเรียกคำสั่งหนักในแต่ละ SDK ระบบจะส่ง Socket Ping ตรวจสอบว่าพอร์ตเปิดอยู่หรือไม่ด้วย Timeout สั้น (0.3 วินาที) ทำให้หาก Service ออฟไลน์จะตอบกลับทันทีโดยไม่บล็อก
+- **Database (SQLite / PostgreSQL)**: ทำการรันคำสั่ง `SELECT 1` ผ่าน SQLAlchemy engine
+- **Redis**: ตรวจสอบ TCP Reachability ไปยัง Redis host:port
+- **MinIO**: ตรวจสอบ TCP Reachability และทดสอบเรียก `list_buckets()` พร้อม timeout ป้องกัน thread ค้าง
+- **Label Studio**: ตรวจสอบ TCP Reachability และเรียก `get_projects()` เมื่อพบ SDK
+- ทุก Service จะมีการจับเวลาเพื่อวัด `latency_ms` อย่างแม่นยำ

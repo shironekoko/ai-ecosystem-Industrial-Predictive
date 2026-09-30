@@ -29,7 +29,7 @@ def generate_telemetry_packet(t_offset: float, pass_index: int = 12) -> Dict[str
     
     fres = math.sqrt(fx * fx + fy * fy + fz * fz)
     
-    interlock_tripped = fres > 240.0
+    interlock_tripped = fres > 210.0
     interlock_status = "TRIPPED" if interlock_tripped else "NORMAL"
     machine_state = "EMERGENCY_HALTED" if interlock_tripped else _SPINDLE_STATES.get("CNC-SP-01", "ENGAGED")
     
@@ -43,7 +43,7 @@ def generate_telemetry_packet(t_offset: float, pass_index: int = 12) -> Dict[str
         chunk_fy.append(round((65.0 * wear_factor) + (22.0 * math.cos(sub_t * 50.0)), 2))
         chunk_fz.append(round((110.0 * wear_factor) + (35.0 * math.sin(sub_t * 50.0 + 0.5)), 2))
         
-    condition = "DULLED" if wear_factor >= 1.5 else ("USED" if wear_factor >= 1.2 else "SHARP")
+    condition = "DULLED" if wear_factor >= 1.5 or fres > 210.0 else ("USED" if wear_factor >= 1.2 or fres > 130.0 else "SHARP")
     flank_wear_est = round(60.0 * wear_factor, 1)
 
     return {
@@ -64,12 +64,12 @@ def generate_telemetry_packet(t_offset: float, pass_index: int = 12) -> Dict[str
         },
         "inference": {
             "condition": condition,
-            "confidence": 0.93,
+            "confidence": 0.94 if condition == "DULLED" else 0.91,
             "flankWearUm": flank_wear_est,
-            "chippingGapUm": 4.5,
-            "estimatedRemainingCycles": max(1, 14 - pass_index),
+            "chippingGapUm": 4.5 if condition != "DULLED" else 18.2,
+            "estimatedRemainingCycles": max(0, 14 - pass_index),
         },
         "interlockStatus": interlock_status,
-        "interlockReason": "Fres cutting force peak exceeded ISO safety threshold (>240 N)" if interlock_tripped else None,
+        "interlockReason": "Fres cutting force peak exceeded ISO safety threshold (>210 N)" if interlock_tripped else None,
         "machineState": machine_state,
     }

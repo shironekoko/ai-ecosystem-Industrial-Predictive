@@ -44,16 +44,23 @@ def create_user(
     db: Session,
     *,
     email: str,
-    username: str,
+    username: str | None = None,
     password: str,
     full_name: str | None = None,
+    role: str = "engineer",
+    department: str | None = "Maintenance Team",
+    title: str | None = "Reliability Engineer",
 ) -> User:
     """สร้าง user ใหม่ — hash password แล้วบันทึกลง DB"""
+    uname = username or email.split("@")[0]
     user = User(
         email=email,
-        username=username,
+        username=uname,
         hashed_password=hash_password(password),
-        full_name=full_name,
+        full_name=full_name or uname.replace(".", " ").title(),
+        role=role,
+        department=department or "Maintenance Team",
+        title=title or "Reliability Engineer",
     )
     db.add(user)
     db.commit()

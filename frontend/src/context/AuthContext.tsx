@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole } from '../types';
 import { api } from '../services/api';
 
@@ -6,18 +6,18 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   usersList: User[];
-  login: (email: string, role: UserRole, name?: string) => void;
-  register: (data: { name: string; email: string; role: UserRole; department?: string; title?: string }) => void;
+  login: (email: string, password: string) => Promise<void>;
+  register: (data: { name: string; email: string; password: string; role: UserRole; department?: string; title?: string }) => Promise<void>;
   logout: () => void;
-  updateUserRole: (userId: string, newRole: UserRole) => void;
-  deleteUser: (userId: string) => void;
-  addUser: (userData: { name: string; email: string; role: UserRole; department: string }) => void;
+  updateUserRole: (userId: string, newRole: UserRole) => Promise<void>;
+  deleteUser: (userId: string) => Promise<void>;
+  addUser: (userData: { name: string; email: string; password?: string; role: UserRole; department: string }) => Promise<void>;
+  refreshUsers: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const AUTH_STORAGE_KEY = 'pdm_auth_user';
-const USERS_STORAGE_KEY = 'pdm_users_directory';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
@@ -29,127 +29,136 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  const [usersList, setUsersList] = useState<User[]>(() => {
-    try {
-      const stored = localStorage.getItem(USERS_STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [usersList, setUsersList] = useState<User[]>([]);
 
   const isAuthenticated = !!user;
 
-  // Fetch registered users from backend and merge
-  useEffect(() => {
-    api.getUsers().then((backendUsers) => {
-      if (Array.isArray(backendUsers) && backendUsers.length > 0) {
-        setUsersList((prev) => {
-          const existingEmails = new Set(prev.map((u) => u.email.toLowerCase()));
-          const newOnes: User[] = backendUsers
-            .filter((bu: any) => !existingEmails.has(bu.email.toLowerCase()))
-            .map((bu: any) => ({
-              id: bu.id,
-              name: bu.name,
-              email: bu.email,
-              role: bu.role as UserRole,
-              title: bu.title || (bu.role === 'admin' ? 'System Administrator' : 'Maintenance Engineer'),
-              department: bu.department || 'Maintenance Team',
-            }));
-          return [...prev, ...newOnes];
-        });
+  // Refresh users directory from PostgreSQL backend
+  const refreshUsers = useCallback(async () => {
+    try {
+      const backendUsers = await api.getUsers();
+      if (Array.isArray(backendUsers)) {
+        const mapped: User[] = backendUsers.map((bu: any) => ({
+          id: String(bu.id),
+          name: bu.name || bu.email.split('@')[0],
+          email: bu.email,
+          role: (bu.role as UserRole) || 'engineer',
+          title: bu.title || (bu.role === 'admin' ? 'System Administrator' : 'Maintenance Engineer'),
+          department: bu.department || 'Maintenance Team',
+        }));
+        setUsersList(mapped);
       }
-    });
+    } catch (err) {
+      console.warn('[AuthContext] Failed to load users from backend:', err);
+    }
   }, []);
 
-  // Sync usersList to localStorage
+  // Fetch users on mount and verify session
   useEffect(() => {
-    try {
-      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(usersList));
-    } catch (e) {
-      console.error('Failed to save users directory', e);
+    refreshUsers();
+
+    // Verify token validity with backend
+    const token = localStorage.getItem('pdm_access_token');
+    if (token) {
+      api.getMe(token).then((me) => {
+        if (me && me.email) {
+          const verifiedUser: User = {
+            id: String(me.id),
+            name: me.name || me.full_name || me.email.split('@')[0],
+            email: me.email,
+            role: (me.role as UserRole) || 'engineer',
+            title: me.title || (me.role === 'admin' ? 'System Administrator' : 'Maintenance Engineer'),
+            department: me.department || 'Maintenance Team',
+          };
+          setUser(verifiedUser);
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(verifiedUser));
+        } else {
+          setUser(null);
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          localStorage.removeItem('pdm_access_token');
+          localStorage.removeItem('pdm_refresh_token');
+        }
+      }).catch(() => {
+        // If token expired/invalid, clear session
+        console.warn('[AuthContext] Token validation failed');
+        setUser(null);
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        localStorage.removeItem('pdm_access_token');
+        localStorage.removeItem('pdm_refresh_token');
+      });
     }
-  }, [usersList]);
+  }, [refreshUsers]);
 
-  const login = (email: string, role: UserRole, name?: string) => {
-    // Check if user already exists in directory
-    const existing = usersList.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    const finalRole = existing ? existing.role : role;
-    const finalName = existing ? existing.name : (name || email.split('@')[0] || 'User');
-
+  const login = async (email: string, password: string) => {
+    // Authenticate with real PostgreSQL backend API
+    const authData = await api.login(email, password);
     const authenticatedUser: User = {
-      id: existing ? existing.id : 'USR-' + Math.random().toString(36).substring(2, 7).toUpperCase(),
-      name: finalName,
-      email,
-      role: finalRole,
-      title: finalRole === 'admin' ? 'System Administrator' : 'Maintenance Engineer',
-      department: existing ? existing.department : (finalRole === 'admin' ? 'Operations & Security' : 'Predictive Maintenance Lab'),
+      id: String(authData.user.id),
+      name: authData.user.name || authData.user.full_name || email.split('@')[0],
+      email: authData.user.email,
+      role: (authData.user.role as UserRole) || 'engineer',
+      title: authData.user.title || (authData.user.role === 'admin' ? 'System Administrator' : 'Maintenance Engineer'),
+      department: authData.user.department || (authData.user.role === 'admin' ? 'Operations & Security' : 'Predictive Maintenance Lab'),
     };
 
     setUser(authenticatedUser);
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authenticatedUser));
-
-    // Ensure user is in directory
-    if (!existing) {
-      setUsersList((prev) => [...prev, authenticatedUser]);
+    if (authData.access_token) {
+      localStorage.setItem('pdm_access_token', authData.access_token);
     }
+    if (authData.refresh_token) {
+      localStorage.setItem('pdm_refresh_token', authData.refresh_token);
+    }
+
+    await refreshUsers();
   };
 
-  const register = (data: { name: string; email: string; role: UserRole; department?: string; title?: string }) => {
-    const newUser: User = {
-      id: 'USR-' + Math.random().toString(36).substring(2, 7).toUpperCase(),
+  const register = async (data: { name: string; email: string; password: string; role: UserRole; department?: string; title?: string }) => {
+    // Register account in PostgreSQL
+    await api.register({
       name: data.name,
       email: data.email,
+      password: data.password,
       role: data.role,
-      title: data.title || (data.role === 'admin' ? 'System Administrator' : 'Maintenance Engineer'),
       department: data.department || (data.role === 'admin' ? 'Operations & Security' : 'Maintenance Department'),
-    };
-
-    setUser(newUser);
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newUser));
-
-    setUsersList((prev) => {
-      const filtered = prev.filter((u) => u.email.toLowerCase() !== data.email.toLowerCase());
-      return [...filtered, newUser];
+      title: data.title || (data.role === 'admin' ? 'System Administrator' : 'Maintenance Engineer'),
     });
+
+    // Automatically login with new credentials
+    await login(data.email, data.password);
   };
 
   const logout = () => {
     setUser(null);
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem('pdm_access_token');
+    localStorage.removeItem('pdm_refresh_token');
   };
 
-  // Admin action: Change role of any user
-  const updateUserRole = (userId: string, newRole: UserRole) => {
+  // Admin action: Change role of any user via backend API
+  const updateUserRole = async (userId: string, newRole: UserRole) => {
     if (user?.role !== 'admin') {
       alert('Access Denied: Only administrators can modify user roles.');
       return;
     }
 
-    api.updateUserRole(userId, newRole);
+    await api.updateUserRole(userId, newRole);
 
-    setUsersList((prev) =>
-      prev.map((u) => {
-        if (u.id === userId) {
-          const updated: User = {
-            ...u,
-            role: newRole,
-            title: newRole === 'admin' ? 'System Administrator' : 'Maintenance Engineer',
-          };
-          // If editing self, update active session too
-          if (user?.id === userId) {
-            setUser(updated);
-            localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
-          }
-          return updated;
-        }
-        return u;
-      })
-    );
+    if (user?.id === userId) {
+      const updatedUser: User = {
+        ...user,
+        role: newRole,
+        title: newRole === 'admin' ? 'System Administrator' : 'Maintenance Engineer',
+      };
+      setUser(updatedUser);
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
+    }
+
+    await refreshUsers();
   };
 
-  // Admin action: Delete user
-  const deleteUser = (userId: string) => {
+  // Admin action: Delete user via backend API
+  const deleteUser = async (userId: string) => {
     if (user?.role !== 'admin') {
       alert('Access Denied: Only administrators can delete users.');
       return;
@@ -160,29 +169,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    api.deleteUser(userId);
-    setUsersList((prev) => prev.filter((u) => u.id !== userId));
+    await api.deleteUser(userId);
+    await refreshUsers();
   };
 
-  // Admin action: Add user
-  const addUser = (userData: { name: string; email: string; role: UserRole; department: string }) => {
+  // Admin action: Add user via backend API
+  const addUser = async (userData: { name: string; email: string; password?: string; role: UserRole; department: string }) => {
     if (user?.role !== 'admin') {
       alert('Access Denied: Only administrators can create users.');
       return;
     }
 
-    api.createUser(userData);
-
-    const newUser: User = {
-      id: 'USR-' + Math.random().toString(36).substring(2, 7).toUpperCase(),
+    await api.createUser({
       name: userData.name,
       email: userData.email,
       role: userData.role,
-      title: userData.role === 'admin' ? 'System Administrator' : 'Maintenance Engineer',
       department: userData.department,
-    };
+      title: userData.role === 'admin' ? 'System Administrator' : 'Maintenance Engineer',
+      password: userData.password || 'default123',
+    });
 
-    setUsersList((prev) => [...prev, newUser]);
+    await refreshUsers();
   };
 
   return (
@@ -197,6 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateUserRole,
         deleteUser,
         addUser,
+        refreshUsers,
       }}
     >
       {children}

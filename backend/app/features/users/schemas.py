@@ -13,7 +13,7 @@ class UserItem(BaseModel):
 class CreateUserRequest(BaseModel):
     name: str
     email: str
-    password: str
+    password: Optional[str] = "default123"
     role: Literal["admin", "engineer", "inspector"] = "engineer"
     department: Optional[str] = "Maintenance"
     title: Optional[str] = "Maintenance Engineer"

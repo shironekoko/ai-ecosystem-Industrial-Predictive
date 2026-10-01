@@ -25,12 +25,40 @@ export function VisualQcPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // Read dispatched tool parameters from URL query params (defaults to Tool 10, Run 12)
+  // Read dispatched tool parameters from URL query params
   const searchParams = new URLSearchParams(location.search);
   const toolParam = searchParams.get('tool');
   const runParam = searchParams.get('run');
   const toolId = toolParam ? Number(toolParam) : 10;
-  const passIndex = runParam ? Number(runParam) : 12;
+
+  const [activePassIndex, setActivePassIndex] = useState<number>(() => {
+    return runParam ? Number(runParam) : 11;
+  });
+  const [machineStatus, setMachineStatus] = useState<{
+    status: string;
+    isStopped: boolean;
+    currentRun: number;
+    stoppedRun?: number;
+    stopReason?: string;
+  } | null>(null);
+
+  // Sync with machine status if no explicit run parameter is in URL
+  useEffect(() => {
+    api.getMachineStatus().then((ms) => {
+      if (ms) {
+        setMachineStatus(ms);
+        if (!runParam) {
+          if (ms.isStopped && ms.stoppedRun) {
+            setActivePassIndex(ms.stoppedRun);
+          } else if (ms.currentRun) {
+            setActivePassIndex(ms.currentRun);
+          }
+        }
+      }
+    });
+  }, [runParam]);
+
+  const passIndex = activePassIndex;
 
   const [selectedBlade, setSelectedBlade] = useState<number>(1);
   const [activeModality, setActiveModality] = useState<ViewportModality>('TOOL_EDGE_PROCESSED');
@@ -136,9 +164,9 @@ export function VisualQcPage() {
   const recordId = `T${toolId}R${passIndex}B${selectedBlade}`;
 
   // Image Processing Ground Truth Values
-  const flankWear = qcData?.tier3ToolEdge.flankWearUm ?? 135.2;
-  const gaps = qcData?.tier3ToolEdge.gapsUm ?? 18.4;
-  const overhang = qcData?.tier3ToolEdge.overhangUm ?? 14.1;
+  const flankWear = qcData?.tier3ToolEdge.flankWearUm ?? 0;
+  const gaps = qcData?.tier3ToolEdge.gapsUm ?? 0;
+  const overhang = qcData?.tier3ToolEdge.overhangUm ?? 0;
   const isBrokenOrWorn = flankWear >= 130.0 || gaps > 15.0;
 
   // Active Retraining Queue State
@@ -279,32 +307,62 @@ export function VisualQcPage() {
         </div>
       )}
 
-      {/* Two-Factor Alert Context Banner from In-Process Monitoring */}
-      <div className="p-4 bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-xl shadow-sm border border-slate-800 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-lg bg-indigo-500/20 border border-indigo-400/30 text-indigo-300">
-            <Activity className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold">
-                In-Process 2-Factor Alert Triggered
-              </span>
-              <span className="text-xs text-slate-300 font-mono">
-                Tool #{toolId} · Machining Pass #{passIndex}
-              </span>
+      {/* Dynamic Bench State Banner */}
+      {machineStatus?.isStopped ? (
+        <div className="p-4 bg-gradient-to-r from-slate-900 to-rose-950 text-white rounded-xl shadow-sm border border-rose-900/60 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300">
+              <Activity className="w-5 h-5 animate-pulse" />
             </div>
-            <p className="text-xs text-slate-200 mt-1">
-              หัวมีดถูกถอดออกมาตรวจสอบที่แท่นส่องกล้อง หลังจากระบบ 2-Factor ที่หน้า Telemetry (Time-Series Force AI + Non-Time Chip Model) แจ้งเตือนความสึกหรอ
-            </p>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/30 border border-rose-500/50 text-rose-200 font-bold">
+                  🛑 Safety Interlock Triggered · Spindle Stopped
+                </span>
+                <span className="text-xs text-slate-300 font-mono">
+                  Tool #{toolId} · Milling Pass #{passIndex}
+                </span>
+              </div>
+              <p className="text-xs text-slate-200 mt-1">
+                สปินเดิลตัดการทำงานฉุกเฉิน: โมเดลตรวจพบมีดสึกหรอวิกฤต (DULLED) ที่รอบตัด Pass #{passIndex} จึงสั่งหยุดเครื่องและถอดหัวมีดมาตรวจสอบที่แท่นส่องกล้อง
+              </p>
+            </div>
+          </div>
+          <div className="text-right font-mono text-xs text-slate-400">
+            <span>Station: </span>
+            <strong className="text-white">Bench #1 (Keyence VHX Optical Fixture)</strong>
           </div>
         </div>
-
-        <div className="text-right font-mono text-xs text-slate-400">
-          <span>Station: </span>
-          <strong className="text-white">Bench #1 (Keyence VHX Optical Fixture)</strong>
+      ) : (
+        <div className="p-4 bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-xl shadow-sm border border-slate-800 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-lg bg-indigo-500/20 border border-indigo-400/30 text-indigo-300">
+              <Activity className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold">
+                  🟢 Bench Standby — ยังไม่มีหัวมีดถูกถอดมาตรวจ
+                </span>
+              </div>
+              <p className="text-xs text-slate-200 mt-1">
+                เมื่อระบบ Safety Interlock ตรวจพบ DULLED มีดจะถูกส่งมาตรวจที่แท่นนี้อัตโนมัติ
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                (ดูข้อมูลย้อนหลัง: สามารถเลือก Pass ที่ผ่านมาแล้วจากเมนูด้านล่างเพื่อดูประวัติได้)
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <button
+              onClick={() => navigate('/machine-monitoring')}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition"
+            >
+              เปิดดูสตรีมที่ Machine Monitoring
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Dismounted Tool Flute Selector Ribbon */}
       <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-xs flex flex-wrap items-center justify-between gap-4">
@@ -322,47 +380,74 @@ export function VisualQcPage() {
           </div>
         </div>
 
-        {/* 4-Flute Blade Selector */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-            Select Flute/Blade:
-          </span>
-          <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-lg">
-            {[1, 2, 3, 4].map((blade) => {
-              const isSelected = selectedBlade === blade;
-              const isConfirmed = verifiedBlades[blade]?.status === 'CONFIRMED_WEAR';
-              const isRetrain = verifiedBlades[blade]?.status === 'RETRAIN_FLAGGED';
+        <div className="flex flex-wrap items-center gap-4">
+          {/* Pass Selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+              Milling Pass:
+            </span>
+            <select
+              value={passIndex}
+              onChange={(e) => setActivePassIndex(Number(e.target.value))}
+              className="px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-mono font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            >
+              {Array.from({ length: 14 }, (_, i) => i + 1).map((p) => (
+                <option key={p} value={p}>
+                  Pass #{p} {p >= 11 ? '(Dulled Stage)' : p >= 7 ? '(Used Stage)' : '(Sharp Stage)'}
+                </option>
+              ))}
+            </select>
+          </div>
 
-              return (
-                <button
-                  key={blade}
-                  onClick={() => setSelectedBlade(blade)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition ${
-                    isSelected
-                      ? 'bg-white text-gray-900 shadow-xs'
-                      : 'text-gray-500 hover:text-gray-800'
-                  }`}
-                >
-                  <span>Blade #{blade}</span>
-                  {isConfirmed ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  ) : isRetrain ? (
-                    <Database className="w-3.5 h-3.5 text-amber-600" />
-                  ) : (
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                  )}
-                </button>
-              );
-            })}
+          {/* 4-Flute Blade Selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+              Blade:
+            </span>
+            <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-lg">
+              {[1, 2, 3, 4].map((blade) => {
+                const isSelected = selectedBlade === blade;
+                const isConfirmed = verifiedBlades[blade]?.status === 'CONFIRMED_WEAR';
+                const isRetrain = verifiedBlades[blade]?.status === 'RETRAIN_FLAGGED';
+
+                return (
+                  <button
+                    key={blade}
+                    onClick={() => setSelectedBlade(blade)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition ${
+                      isSelected
+                        ? 'bg-white text-gray-900 shadow-xs'
+                        : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    <span>Blade #{blade}</span>
+                    {isConfirmed ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : isRetrain ? (
+                      <Database className="w-3.5 h-3.5 text-amber-600" />
+                    ) : (
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Main Grid: Microscope Viewport + Image Processing Vb Metrology & Consensus Sign-Off */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Left Column: Physical Tool Flank Microscope Viewport */}
-        <div className="col-span-12 lg:col-span-7">
-          <OpticalScanViewport
+      {/* Main Grid: Microscope Viewport + Optical Vb Metrology & Consensus Sign-Off */}
+      {(!machineStatus?.isStopped && passIndex >= (machineStatus?.currentRun || 1)) ? (
+        <div className="flex flex-col items-center justify-center p-12 bg-white rounded-xl border border-gray-200 border-dashed text-gray-400">
+          <ScanEye className="w-12 h-12 mb-3 text-gray-300" />
+          <h3 className="text-lg font-bold text-gray-500">Standby Mode</h3>
+          <p className="text-sm">ไม่มีข้อมูลการตรวจสอบคมมีดสำหรับ Pass ปัจจุบัน (เครื่องยังทำงานอยู่)</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-12 gap-6">
+          {/* Left Column: Physical Tool Flank Microscope Viewport */}
+          <div className="col-span-12 lg:col-span-7">
+            <OpticalScanViewport
             recordId={recordId}
             toolImageUrl={qcData?.toolImageUrl}
             toolProcessedImageUrl={qcData?.toolProcessedImageUrl}
@@ -371,19 +456,24 @@ export function VisualQcPage() {
           />
         </div>
 
-        {/* Right Column: Image Processing Ground Truth Metrology & Sign-Off Hub */}
+        {/* Right Column: Optical Metrology & Sign-Off Hub */}
         <div className="col-span-12 lg:col-span-5 space-y-5">
-          {/* Card 1: Image Processing Edge Metrology (หาค่า Vb และรอยบิ่นจริง) */}
+          {/* Card 1: Optical Edge Metrology (ISO 8688-2) */}
           <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <span className="font-bold text-xs uppercase tracking-wider text-purple-700 flex items-center gap-1.5">
                 <Layers className="w-4 h-4 text-purple-600" />
-                <span>Image Processing Ground Truth (หาค่า Vb)</span>
+                <span>Optical Wear Metrology (การวัดขนาดคมมีด Vb จากภาพกำลังขยาย)</span>
               </span>
               <span className="text-[10px] font-mono bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded font-bold">
-                ISO 8688 Metrology
+                ISO 8688-2 Measurement
               </span>
             </div>
+
+            {/* Explanation Note for Operators */}
+            <p className="text-[11px] text-gray-500 leading-relaxed bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+              🔬 ระบบประมวลผลภาพ (OpenCV Contour Analysis) ตรวจวัดระยะความกว้างของรอยสึกหรอด้านข้าง (Flank Wear Land) จากภาพถ่ายกล้องจุลทรรศน์จริง เพื่อเป็นข้อมูลมาตรวิทยาช่วยวิศวกรยืนยันสภาพมีดจริงก่อนกด Sign-Off
+            </p>
 
             {/* Flank Wear Land Vb Gauge */}
             <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-100 space-y-2">
@@ -436,7 +526,7 @@ export function VisualQcPage() {
                     gaps > 15 ? 'text-rose-600' : 'text-emerald-600'
                   }`}
                 >
-                  {gaps} µm {gaps > 15 ? '(บิ่นจริง)' : '(ขอบเรียบ)'}
+                  {gaps} µm {gaps > 15 ? '(ตรวจพบรอยบิ่น)' : '(ขอบคมต่อเนื่อง)'}
                 </span>
               </div>
               <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-100">
@@ -478,8 +568,12 @@ export function VisualQcPage() {
                 <Sparkles className="w-4 h-4 text-rose-400" />
                 <span className="text-slate-300">YOLOv8 Vision Prediction:</span>
               </div>
-              <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40">
-                DULLED (94.2% Conf)
+              <span className={`px-2 py-0.5 rounded font-bold border ${
+                qcData?.tier2ChipAi.condition === 'DULLED' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' :
+                qcData?.tier2ChipAi.condition === 'USED' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
+                'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+              }`}>
+                {qcData?.tier2ChipAi.condition ?? 'N/A'} ({( (qcData?.tier2ChipAi.confidence ?? 0) * 100 ).toFixed(1)}% Conf)
               </span>
             </div>
 
@@ -535,20 +629,20 @@ export function VisualQcPage() {
                 คำตัดสินของวิศวกรผู้เชี่ยวชาญ (Human-in-the-Loop Sign-off):
               </span>
 
-              {/* Option A: Confirmed Wear */}
+              {/* Option A: Confirm */}
               <button
                 disabled={isSubmitting}
-                onClick={() => handleHumanSignOff('DULLED')}
+                onClick={() => handleHumanSignOff(qcData?.tier2ChipAi.condition as any)}
                 className="w-full p-2.5 rounded-xl border border-gray-200 hover:border-emerald-400 bg-white hover:bg-emerald-50/50 text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
               >
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 group-hover:scale-110 transition" />
                   <div>
                     <span className="text-xs font-bold text-gray-900 block">
-                      มีดพังจริง (DULLED) · อนุมัติเปลี่ยนหัวมีด
+                      โมเดลทำนาย {qcData?.tier2ChipAi.condition} — ฉันเห็นด้วย (ยืนยัน)
                     </span>
                     <span className="text-[10px] text-gray-500 font-mono">
-                      โมเดลทำนายถูกต้อง (Vb ≥ 130 µm) ไม่ต้องส่ง Retrain
+                      ไม่ต้องส่ง Retrain
                     </span>
                   </div>
                 </div>
@@ -557,20 +651,20 @@ export function VisualQcPage() {
                 </span>
               </button>
 
-              {/* Option B: Discrepancy -> Real is SHARP (Triggers YOLOv8 Retrain) */}
+              {/* Option B: Discrepancy 1 (Triggers YOLOv8 Retrain) */}
               <button
                 disabled={isSubmitting}
-                onClick={() => handleHumanSignOff('SHARP')}
+                onClick={() => handleHumanSignOff(qcData?.tier2ChipAi.condition === 'SHARP' ? 'USED' : 'SHARP')}
                 className="w-full p-2.5 rounded-xl border border-amber-200 hover:border-amber-400 bg-amber-50/50 hover:bg-amber-100/60 text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
               >
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-amber-600 group-hover:scale-110 transition" />
                   <div>
                     <span className="text-xs font-bold text-amber-950 block">
-                      โมเดลบอก DULLED แต่มีดจริงยังเป็น [ SHARP ]
+                      โมเดลบอก {qcData?.tier2ChipAi.condition} แต่มีดจริงเป็น [ {qcData?.tier2ChipAi.condition === 'SHARP' ? 'USED' : 'SHARP'} ]
                     </span>
                     <span className="text-[10px] text-amber-700 font-mono">
-                      ⚡ ดึงภาพ chip/{recordId}.jpg คู่กับคำตอบ [ SHARP ] สั่ง Retrain ทันที!
+                      ⚡ ดึงภาพ chip/{recordId}.jpg คู่กับคำตอบ [ {qcData?.tier2ChipAi.condition === 'SHARP' ? 'USED' : 'SHARP'} ] สั่ง Retrain ทันที!
                     </span>
                   </div>
                 </div>
@@ -579,20 +673,20 @@ export function VisualQcPage() {
                 </span>
               </button>
 
-              {/* Option C: Discrepancy -> Real is USED (Triggers YOLOv8 Retrain) */}
+              {/* Option C: Discrepancy 2 (Triggers YOLOv8 Retrain) */}
               <button
                 disabled={isSubmitting}
-                onClick={() => handleHumanSignOff('USED')}
+                onClick={() => handleHumanSignOff(qcData?.tier2ChipAi.condition === 'DULLED' ? 'USED' : 'DULLED')}
                 className="w-full p-2.5 rounded-xl border border-indigo-200 hover:border-indigo-400 bg-indigo-50/50 hover:bg-indigo-100/60 text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
               >
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-indigo-600 group-hover:scale-110 transition" />
                   <div>
                     <span className="text-xs font-bold text-indigo-950 block">
-                      โมเดลบอก DULLED แต่มีดจริงยังเป็น [ USED ]
+                      โมเดลบอก {qcData?.tier2ChipAi.condition} แต่มีดจริงเป็น [ {qcData?.tier2ChipAi.condition === 'DULLED' ? 'USED' : 'DULLED'} ]
                     </span>
                     <span className="text-[10px] text-indigo-700 font-mono">
-                      ⚡ ดึงภาพ chip/{recordId}.jpg คู่กับคำตอบ [ USED ] สั่ง Retrain ทันที!
+                      ⚡ ดึงภาพ chip/{recordId}.jpg คู่กับคำตอบ [ {qcData?.tier2ChipAi.condition === 'DULLED' ? 'USED' : 'DULLED'} ] สั่ง Retrain ทันที!
                     </span>
                   </div>
                 </div>
@@ -622,6 +716,7 @@ export function VisualQcPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

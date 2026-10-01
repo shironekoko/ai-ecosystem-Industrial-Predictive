@@ -35,6 +35,11 @@ class User(Base):
         String(500), nullable=True, comment="MinIO object name for avatar"
     )
 
+    # ── Role & Department (RBAC) ──
+    role: Mapped[str] = mapped_column(String(50), default="engineer", nullable=False)
+    department: Mapped[str | None] = mapped_column(String(100), default="Maintenance Team", nullable=True)
+    title: Mapped[str | None] = mapped_column(String(100), default="Reliability Engineer", nullable=True)
+
     # ── Account status ──
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

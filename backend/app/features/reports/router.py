@@ -1,6 +1,9 @@
 from fastapi import APIRouter, Query, Response
 from .schemas import DegradationSummaryResponse
 from . import service
+from core.database import SessionLocal
+from app.features.audit.models import AuditLog
+from app.features.fleet.service import get_fleet_spindles
 
 router = APIRouter(prefix="/reports", tags=["Degradation Reports"])
 
@@ -12,36 +15,54 @@ async def get_degradation_summary(period: str = Query("30D", description="Time p
 @router.get("/shift-summary", summary="Get shift performance summary")
 async def get_shift_summary(shift: str = Query("current", description="Shift identifier")):
     """Get shift performance summary and OEE metrics"""
-    return {
-        "shift": shift,
-        "activeTools": 4,
-        "completedCuts": 142,
-        "oeePct": 88.5,
-        "alertsTriggered": 2,
-        "averageWearUm": 74.2,
-    }
+    db = SessionLocal()
+    try:
+        spindles = get_fleet_spindles()
+        active_tools = len(spindles)
+        
+        alerts_triggered = db.query(AuditLog).filter(
+            AuditLog.event_type == "WEAR_CONFIRMED"
+        ).count()
+        
+        wear_vals = [s.flankWearUm for s in spindles if s.flankWearUm]
+        avg_wear = sum(wear_vals)/len(wear_vals) if wear_vals else 0.0
+        
+        return {
+            "shift": shift,
+            "activeTools": active_tools,
+            "completedCuts": sum(s.currentRun for s in spindles),
+            "oeePct": 88.5 if active_tools > 0 else 0.0,
+            "alertsTriggered": alerts_triggered,
+            "averageWearUm": avg_wear,
+        }
+    finally:
+        db.close()
 
 @router.get("/export/pdf", summary="Export degradation report as PDF")
 async def export_pdf(period: str = Query("30D")):
     """Generate and download degradation summary report PDF"""
-    dummy_pdf = b"%PDF-1.4 ... Nonastreda Industrial Predictive Maintenance Report ..."
+    content = f"Nonastreda Industrial Predictive Maintenance Report\nGenerated for period: {period}\n"
     return Response(
-        content=dummy_pdf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=pdm_report_{period}.pdf"},
+        content=content.encode("utf-8"),
+        media_type="text/plain",
+        headers={"Content-Disposition": f"attachment; filename=pdm_report_{period}.txt"},
     )
 
 @router.get("/export/csv", summary="Export degradation report as CSV")
 async def export_csv(period: str = Query("30D")):
     """Generate and download degradation summary report CSV"""
-    csv_content = (
-        "Timestamp,Tool_ID,Pass_Index,Flank_Wear_Um,Condition,Status\n"
-        "2026-09-30T10:00:00Z,1,1,34.0,SHARP,NORMAL\n"
-        "2026-09-30T12:00:00Z,1,6,88.4,USED,WARNING\n"
-        "2026-09-30T14:00:00Z,1,12,135.2,DULLED,ALERT\n"
-    )
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=pdm_report_{period}.csv"},
-    )
+    db = SessionLocal()
+    try:
+        logs = db.query(AuditLog).all()
+        csv_lines = ["Timestamp,ID,Event_Type,Target,Status"]
+        for log in logs:
+            csv_lines.append(f"{log.created_at},{log.id},{log.event_type},{log.target_resource},{log.status}")
+        csv_content = "\n".join(csv_lines) + "\n"
+        
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=pdm_report_{period}.csv"},
+        )
+    finally:
+        db.close()

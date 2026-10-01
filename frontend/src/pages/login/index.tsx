@@ -2,18 +2,18 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { UserRole } from '../../types';
-import { Cpu, Shield, User, Lock, Mail, Building2, UserPlus, LogIn, ArrowRight } from 'lucide-react';
+import { Cpu, Shield, User, Lock, Mail, Building2, UserPlus, LogIn, ArrowRight, Loader2, KeyRound } from 'lucide-react';
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login, register, isAuthenticated, user, logout } = useAuth();
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [loading, setLoading] = useState(false);
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  const [loginRole, setLoginRole] = useState<UserRole>('engineer');
 
   // Register form state
   const [regName, setRegName] = useState('');
@@ -24,35 +24,58 @@ export function LoginPage() {
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     if (!loginEmail || !loginPassword) {
-      setErrorMsg('Please enter both email and password.');
+      setErrorMsg('กรุณากรอกทั้งอีเมลและรหัสผ่าน (Please enter email and password)');
       return;
     }
-    login(loginEmail, loginRole);
-    navigate('/dashboard');
+
+    setLoading(true);
+    try {
+      await login(loginEmail, loginPassword);
+      navigate('/dashboard');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'อีเมลหรือรหัสผ่านไม่ถูกต้อง (Invalid credentials)');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     if (!regName || !regEmail || !regPassword) {
-      setErrorMsg('Please fill in all required fields.');
+      setErrorMsg('กรุณากรอกข้อมูลให้ครบถ้วน (Please fill in all required fields)');
       return;
     }
     if (regPassword !== regConfirmPassword) {
-      setErrorMsg('Passwords do not match. Please try again.');
+      setErrorMsg('รหัสผ่านยืนยันไม่ตรงกัน (Passwords do not match)');
       return;
     }
-    register({
-      name: regName,
-      email: regEmail,
-      role: regRole,
-      department: regDepartment || (regRole === 'admin' ? 'Operations' : 'Maintenance Team'),
-    });
-    navigate('/dashboard');
+
+    setLoading(true);
+    try {
+      await register({
+        name: regName,
+        email: regEmail,
+        password: regPassword,
+        role: regRole,
+        department: regDepartment || (regRole === 'admin' ? 'Operations & Security' : 'Maintenance Team'),
+      });
+      navigate('/dashboard');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'ไม่สามารถลงทะเบียนได้ (Registration failed)');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fillQuickAccount = (email: string, pass: string) => {
+    setLoginEmail(email);
+    setLoginPassword(pass);
+    setErrorMsg('');
   };
 
   return (
@@ -117,7 +140,7 @@ export function LoginPage() {
             <div className="mb-5 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center justify-between">
               <div>
                 <p className="font-semibold">Currently signed in as {user?.name}</p>
-                <p className="text-[11px] text-emerald-600">{user?.email} · {user?.title}</p>
+                <p className="text-[11px] text-emerald-600">{user?.email} · {user?.title} ({user?.role})</p>
               </div>
               <button
                 onClick={logout}
@@ -132,38 +155,6 @@ export function LoginPage() {
             /* Login Form */
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                  Select Role
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setLoginRole('engineer')}
-                    className={`py-2 px-3 text-xs font-medium rounded-lg border text-center flex items-center justify-center gap-1.5 transition ${
-                      loginRole === 'engineer'
-                        ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-sm'
-                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    <User className="w-3.5 h-3.5" />
-                    Engineer
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLoginRole('admin')}
-                    className={`py-2 px-3 text-xs font-medium rounded-lg border text-center flex items-center justify-center gap-1.5 transition ${
-                      loginRole === 'admin'
-                        ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-sm'
-                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    <Shield className="w-3.5 h-3.5" />
-                    Admin
-                  </button>
-                </div>
-              </div>
-
-              <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Email Address
                 </label>
@@ -172,7 +163,7 @@ export function LoginPage() {
                   <input
                     type="email"
                     required
-                    placeholder="engineer@plant.corp"
+                    placeholder="e.g. admin@machinery.internal"
                     className="pl-9 pr-3 py-2 w-full border border-gray-300 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
@@ -197,14 +188,58 @@ export function LoginPage() {
                 </div>
               </div>
 
+              {/* Fast fill badges for verified PostgreSQL accounts */}
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 text-xs">
+                <div className="flex items-center gap-1.5 text-gray-600 font-semibold mb-2">
+                  <KeyRound className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Real PostgreSQL System Accounts</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fillQuickAccount('admin@machinery.internal', 'admin123')}
+                    className="p-2 text-left rounded-lg bg-white border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/50 transition cursor-pointer"
+                  >
+                    <div className="font-semibold text-gray-900 text-[11px] flex items-center justify-between">
+                      <span>Administrator</span>
+                      <Shield className="w-3 h-3 text-purple-600" />
+                    </div>
+                    <div className="text-[10px] text-gray-500 truncate">admin@machinery.internal</div>
+                    <div className="text-[10px] text-indigo-600 font-mono">admin123</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fillQuickAccount('engineer@machinery.internal', 'engineer123')}
+                    className="p-2 text-left rounded-lg bg-white border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/50 transition cursor-pointer"
+                  >
+                    <div className="font-semibold text-gray-900 text-[11px] flex items-center justify-between">
+                      <span>Engineer</span>
+                      <User className="w-3 h-3 text-indigo-600" />
+                    </div>
+                    <div className="text-[10px] text-gray-500 truncate">engineer@machinery.internal</div>
+                    <div className="text-[10px] text-indigo-600 font-mono">engineer123</div>
+                  </button>
+                </div>
+              </div>
+
               <button
                 type="submit"
-                className="w-full mt-2 py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm flex items-center justify-center gap-2 transition shadow-sm"
+                disabled={loading}
+                className="w-full mt-2 py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-medium text-sm flex items-center justify-center gap-2 transition shadow-sm"
               >
-                <span>Sign In to System</span>
-                <ArrowRight className="w-4 h-4" />
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>กำลังตรวจสอบสิทธิ์ (Authenticating)...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Sign In to System</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
-
 
               <div className="text-center pt-2">
                 <button
@@ -263,7 +298,7 @@ export function LoginPage() {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. John Doe"
+                    placeholder="e.g. Somchai Srivichai"
                     className="pl-9 pr-3 py-2 w-full border border-gray-300 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     value={regName}
                     onChange={(e) => setRegName(e.target.value)}
@@ -280,7 +315,7 @@ export function LoginPage() {
                   <input
                     type="email"
                     required
-                    placeholder="john@plant.corp"
+                    placeholder="somchai@machinery.internal"
                     className="pl-9 pr-3 py-2 w-full border border-gray-300 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     value={regEmail}
                     onChange={(e) => setRegEmail(e.target.value)}
@@ -296,7 +331,7 @@ export function LoginPage() {
                   <Building2 className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
                   <input
                     type="text"
-                    placeholder="e.g. Turbine Line 1"
+                    placeholder="e.g. CNC Line 1"
                     className="pl-9 pr-3 py-2 w-full border border-gray-300 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     value={regDepartment}
                     onChange={(e) => setRegDepartment(e.target.value)}
@@ -335,10 +370,20 @@ export function LoginPage() {
 
               <button
                 type="submit"
-                className="w-full mt-3 py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm flex items-center justify-center gap-2 transition shadow-sm"
+                disabled={loading}
+                className="w-full mt-3 py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-medium text-sm flex items-center justify-center gap-2 transition shadow-sm"
               >
-                <span>Create Account & Enter</span>
-                <ArrowRight className="w-4 h-4" />
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>กำลังสร้างบัญชี (Creating Account)...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Create Account & Enter</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
 
               <div className="text-center pt-2">

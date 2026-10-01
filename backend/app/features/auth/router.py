@@ -53,7 +53,8 @@ def signup(body: SignUpRequest, db: Session = Depends(get_db)):
     - Hash password ด้วย bcrypt
     - บันทึกลง PostgreSQL
     """
-    taken = is_email_or_username_taken(db, body.email, body.username)
+    uname = body.username or body.email.split("@")[0]
+    taken = is_email_or_username_taken(db, body.email, uname)
     if taken == "email":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -68,9 +69,12 @@ def signup(body: SignUpRequest, db: Session = Depends(get_db)):
     user = create_user(
         db,
         email=body.email,
-        username=body.username,
+        username=uname,
         password=body.password,
         full_name=body.full_name,
+        role=body.role,
+        department=body.department,
+        title=body.title,
     )
     return _user_to_response(user)
 
@@ -108,6 +112,8 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
+        token_type="bearer",
+        user=_user_to_response(user),
     )
 
 
@@ -209,6 +215,9 @@ def _user_to_response(user: User) -> UserResponse:
         email=user.email,
         username=user.username,
         full_name=user.full_name,
+        role=getattr(user, "role", "engineer") or "engineer",
+        department=getattr(user, "department", "Maintenance Team") or "Maintenance Team",
+        title=getattr(user, "title", "Reliability Engineer") or "Reliability Engineer",
         bio=user.bio,
         profile_image_url=profile_image_url,
         is_active=user.is_active,

@@ -32,7 +32,6 @@ export interface AlarmItem {
 
 export function NotificationsPage() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'ALL' | 'CRITICAL' | 'WARNING' | 'INFO'>('ALL');
   const [alarms, setAlarms] = useState<AlarmItem[]>([]);
@@ -48,8 +47,6 @@ export function NotificationsPage() {
   const criticalCount = alarms.filter((a) => a.severity === 'CRITICAL').length;
   const warningCount = alarms.filter((a) => a.severity === 'WARNING').length;
   const unreadCount = alarms.filter((a) => !a.isRead).length;
-
-  const filteredAlarms = alarms;
 
   const handleMarkAllRead = async () => {
     await api.markAllAlarmsRead();
@@ -165,7 +162,7 @@ export function NotificationsPage() {
         </div>
 
         {/* Alarms Feed */}
-        {filteredAlarms.length === 0 ? (
+        {alarms.length === 0 ? (
           <div className="py-14">
             <EmptyState
               icon={CheckCircle2}
@@ -175,7 +172,7 @@ export function NotificationsPage() {
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {filteredAlarms.map((alarm) => (
+            {alarms.map((alarm) => (
               <div
                 key={alarm.id}
                 className={`p-4 transition flex flex-col sm:flex-row items-start justify-between gap-4 ${

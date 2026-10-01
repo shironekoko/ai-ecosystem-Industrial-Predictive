@@ -28,12 +28,19 @@ export function ActiveLearningPage() {
 
   // Model Registry state
   const [models, setModels] = useState<ModelRegistryItem[]>([]);
-  const [verifiedSamplesCount, setVerifiedSamplesCount] = useState<number>(14);
+  const [verifiedSamplesCount, setVerifiedSamplesCount] = useState<number>(0);
 
   useEffect(() => {
     api.getRegisteredModels().then((data) => {
       if (data && data.length > 0) {
         setModels(data);
+      }
+    });
+    api.getAuditLogs('WEAR_CONFIRMED').then((data) => {
+      if (data && data.total !== undefined) {
+        setVerifiedSamplesCount(data.total);
+      } else if (data && Array.isArray(data.items)) {
+        setVerifiedSamplesCount(data.items.length);
       }
     });
   }, []);
@@ -87,7 +94,7 @@ export function ActiveLearningPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard
           label="Registered Models"
-          value={models.length > 0 ? `${models.length} Models` : '2 Models'}
+          value={models.length > 0 ? `${models.length} Models` : '0 Models'}
           icon={BrainCircuit}
           accent="purple"
           trend="neutral"

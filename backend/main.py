@@ -71,12 +71,34 @@ async def lifespan(app: FastAPI):
     - สร้าง MinIO bucket สำหรับ profile images (ถ้ายังไม่มี)
     """
     # ── Startup ──
-    # Import models เพื่อให้ Base.metadata รู้จัก tables ทั้งหมด
     import app.features.auth.models  # noqa: F401
+    import app.features.audit.models  # noqa: F401
+    import app.features.alarms.models  # noqa: F401
 
     try:
         Base.metadata.create_all(bind=engine)
         print("[OK] Database tables created")
+
+        # Seed default accounts
+        from app.features.auth.service import create_user, get_user_by_email
+        from app.features.auth.schemas import UserCreate
+        from core.database import SessionLocal
+
+        with SessionLocal() as db:
+            if not get_user_by_email(db, "admin@machinery.internal"):
+                create_user(db, UserCreate(email="admin@machinery.internal", password="admin123", full_name="System Admin", username="admin", role="admin"))
+                print("[OK] Seeded admin user")
+            
+            if not get_user_by_email(db, "engineer@machinery.internal"):
+                create_user(db, UserCreate(email="engineer@machinery.internal", password="engineer123", full_name="Maintenance Engineer", username="engineer", role="engineer"))
+                print("[OK] Seeded engineer user")
+
+            from app.features.alarms.service import seed_alarms_if_empty
+            from app.features.audit.service import seed_audit_logs_if_empty
+            seed_alarms_if_empty(db)
+            seed_audit_logs_if_empty(db)
+            print("[OK] Seeded alarms and audit logs")
+
     except Exception as e:
         print(f"[WARN] Database setup failed (server may not be ready): {e}")
 
@@ -90,9 +112,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[WARN] MinIO bucket setup failed (server may not be ready): {e}")
 
+    import asyncio
+    from app.features.telemetry.service import get_coordinator
+    coordinator = get_coordinator()
+    sim_task = asyncio.create_task(coordinator.run_simulation_loop())
+
     yield
 
     # ── Shutdown ──
+    sim_task.cancel()
     print("[INFO] Application shutting down")
 
 

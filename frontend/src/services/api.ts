@@ -89,6 +89,11 @@ export class ApiService {
   private static instance: ApiService;
   private isBackendOnline: boolean = false;
 
+  public getAuthHeaders(): Record<string, string> {
+    const token = localStorage.getItem('pdm_access_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
   private constructor() {
     this.checkHealth();
   }
@@ -144,6 +149,19 @@ export class ApiService {
     }
     return null;
   }
+
+  public async getRunWaveform(toolId: number = 10, run: number = 1) {
+    try {
+      const res = await fetch(`${API_BASE_URL}/telemetry/waveform?tool_id=${toolId}&run=${run}&points=60`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('[API] Backend getRunWaveform error:', err);
+    }
+    return [];
+  }
+
 
   /**
    * Run Pure Time-Series CRNN Inference on force dynamics
@@ -232,7 +250,7 @@ export class ApiService {
     try {
       const res = await fetch(`${API_BASE_URL}/qc/verify`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
         body: JSON.stringify({
           recordId: recordId,
           toolId: toolId,
@@ -244,30 +262,14 @@ export class ApiService {
           inspectorName: inspectorName || 'Maintenance Engineer',
         }),
       });
-      if (res.ok) {
-        return await res.json();
+      if (!res.ok) {
+        throw new Error(`Failed to submit verification: ${res.statusText}`);
       }
+      return await res.json();
     } catch (err) {
       console.warn('[API] Backend verify submission error:', err);
+      throw err;
     }
-
-    const isDiscrepancy = decision === 'SEND_TO_RETRAIN' || decision === 'FALSE_ALARM' || actualCondition === 'SHARP' || actualCondition === 'USED';
-    return {
-      status: 'VERIFIED',
-      decision: decision,
-      loggedToMinio: true,
-      activeLearningPoolSize: 15,
-      verifiedAt: new Date().toISOString(),
-      message: isDiscrepancy
-        ? `🚀 Human-in-the-Loop Discrepancy logged for ${recordId}. Auto-enqueued YOLOv8 Vision Retraining Job!`
-        : `Blade ${recordId} wear confirmed. Cutter replacement instruction logged.`,
-      retrainJobId: isDiscrepancy ? `retrain-auto-${Date.now().toString(36)}` : undefined,
-      autoRetrainTriggered: isDiscrepancy,
-      modelRetrained: 'yolov8_chip_wear',
-      correctedLabel: actualCondition || (decision === 'FALSE_ALARM' ? 'SHARP' : 'DULLED'),
-      chipImageRetrained: isDiscrepancy ? `chip/${recordId}.jpg` : undefined,
-      userAnswer: actualCondition || (decision === 'FALSE_ALARM' ? 'SHARP' : 'USED'),
-    };
   }
 
   /**
@@ -448,7 +450,7 @@ export class ApiService {
    */
   public async getUsers() {
     try {
-      const res = await fetch(`${API_BASE_URL}/users`);
+      const res = await fetch(`${API_BASE_URL}/users`, { headers: { ...this.getAuthHeaders() } });
       if (res.ok) {
         return await res.json();
       }
@@ -458,11 +460,11 @@ export class ApiService {
     return [];
   }
 
-  public async createUser(userData: { name: string; email: string; role: string; department?: string; title?: string }) {
+  public async createUser(userData: { name: string; email: string; role: string; department?: string; title?: string; password?: string }) {
     try {
       const res = await fetch(`${API_BASE_URL}/users`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
         body: JSON.stringify(userData),
       });
       if (res.ok) {
@@ -478,7 +480,7 @@ export class ApiService {
     try {
       const res = await fetch(`${API_BASE_URL}/users/${userId}/role`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
         body: JSON.stringify({ role }),
       });
       if (res.ok) {
@@ -492,7 +494,7 @@ export class ApiService {
 
   public async deleteUser(userId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/users/${userId}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE_URL}/users/${userId}`, { method: 'DELETE', headers: { ...this.getAuthHeaders() } });
       if (res.ok) {
         return await res.json();
       }
@@ -509,7 +511,7 @@ export class ApiService {
     try {
       const res = await fetch(`${API_BASE_URL}/telemetry/spindle/control`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
         body: JSON.stringify({ spindleId, action }),
       });
       if (res.ok) {
@@ -525,7 +527,7 @@ export class ApiService {
     try {
       const res = await fetch(`${API_BASE_URL}/telemetry/machine/stop`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
         body: JSON.stringify({ reason, run }),
       });
       if (res.ok) {
@@ -541,6 +543,7 @@ export class ApiService {
     try {
       const res = await fetch(`${API_BASE_URL}/telemetry/machine/reset`, {
         method: 'POST',
+        headers: { ...this.getAuthHeaders() },
       });
       if (res.ok) {
         return await res.json();
@@ -560,6 +563,123 @@ export class ApiService {
     } catch (err) {
       console.warn('[API] Backend getMachineStatus error:', err);
     }
+    return null;
+  }
+
+  public async getMillingHistory() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/telemetry/history`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('[API] Backend getMillingHistory error:', err);
+    }
+    return null;
+  }
+
+  /** Generic GET helper for flexibility */
+  public async get(endpoint: string): Promise<{ data: any }> {
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const url = endpoint.startsWith('http')
+      ? endpoint
+      : endpoint.startsWith('/api/v1')
+      ? `${API_BASE_URL.replace('/api/v1', '')}${cleanEndpoint}`
+      : `${API_BASE_URL}${cleanEndpoint}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    const data = await res.json();
+    return { data };
+  }
+
+  /** Generic POST helper for flexibility */
+  public async post(endpoint: string, body?: any): Promise<{ data: any }> {
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const url = endpoint.startsWith('http')
+      ? endpoint
+      : endpoint.startsWith('/api/v1')
+      ? `${API_BASE_URL.replace('/api/v1', '')}${cleanEndpoint}`
+      : `${API_BASE_URL}${cleanEndpoint}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    const data = await res.json();
+    return { data };
+  }
+
+  /**
+   * Real Authentication: Login against PostgreSQL backed backend (/api/v1/auth/login)
+   */
+  public async login(email: string, password: string): Promise<{ access_token: string; refresh_token: string; user: any }> {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      let detail = 'อีเมลหรือรหัสผ่านไม่ถูกต้อง (Invalid credentials)';
+      try {
+        const errJson = await res.json();
+        if (errJson.detail) detail = errJson.detail;
+      } catch {}
+      throw new Error(detail);
+    }
+    return await res.json();
+  }
+
+  /**
+   * Real Authentication: Register new account in PostgreSQL (/api/v1/auth/signup)
+   */
+  public async register(userData: {
+    email: string;
+    password: string;
+    name?: string;
+    username?: string;
+    role?: string;
+    department?: string;
+    title?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: userData.email,
+        password: userData.password,
+        full_name: userData.name || userData.email.split('@')[0],
+        username: userData.username || userData.email.split('@')[0],
+        role: userData.role || 'engineer',
+        department: userData.department || 'Maintenance Team',
+        title: userData.title || 'Reliability Engineer',
+      }),
+    });
+    if (!res.ok) {
+      let detail = 'Registration failed';
+      try {
+        const errJson = await res.json();
+        if (errJson.detail) detail = errJson.detail;
+      } catch {}
+      throw new Error(detail);
+    }
+    return await res.json();
+  }
+
+  /**
+   * Get Current Authenticated User (/api/v1/auth/me)
+   */
+  public async getMe(token?: string): Promise<any> {
+    const authToken = token || localStorage.getItem('pdm_access_token');
+    if (!authToken) return null;
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {}
     return null;
   }
 }

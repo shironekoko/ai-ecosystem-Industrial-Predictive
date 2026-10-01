@@ -80,18 +80,27 @@ def _load_labels():
                     "overhang": reg["overhang"],
                 }
 
-def get_qc_target(tool: Optional[int] = None, run: Optional[int] = None) -> QCTargetResponse:
-    # Default active tool on the bench: Tool 10, Run 12
-    t_id = tool if tool is not None else 10
-    r_id = run if run is not None else 12
-    return QCTargetResponse(
-        toolId=t_id,
-        passIndex=r_id,
-        teethCount=4,
-        originSpindle="CNC-SP-01 (Haas VF-2SS)",
-        dispatchReason="Tier 1 Force Anomaly Triggered (Fres > 210 N) · Staged for Tier 2 Chip & Tier 3 Edge Metrology",
-        dispatchedAt=datetime.utcnow().isoformat() + "Z",
-    )
+def get_qc_target(tool: Optional[int] = None, run: Optional[int] = None) -> Optional[QCTargetResponse]:
+    try:
+        from app.features.telemetry.service import get_coordinator
+        coordinator = get_coordinator()
+        machine = coordinator.get_machine_simulator()
+        
+        if machine.status != "STOPPED":
+            return None
+
+        t_id = tool if tool is not None else machine.tool_id
+        r_id = run if run is not None else machine.current_run
+        return QCTargetResponse(
+            toolId=t_id,
+            passIndex=r_id,
+            teethCount=4,
+            originSpindle="CNC-SP-01 (Haas VF-2SS)",
+            dispatchReason=machine.stop_reason or "Safety Interlock Triggered",
+            dispatchedAt=datetime.utcnow().isoformat() + "Z",
+        )
+    except Exception:
+        return None
 
 def get_chip_image_file_path(record_id: str) -> Optional[Path]:
     ds_dir = get_dataset_dir()
@@ -285,7 +294,7 @@ def get_blade_qc(tool_id: Any, run_index: int, blade_index: int) -> BladeQCRespo
         condition=pred_cls,
         confidence=0.92,
         flankWearEstimateUm=round(flank_wear * 0.98, 1),
-        triggerMetric="Fres > 210 N (Peak dynamic force spike)" if flank_wear >= 120 else "Fres nominal (< 180 N)",
+        triggerMetric=f"CRNN Time-Series Model evaluated: DULLED (Vb ~ {flank_wear:.1f} µm)" if flank_wear >= 120 else "CRNN Time-Series Model evaluated: NOMINAL",
         status="ALERT" if flank_wear >= 120 else "WARNING" if flank_wear >= 70 else "NORMAL",
     )
 
@@ -443,9 +452,23 @@ async def verify_blade(req: VerifyQCRequest) -> VerifyQCResponse:
                 f"เข้าชุดข้อมูล Retrain โมเดล YOLOv8 Vision เรียบร้อย (Job #{retrain_job_id})"
             )
         except Exception as e:
-            msg = f"Discrepancy logged for {req.recordId}. Note: Retrain trigger warning: {e}"
+            logger.warning(f"Auto-retrain enqueue warning: {e}")
+            msg = f"Logged discrepancy on {req.recordId} for retraining."
     else:
         msg = f"Blade {req.recordId} wear confirmed (DULLED). Cutter replacement instruction logged."
+
+    try:
+        from app.features.audit.service import record_audit_event
+        record_audit_event(
+            event_type="FALSE_ALARM_FLAGGED" if req.decision == "FALSE_ALARM" else ("RETRAIN_TRIGGERED" if is_discrepancy else "WEAR_CONFIRMED"),
+            actor=req.inspectorName or "Maintenance Engineer",
+            role="QC Inspector",
+            target_resource=req.recordId,
+            summary=msg,
+            status="WARNING" if req.decision == "FALSE_ALARM" else "SUCCESS",
+        )
+    except Exception as err:
+        logger.warning(f"Audit log warning: {err}")
 
     return VerifyQCResponse(
         status="VERIFIED",

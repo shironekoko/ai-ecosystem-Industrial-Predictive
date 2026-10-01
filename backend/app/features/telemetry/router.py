@@ -118,8 +118,6 @@ async def websocket_spindle_stream(
     if run is not None:
         machine.current_run = max(1, min(14, run))
         machine.point_index = 0
-        machine.status = "RUNNING"
-        machine.stop_reason = None
 
     async def listen_commands():
         nonlocal is_paused
@@ -152,9 +150,12 @@ async def websocket_spindle_stream(
     try:
         while True:
             if not is_paused:
-                packet = coordinator.get_next_telemetry_packet()
-                await websocket.send_json(packet)
-            await asyncio.sleep(0.08)  # ~12.5 Hz cadence
+                await coordinator.wait_for_packet()
+                packet = coordinator.get_latest_packet()
+                if packet:
+                    await websocket.send_json(packet)
+            else:
+                await asyncio.sleep(0.1)
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -185,6 +186,11 @@ async def get_forces(tool_id: int = Query(10), run: int = Query(11)):
     packet = service.generate_telemetry_packet(0.0, pass_index=run)
     return packet
 
+@router.get("/waveform", summary="Get downsampled time-series force curve for charting a pass")
+async def get_waveform(tool_id: int = Query(10), run: int = Query(11), points: int = Query(50, ge=10, le=200)):
+    """Fetch time-series force waveform points (Fx, Fy, Fz, Fres) for historical charting"""
+    return service.get_run_waveform(run, target_points=points)
+
 @router.get("/status", summary="Get overall machine and tool status")
 async def get_status():
     """Retrieve current spindle state, active run, and interlock condition"""
@@ -198,3 +204,20 @@ async def get_status():
         "stopReason": machine.stop_reason,
         "stoppedRun": machine.stopped_run,
     }
+
+@router.get("/history", summary="Get history of completed milling passes and active machine state")
+async def get_milling_history():
+    """Retrieve all completed milling passes, wear progression, and spindle state"""
+    coordinator = service.get_coordinator()
+    machine = coordinator.get_machine_simulator()
+    return {
+        "machineId": machine.machine_id,
+        "toolId": machine.tool_id,
+        "currentRun": machine.current_run,
+        "status": machine.status,
+        "isStopped": machine.status == "STOPPED",
+        "stopReason": machine.stop_reason,
+        "stoppedRun": machine.stopped_run,
+        "runs": coordinator.get_history(),
+    }
+

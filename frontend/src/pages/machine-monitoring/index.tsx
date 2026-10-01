@@ -46,11 +46,15 @@ export function MachineMonitoringPage() {
   const navigate = useNavigate();
 
   // Active Tool state
-  const [selectedToolId] = useState<number>(10);
+  const [selectedToolId, setSelectedToolId] = useState<number>(10);
 
   // Per-Run Progression items (Clean / empty by default awaiting API or stream)
   const [runs, setRuns] = useState<RunProgressionItem[]>([]);
   const [activeRunNumber, setActiveRunNumber] = useState<number | null>(null);
+
+  // Active in-progress pass metadata during live cutting
+  const [activeCuttingRun, setActiveCuttingRun] = useState<number>(1);
+  const [activeCuttingProgressPct, setActiveCuttingProgressPct] = useState<number>(0);
 
   // Live streaming buffer (rolling window of the latest data points)
   const [streamPoints, setStreamPoints] = useState<StreamingDataPoint[]>([]);
@@ -61,10 +65,93 @@ export function MachineMonitoringPage() {
     fres: number;
   } | null>(null);
 
-  // Stream connection state
-  const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  // Stream connection state (restores streaming flag from sessionStorage if user previously turned it on)
+  const [isStreaming, setIsStreaming] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('pdm_streaming_active') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [streamStatus, setStreamStatus] = useState<'IDLE' | 'CONNECTING' | 'STREAMING' | 'ERROR'>('IDLE');
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Restore history upon returning to the page or initial mount
+  useEffect(() => {
+    let isMounted = true;
+
+    // Fast local restore from sessionStorage to eliminate UI flash
+    try {
+      const cached = sessionStorage.getItem('milling_runs_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRuns(parsed);
+          setActiveRunNumber(parsed[parsed.length - 1].run);
+        }
+      }
+    } catch {}
+
+    // Authoritative backend sync from /api/v1/telemetry/history
+    api.getMillingHistory()
+      .then((data: any) => {
+        if (!isMounted || !data) return;
+        if (data.isStopped) {
+          setIsStreaming(false);
+          try {
+            sessionStorage.removeItem('pdm_streaming_active');
+          } catch {}
+        }
+        if (Array.isArray(data.runs) && data.runs.length > 0) {
+          const loadedRuns: RunProgressionItem[] = data.runs.map((r: any) => ({
+            run: r.run,
+            tsPrediction: r.tsPrediction,
+            confidence: r.confidence ?? 0.95,
+            flankWearUm: r.flankWearUm,
+            gapsUm: r.chippingGapUm,
+            fres: r.fres,
+          }));
+          setRuns(loadedRuns);
+          setActiveRunNumber(loadedRuns[loadedRuns.length - 1].run);
+          try {
+            sessionStorage.setItem('milling_runs_cache', JSON.stringify(loadedRuns));
+          } catch {}
+        } else if (data.currentRun) {
+          setActiveCuttingRun(data.currentRun);
+        }
+      })
+      .catch((err: any) => {
+        console.warn('[Telemetry] History fetch error:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Automatically load and display waveform curve for the active run when returning to the page or selecting a run
+  useEffect(() => {
+    if (isStreaming) return;
+    const targetRun = activeRunNumber ?? (runs.length > 0 ? runs[runs.length - 1].run : null);
+    if (!targetRun) return;
+
+    let isMounted = true;
+    api.getRunWaveform(selectedToolId, targetRun).then((points: StreamingDataPoint[]) => {
+      if (!isMounted || !Array.isArray(points) || points.length === 0) return;
+      setStreamPoints(points);
+      const last = points[points.length - 1];
+      setLatestForces({
+        fx: last.fx,
+        fy: last.fy,
+        fz: last.fz,
+        fres: last.fres,
+      });
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeRunNumber, isStreaming, selectedToolId, runs.length]);
 
   // Active run info derived from current runs array
   const currentRunInfo = runs.find((r) => r.run === activeRunNumber) || (runs.length > 0 ? runs[runs.length - 1] : null);
@@ -74,9 +161,23 @@ export function MachineMonitoringPage() {
   // Factor 1: Time-Series Force AI checks per-run.
   // Factor 2: Non-Time-Series Chip AI triggers ONLY IF Factor 1 Alerts!
   const isNonTimeActive = Boolean(currentRunInfo && isTimeSeriesAlert);
-  const chipAiCondition = currentRunInfo?.chipPrediction || (isTimeSeriesAlert ? 'DULLED' : 'SHARP');
-  const chipAiConfidence = currentRunInfo?.chipConfidence ?? (isTimeSeriesAlert ? 94.2 : 91.5);
+  const chipAiCondition = currentRunInfo?.chipPrediction || (isTimeSeriesAlert ? 'PENDING' : 'SHARP');
+  const chipAiConfidence = currentRunInfo?.chipConfidence ?? 0;
   const isTwoFactorConfirmed = Boolean(isTimeSeriesAlert && chipAiCondition === 'DULLED');
+
+  useEffect(() => {
+    if (isTimeSeriesAlert && activeRunNumber && !currentRunInfo?.chipPrediction) {
+      api.getBladeQc(selectedToolId, activeRunNumber, 1).then((res: any) => {
+        if (res && res.tier2ChipAi) {
+          setRuns((prev) => prev.map((r) => r.run === activeRunNumber ? {
+            ...r,
+            chipPrediction: res.tier2ChipAi.condition,
+            chipConfidence: res.tier2ChipAi.confidence
+          } : r));
+        }
+      }).catch(console.error);
+    }
+  }, [isTimeSeriesAlert, activeRunNumber, currentRunInfo?.chipPrediction, selectedToolId]);
 
   // WebSocket Live Telemetry Streaming Handler
   useEffect(() => {
@@ -127,14 +228,20 @@ export function MachineMonitoringPage() {
             return next.length > 60 ? next.slice(next.length - 60) : next;
           });
 
-          // Ingest run telemetry if packet contains passIndex
+          // Update live milling progress for current cutting pass
           if (data.passIndex !== undefined) {
+            setActiveCuttingRun(Number(data.passIndex));
+          }
+          if (data.runProgressPct !== undefined) {
+            setActiveCuttingProgressPct(Number(data.runProgressPct));
+          }
+
+          // Evaluate Time-Series model prediction ONLY when the pass has finished cutting!
+          if (data.isPassCompleted && data.inference && data.inference.status === 'COMPLETED') {
             const passNum = Number(data.passIndex);
-            const condition =
-              data.inference?.condition ||
-              (data.forces.fres > 210 ? 'DULLED' : data.forces.fres > 130 ? 'USED' : 'SHARP');
-            const conf = data.inference?.confidence || 0.92;
-            const flankWear = data.inference?.flankWearUm;
+            const condition = data.inference.condition;
+            const conf = data.inference.confidence || 0.95;
+            const flankWear = data.inference.flankWearUm;
 
             setRuns((prev) => {
               const idx = prev.findIndex((r) => r.run === passNum);
@@ -145,27 +252,28 @@ export function MachineMonitoringPage() {
                 flankWearUm: flankWear,
                 fres: data.forces.fres,
               };
+              let next;
               if (idx >= 0) {
-                const updated = [...prev];
-                updated[idx] = item;
-                return updated;
+                next = [...prev];
+                next[idx] = item;
               } else {
-                return [...prev, item].sort((a, b) => a.run - b.run);
+                next = [...prev, item].sort((a, b) => a.run - b.run);
               }
+              try {
+                sessionStorage.setItem('milling_runs_cache', JSON.stringify(next));
+              } catch {}
+              return next;
             });
 
             // Follow active milling run dynamically
-            setActiveRunNumber((prev) => {
-              if (condition === 'DULLED' || data.machineState === 'EMERGENCY_HALTED') {
-                return passNum;
-              }
-              return passNum;
-            });
+            setActiveRunNumber(passNum);
 
-            // If Time-Series model detects DULLED, auto-stop stream via safety interlock
+            // Safety Interlock: If Time-Series model detects DULLED, auto-stop stream
             if (condition === 'DULLED' || data.machineState === 'EMERGENCY_HALTED') {
-              setActiveRunNumber(passNum);
               setIsStreaming(false); // Safety cut on first dulled!
+              try {
+                sessionStorage.removeItem('pdm_streaming_active');
+              } catch {}
             }
           }
         }
@@ -223,11 +331,30 @@ export function MachineMonitoringPage() {
   const thresholdY = chartHeight - 24 - (210 / maxForceScale) * (chartHeight - 48);
   const firstDulledRun = runs.find((r) => r.tsPrediction === 'DULLED');
 
+  const handleToggleStreaming = () => {
+    setIsStreaming((prev) => {
+      const next = !prev;
+      try {
+        if (next) {
+          sessionStorage.setItem('pdm_streaming_active', 'true');
+        } else {
+          sessionStorage.removeItem('pdm_streaming_active');
+        }
+      } catch {}
+      return next;
+    });
+  };
+
   const handleClearData = () => {
     setStreamPoints([]);
     setLatestForces(null);
     setRuns([]);
     setActiveRunNumber(null);
+    setActiveCuttingProgressPct(0);
+    try {
+      sessionStorage.removeItem('milling_runs_cache');
+      sessionStorage.removeItem('pdm_streaming_active');
+    } catch {}
   };
 
   const handleMountFreshTool = async () => {
@@ -243,6 +370,12 @@ export function MachineMonitoringPage() {
     setLatestForces(null);
     setRuns([]);
     setActiveRunNumber(1);
+    setActiveCuttingRun(1);
+    setActiveCuttingProgressPct(0);
+    try {
+      sessionStorage.removeItem('milling_runs_cache');
+      sessionStorage.setItem('pdm_streaming_active', 'true');
+    } catch {}
     setIsStreaming(true);
   };
 
@@ -254,10 +387,19 @@ export function MachineMonitoringPage() {
         subtitle="โมเดล Time-Series CRNN (BiGRU + Attention) เช็คราย Run ตามลำดับรอบตัด ➔ หยุดทันทีเมื่อเจอ Dulled อันแรก เพื่อดึงภาพ Chip"
         actions={
           <div className="flex items-center gap-2">
+            <select
+              value={selectedToolId}
+              onChange={(e) => setSelectedToolId(Number(e.target.value))}
+              className="px-2 py-1 rounded border border-gray-300 text-sm font-medium bg-white"
+            >
+              <option value={10}>Tool 10</option>
+              <option value={11}>Tool 11</option>
+              <option value={12}>Tool 12</option>
+            </select>
             {/* Mount Fresh Tool / Reset Spindle Button */}
             <button
               onClick={handleMountFreshTool}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 transition shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 transition shadow-xs cursor-pointer"
               title="เปลี่ยนหัวมีดใหม่ (Mount Fresh Tool) และรีเซ็ตการตัดเริ่มจาก Run #1"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -268,7 +410,7 @@ export function MachineMonitoringPage() {
             {(runs.length > 0 || streamPoints.length > 0) && (
               <button
                 onClick={handleClearData}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition shadow-xs"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition shadow-xs cursor-pointer"
                 title="ล้างข้อมูลกราฟและรอบตัดเพื่อเริ่มรับข้อมูลใหม่"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -278,8 +420,8 @@ export function MachineMonitoringPage() {
 
             {/* Live Streaming Toggle */}
             <button
-              onClick={() => setIsStreaming((prev) => !prev)}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold border transition shadow-xs ${
+              onClick={handleToggleStreaming}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold border transition shadow-xs cursor-pointer ${
                 isStreaming
                   ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
                   : 'bg-indigo-600 hover:bg-indigo-700 text-white border-transparent'
@@ -322,6 +464,47 @@ export function MachineMonitoringPage() {
           </div>
         }
       />
+
+      {/* Safety Interlock Auto-Halt Alert Banner */}
+      {isTimeSeriesAlert && (
+        <div className="p-4 bg-gradient-to-r from-rose-950 via-slate-900 to-rose-950 text-white rounded-xl shadow-sm border border-rose-800/70 flex flex-wrap items-center justify-between gap-4 animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300">
+              <AlertTriangle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/30 border border-rose-500/50 text-rose-200 font-bold">
+                  🛑 Safety Interlock Triggered · Spindle Halted at Run #{activeRunNumber}
+                </span>
+                <span className="text-xs text-rose-300 font-mono">
+                  Flank Wear Vb = {currentRunInfo?.flankWearUm ?? 107.3} µm
+                </span>
+              </div>
+              <p className="text-xs text-slate-200 mt-1">
+                สปินเดิลและระบบสตรีมถูกสั่งหยุดการทำงานอัตโนมัติ เนื่องจากโมเดล Time-Series CRNN ตรวจพบว่ามีดอยู่ในสถานะ <strong>DULLED (มีดทื่อวิกฤต)</strong> ในรอบตัด Pass #{activeRunNumber} เพื่อป้องกันชิ้นงานเสียหาย
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate(`/visual-qc?tool=${selectedToolId}&run=${activeRunNumber}`)}
+              className="px-3.5 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <ScanEye className="w-3.5 h-3.5" />
+              <span>ถอดมีดไปตรวจที่ Tool Verification</span>
+            </button>
+            <button
+              onClick={handleMountFreshTool}
+              className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>เปลี่ยนมีดใหม่ (Mount Fresh Tool)</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Grid: Per-Run Dynamics Graph + Timeline (70%) + 2-Factor In-Process HUD (30%) */}
       <div className="grid grid-cols-12 gap-6">
@@ -448,6 +631,30 @@ export function MachineMonitoringPage() {
                       ? 'เชื่อมต่อ WebSocket แล้ว กำลังรอข้อมูลแรงตัด (Fx, Fy, Fres) ส่งเข้ามา...'
                       : 'กดปุ่ม "Start Telemetry Stream" หรือส่งข้อมูลสตรีมผ่าน API เพื่อเริ่มแสดงกราฟแบบ Real-time'}
                   </p>
+                </div>
+              )}
+
+              {/* Live Milling Pass In-Progress Bar */}
+              {isStreaming && (
+                <div className="bg-slate-900/90 rounded-lg p-2.5 my-2 border border-slate-800 flex items-center justify-between text-xs font-mono">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-slate-200 font-bold">
+                      Workpiece Milling Pass #{activeCuttingRun}:
+                    </span>
+                    <span className="text-emerald-400 font-bold">
+                      {activeCuttingProgressPct.toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="flex-1 max-w-xs mx-4 bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-700">
+                    <div
+                      className="bg-emerald-500 h-full transition-all duration-100 ease-out"
+                      style={{ width: `${Math.min(100, Math.max(0, activeCuttingProgressPct))}%` }}
+                    />
+                  </div>
+                  <span className="text-slate-400 text-[11px] hidden sm:inline">
+                    CRNN Model evaluates at 100%
+                  </span>
                 </div>
               )}
 

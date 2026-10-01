@@ -35,11 +35,20 @@ export function Dashboard() {
   const { user } = useAuth();
 
   const [fleet, setFleet] = useState<SpindleFleetItem[]>([]);
+  const [verifiedCount, setVerifiedCount] = useState<number>(0);
 
   useEffect(() => {
     api.getFleetSpindles().then((data) => {
       if (Array.isArray(data) && data.length > 0) {
         setFleet(data);
+      }
+    });
+    api.getAuditLogs().then((res) => {
+      if (res && typeof res.total === 'number') {
+        const confirmed = res.items
+          ? res.items.filter((i: any) => i.eventType === 'WEAR_CONFIRMED' || i.eventType === 'FALSE_ALARM_FLAGGED' || i.eventType === 'RETRAIN_TRIGGERED').length
+          : res.total;
+        setVerifiedCount(confirmed || res.total);
       }
     });
   }, []);
@@ -85,10 +94,10 @@ export function Dashboard() {
         />
         <StatCard
           label="Human Confirmations"
-          value="0 Verified"
+          value={`${verifiedCount} Verified`}
           icon={CheckCircle2}
           accent="amber"
-          trend="neutral"
+          trend="up"
           trendLabel="Active Learning Ready"
         />
       </div>

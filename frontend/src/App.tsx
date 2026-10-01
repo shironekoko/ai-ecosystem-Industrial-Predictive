@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppLayout } from './components/layout/AppLayout';
 import { LoginPage } from './pages/login';
 import { DashboardPage } from './pages/dashboard';
@@ -13,9 +13,11 @@ import { UserManagementPage } from './pages/user-management';
 import { ReportsPage } from './pages/reports';
 import { UserRole } from './types';
 import { api } from './services/api';
+import { ProtectedRoute } from './components/ProtectedRoute';
 
-export const App: React.FC = () => {
-  const [currentRole, setCurrentRole] = useState<UserRole>('engineer');
+const AppRoutes = () => {
+  const { user } = useAuth();
+  const currentRole = user?.role || 'engineer';
   const [unreadAlertCount, setUnreadAlertCount] = useState<number>(0);
 
   React.useEffect(() => {
@@ -28,23 +30,22 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/" element={<ProtectedRoute />}>
           <Route
-            path="/"
             element={
               <AppLayout
                 currentRole={currentRole}
-                onRoleChange={setCurrentRole}
-                retrainQueueCount={0}
+                onRoleChange={() => {}} 
                 unreadAlertCount={unreadAlertCount}
+                retrainQueueCount={0}
               />
             }
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="login" element={<LoginPage />} />
             <Route path="machine-monitoring" element={<MachineMonitoringPage />} />
             <Route path="visual-qc" element={<VisualQcPage />} />
             <Route path="active-learning" element={<ActiveLearningPage />} />
@@ -53,8 +54,16 @@ export const App: React.FC = () => {
             <Route path="user-management" element={<UserManagementPage />} />
             <Route path="reports" element={<ReportsPage />} />
           </Route>
-        </Routes>
-      </BrowserRouter>
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AppRoutes />
     </AuthProvider>
   );
 };

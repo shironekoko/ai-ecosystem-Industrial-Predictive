@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import numpy as np
 import joblib
+import asyncio
 
 logger = logging.getLogger("telemetry.service")
 
@@ -241,32 +242,119 @@ class EdgeTelemetryCoordinator:
     def __init__(self):
         self.machine = CNCMachineSimulator()
         self.ai = TimeSeriesPredictor()
+        self.completed_runs: List[Dict[str, Any]] = []
+        self._latest_packet: Optional[Dict[str, Any]] = None
+        self._packet_event = asyncio.Event()
+
+    async def run_simulation_loop(self):
+        """Background loop that advances the CNC simulation independently of WebSocket clients."""
+        while True:
+            if self.machine.status == 'RUNNING':
+                packet = self.get_next_telemetry_packet()
+                # Store latest packet for WebSocket clients to read
+                self._latest_packet = packet
+                self._packet_event.set()  # Notify waiting clients
+                self._packet_event = asyncio.Event()  # Reset for next
+            await asyncio.sleep(0.08)  # ~12.5 Hz sampling rate
+
+    async def wait_for_packet(self):
+        await self._packet_event.wait()
+        
+    def get_latest_packet(self) -> Optional[Dict[str, Any]]:
+        return self._latest_packet
 
     def get_machine_simulator(self) -> CNCMachineSimulator:
         return self.machine
+
+    def get_history(self) -> List[Dict[str, Any]]:
+        return list(self.completed_runs)
+
+    def reset(self) -> None:
+        self.machine.reset_spindle()
+        self.completed_runs.clear()
+        logger.info("🔄 [Coordinator] Reset machine and cleared completed runs history.")
 
     def get_next_telemetry_packet(self) -> Dict[str, Any]:
         # 1. Pull raw hardware frame from the machine
         raw_frame = self.machine.get_raw_sensor_frame()
         current_run = raw_frame["passIndex"]
+        is_completed = raw_frame["isPassCompleted"]
 
-        # 2. Run Time-Series Model inference
-        ai_result = self.ai.predict_wear(current_run)
+        ai_result = None
+        # 2. Only evaluate Time-Series model when the cutting pass finishes!
+        if is_completed:
+            ai_result = self.ai.predict_wear(current_run)
 
-        # 3. When a pass finishes, check AI result
-        if raw_frame["isPassCompleted"] and self.machine.status == "RUNNING":
-            if ai_result["isDull"]:
-                # 🛑 AI PREDICTS DULL: Command the machine to STOP via its API!
-                stop_reason = (
-                    f"Time-Series Model detected cutter reached DULL state (Vb={ai_result['flankWearUm']} µm) "
-                    f"at Run #{current_run}. Spindle auto-stopped via Machine API."
-                )
-                self.machine.stop_spindle(reason=stop_reason, run=current_run)
-            else:
-                # ✅ CUTTER HEALTHY (SHARP or USED): Machine continues naturally
-                self.machine.advance_to_next_pass()
+            # Record into completed_runs history if not already recorded
+            if not any(r["run"] == current_run for r in self.completed_runs):
+                self.completed_runs.append({
+                    "run": current_run,
+                    "tsPrediction": ai_result["condition"],
+                    "confidence": ai_result["confidence"],
+                    "flankWearUm": ai_result["flankWearUm"],
+                    "chippingGapUm": ai_result["chippingGapUm"],
+                    "fres": raw_frame["forces"]["fres"],
+                    "timestamp": raw_frame["timestamp"],
+                })
 
-        # 4. Format packet for Web Dashboard
+            # Check if AI evaluates DULL upon pass completion
+            if self.machine.status == "RUNNING":
+                if ai_result["isDull"]:
+                    # 🛑 AI PREDICTS DULL: Command the machine to STOP via its API!
+                    stop_reason = (
+                        f"Time-Series CRNN Model evaluated cutter reached DULL state (Vb={ai_result['flankWearUm']} µm) "
+                        f"upon completing Pass #{current_run}. Spindle auto-stopped via Safety Interlock."
+                    )
+                    self.machine.stop_spindle(reason=stop_reason, run=current_run)
+                    try:
+                        from app.features.alarms.service import trigger_alarm
+                        from app.features.audit.service import record_audit_event
+                        trigger_alarm(
+                            severity="CRITICAL",
+                            title=f"Spindle #{self.machine.tool_id} Safety Interlock Tripped",
+                            message=stop_reason,
+                            source_service="Force_CRNN_Interlock",
+                            machine_id=self.machine.machine_id,
+                            tool_ref=f"T{self.machine.tool_id}R{current_run}",
+                            action_url="/machine-monitoring",
+                        )
+                        record_audit_event(
+                            event_type="WEAR_CONFIRMED",
+                            actor="Time-Series AI Agent",
+                            role="Edge Inference Service",
+                            target_resource=f"T{self.machine.tool_id}R{current_run}",
+                            summary=stop_reason,
+                            status="WARNING",
+                        )
+                    except Exception as err:
+                        logger.warning(f"Alarm/Audit trigger warning: {err}")
+                else:
+                    # ✅ CUTTER HEALTHY (SHARP or USED): Machine continues naturally to next pass
+                    self.machine.advance_to_next_pass()
+
+        # Format inference payload:
+        # If pass just completed, send evaluated AI result.
+        # While pass is actively cutting, status is IN_PROGRESS (sampling force waves).
+        if ai_result:
+            inference_payload = {
+                "condition": ai_result["condition"],
+                "confidence": ai_result["confidence"],
+                "flankWearUm": ai_result["flankWearUm"],
+                "chippingGapUm": ai_result["chippingGapUm"],
+                "estimatedRemainingCycles": ai_result["estimatedRemainingCycles"],
+                "status": "COMPLETED",
+            }
+        else:
+            inference_payload = {
+                "condition": "IN_PROGRESS",
+                "confidence": None,
+                "flankWearUm": None,
+                "chippingGapUm": None,
+                "estimatedRemainingCycles": None,
+                "status": "CUTTING",
+            }
+
+        # 3. Format packet for Web Dashboard
         is_stopped = (self.machine.status == "STOPPED")
         interlock_status = "TRIPPED" if is_stopped else "NORMAL"
         machine_state = "EMERGENCY_HALTED" if is_stopped else "ENGAGED"
@@ -277,16 +365,11 @@ class EdgeTelemetryCoordinator:
             "passIndex": current_run,
             "cycleDurationSec": 45.2,
             "runProgressPct": raw_frame["runProgressPct"],
+            "isPassCompleted": is_completed,
             "samplingRateHz": 1000,
             "forces": raw_frame["forces"],
             "waveformChunk": raw_frame["waveformChunk"],
-            "inference": {
-                "condition": ai_result["condition"],
-                "confidence": ai_result["confidence"],
-                "flankWearUm": ai_result["flankWearUm"],
-                "chippingGapUm": ai_result["chippingGapUm"],
-                "estimatedRemainingCycles": ai_result["estimatedRemainingCycles"],
-            },
+            "inference": inference_payload,
             "interlockStatus": interlock_status,
             "interlockReason": self.machine.stop_reason,
             "machineState": machine_state,
@@ -313,7 +396,7 @@ def stop_machine(reason: str, run: Optional[int] = None) -> bool:
 
 def reset_machine() -> None:
     """API endpoint to mount a fresh tool and reset machine to Run 1"""
-    get_machine().reset_spindle()
+    get_coordinator().reset()
 
 
 def set_spindle_action(spindle_id: str, action: str) -> bool:
@@ -369,3 +452,28 @@ def generate_telemetry_packet(t_offset: float = 0.0, pass_index: Optional[int] =
         }
 
     return coordinator.get_next_telemetry_packet()
+
+
+def get_run_waveform(run_index: int, target_points: int = 50) -> List[Dict[str, Any]]:
+    """Generate downsampled time-series force curve for charting a completed milling pass"""
+    cache = _load_tool10_cache()
+    run_data = cache.get(f"run_{run_index}", cache.get("run_1"))
+    fx = run_data["fx"]
+    fy = run_data["fy"]
+    fz = run_data["fz"]
+    fres = run_data["fres"]
+    total = len(fx)
+    step = max(1, total // target_points)
+
+    points = []
+    now_ms = int(time.time() * 1000)
+    for i in range(0, total, step):
+        points.append({
+            "timestamp": now_ms - (total - i) * 60,
+            "fx": round(float(fx[i]), 2),
+            "fy": round(float(fy[i]), 2),
+            "fz": round(float(fz[i]), 2),
+            "fres": round(float(fres[i]), 2),
+        })
+    return points[:target_points]
+

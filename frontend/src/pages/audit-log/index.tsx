@@ -102,7 +102,12 @@ export function AuditLogPage() {
                     <td className="px-4 py-3.5 text-indigo-600 font-bold">{ev.targetResource}</td>
                     <td className="px-5 py-3.5 font-sans text-gray-600 max-w-xs truncate">{ev.summary}</td>
                     <td className="px-4 py-3.5 text-right font-sans">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                        ev.status === 'SUCCESS' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                        ev.status === 'WARNING' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                        ev.status === 'FAILED' || ev.status === 'ERROR' ? 'bg-red-50 text-red-700 border-red-200' :
+                        'bg-gray-50 text-gray-700 border-gray-200'
+                      }`}>
                         {ev.status}
                       </span>
                     </td>

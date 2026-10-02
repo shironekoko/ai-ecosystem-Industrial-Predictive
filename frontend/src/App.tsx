@@ -19,14 +19,31 @@ const AppRoutes = () => {
   const { user } = useAuth();
   const currentRole = user?.role || 'engineer';
   const [unreadAlertCount, setUnreadAlertCount] = useState<number>(0);
+  const [retrainQueueCount, setRetrainQueueCount] = useState<number>(0);
 
   React.useEffect(() => {
-    api.getAlarms().then((alarms) => {
-      if (Array.isArray(alarms)) {
-        const unread = alarms.filter((a: any) => !a.isRead).length;
-        setUnreadAlertCount(unread);
-      }
-    });
+    let isMounted = true;
+    const fetchCounters = () => {
+      api.getAlarms().then((alarms) => {
+        if (isMounted && Array.isArray(alarms)) {
+          const unread = alarms.filter((a: any) => !a.isRead).length;
+          setUnreadAlertCount(unread);
+        }
+      });
+      api.getRetrainQueueCount().then((count) => {
+        if (isMounted) setRetrainQueueCount(count);
+      });
+    };
+
+    fetchCounters();
+    const interval = setInterval(fetchCounters, 4000);
+    window.addEventListener('focus', fetchCounters);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', fetchCounters);
+    };
   }, []);
 
   return (
@@ -40,7 +57,7 @@ const AppRoutes = () => {
                 currentRole={currentRole}
                 onRoleChange={() => {}} 
                 unreadAlertCount={unreadAlertCount}
-                retrainQueueCount={0}
+                retrainQueueCount={retrainQueueCount}
               />
             }
           >

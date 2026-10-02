@@ -72,16 +72,18 @@ def get_registered_models() -> List[ModelRegistryItem]:
 def get_retraining_pool_status() -> RetrainingPoolStatus:
     from app.features.audit.models import AuditLog
     from core.database import SessionLocal
-    count = 14
+    count = 0
+    last_retrained = None
     db = SessionLocal()
     try:
-        real_count = db.query(AuditLog).filter(
+        count = db.query(AuditLog).filter(
             (AuditLog.event_type == "WEAR_CONFIRMED") |
             (AuditLog.event_type == "FALSE_ALARM_FLAGGED") |
             (AuditLog.event_type == "RETRAIN_TRIGGERED")
         ).count()
-        if real_count > 0:
-            count = real_count
+        latest_log = db.query(AuditLog).filter(AuditLog.event_type == "RETRAIN_TRIGGERED").order_by(AuditLog.created_at.desc()).first()
+        if latest_log and latest_log.created_at:
+            last_retrained = latest_log.created_at.isoformat() + "Z"
     except Exception:
         pass
     finally:
@@ -92,8 +94,9 @@ def get_retraining_pool_status() -> RetrainingPoolStatus:
         verifiedSamplesCount=count,
         minSamplesThreshold=min_thresh,
         canRetrain=count >= min_thresh,
-        lastRetrainedAt="2026-10-02T01:24:00Z",
+        lastRetrainedAt=last_retrained,
     )
+
 
 def hot_reload_model(model_id: str, target_version: str) -> HotReloadResponse:
     now_iso = datetime.utcnow().isoformat() + "Z"

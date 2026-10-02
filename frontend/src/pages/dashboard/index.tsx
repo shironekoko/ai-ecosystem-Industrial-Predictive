@@ -22,8 +22,9 @@ export interface SpindleFleetItem {
   toolId: number;
   currentRun: number;
   currentBlade: number;
-  flankWearUm: number;
-  rulCuts: number;
+  progressPct?: number;
+  flankWearUm: number | null;
+  rulCuts: number | null;
   healthIndex: number;
   status: 'HEALTHY' | 'WARNING' | 'CRITICAL';
   feedRate: number;
@@ -38,19 +39,77 @@ export function Dashboard() {
   const [verifiedCount, setVerifiedCount] = useState<number>(0);
 
   useEffect(() => {
-    api.getFleetSpindles().then((data) => {
-      if (Array.isArray(data) && data.length > 0) {
-        setFleet(data);
+    let isMounted = true;
+
+    const fetchDashboardData = () => {
+      api.getFleetSpindles().then((data) => {
+        if (isMounted && Array.isArray(data) && data.length > 0) {
+          setFleet(data);
+        }
+      });
+      api.getAuditLogs().then((res) => {
+        if (isMounted && res && typeof res.total === 'number') {
+          const confirmed = res.items
+            ? res.items.filter((i: any) => i.eventType === 'WEAR_CONFIRMED' || i.eventType === 'FALSE_ALARM_FLAGGED' || i.eventType === 'RETRAIN_TRIGGERED').length
+            : res.total;
+          setVerifiedCount(confirmed || res.total);
+        }
+      });
+    };
+
+    fetchDashboardData();
+    // 1.5s background polling ensures freshness even if websocket is reconnecting
+    const interval = setInterval(fetchDashboardData, 1500);
+    window.addEventListener('focus', fetchDashboardData);
+
+    // Live Telemetry WebSocket: Streams physical milling progress and AI wear status directly
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl =
+      (import.meta as any).env?.VITE_WS_URL ||
+      `${wsProtocol}//${window.location.hostname}:8000/api/v1/telemetry/spindle/stream`;
+
+    let socket: WebSocket | null = null;
+    try {
+      socket = new WebSocket(wsUrl);
+      socket.onmessage = (event) => {
+        if (!isMounted) return;
+        try {
+          const packet = JSON.parse(event.data);
+          if (packet && packet.passIndex !== undefined) {
+            setFleet((prev) => {
+              if (prev.length === 0) return prev;
+              const isHalted = packet.interlockStatus === 'TRIPPED' || packet.machineState === 'EMERGENCY_HALTED';
+              const isWarning = packet.inference?.condition === 'USED';
+              const newStatus: 'HEALTHY' | 'WARNING' | 'CRITICAL' = isHalted ? 'CRITICAL' : (isWarning ? 'WARNING' : 'HEALTHY');
+
+              return prev.map((sp) => {
+                if (sp.id === 'CNC-SP-01' || sp.toolId === packet.toolId) {
+                  return {
+                    ...sp,
+                    currentRun: Number(packet.passIndex),
+                    progressPct: Number(packet.runProgressPct ?? 0),
+                    status: newStatus,
+                    healthIndex: newStatus === 'CRITICAL' ? 25 : (newStatus === 'WARNING' ? 70 : 98),
+                  };
+                }
+                return sp;
+              });
+            });
+          }
+        } catch {}
+      };
+    } catch (e) {
+      console.warn('[Dashboard] Telemetry WS connection warning:', e);
+    }
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', fetchDashboardData);
+      if (socket) {
+        socket.close();
       }
-    });
-    api.getAuditLogs().then((res) => {
-      if (res && typeof res.total === 'number') {
-        const confirmed = res.items
-          ? res.items.filter((i: any) => i.eventType === 'WEAR_CONFIRMED' || i.eventType === 'FALSE_ALARM_FLAGGED' || i.eventType === 'RETRAIN_TRIGGERED').length
-          : res.total;
-        setVerifiedCount(confirmed || res.total);
-      }
-    });
+    };
   }, []);
 
   const criticalCount = fleet.filter((f) => f.status === 'CRITICAL').length;
@@ -78,7 +137,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <StatCard
           label="Active Spindles"
-          value={fleet.length > 0 ? `${fleet.length} Machines` : '0 Machines'}
+          value={fleet.length > 0 ? `${fleet.length} Machine${fleet.length !== 1 ? 's' : ''}` : '0 Machines'}
           icon={Cpu}
           accent="blue"
           trend="neutral"
@@ -105,7 +164,7 @@ export function Dashboard() {
       {/* Fast Action Shortcuts */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <button
-          onClick={() => navigate('/machine-monitoring')}
+          onClick={() => navigate(`/machine-monitoring?tool=${fleet[0]?.toolId || 10}`)}
           className="group flex items-center p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:border-indigo-500 hover:shadow-md transition-all text-left"
         >
           <div className="bg-indigo-50 p-3 rounded-lg mr-4 group-hover:bg-indigo-600 transition-colors">
@@ -213,14 +272,47 @@ export function Dashboard() {
                     </td>
                     <td className="px-4 py-4 font-bold text-gray-900">Tool #{spindle.toolId}</td>
                     <td className="px-4 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 text-[11px]">Pass #{spindle.currentRun}</span>
+                      <div className="space-y-1.5 min-w-[130px]">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-semibold text-gray-800">
+                            Pass #{spindle.currentRun}
+                          </span>
+                          <span className="text-gray-400 font-mono text-[10px]">
+                            {spindle.status === 'CRITICAL'
+                              ? 'Halted'
+                              : spindle.progressPct != null
+                              ? `${Math.round(spindle.progressPct)}%`
+                              : 'Active'}
+                          </span>
+                        </div>
+                        <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-300 rounded-full ${
+                              spindle.status === 'CRITICAL'
+                                ? 'bg-rose-500'
+                                : spindle.status === 'WARNING'
+                                ? 'bg-amber-400'
+                                : 'bg-indigo-600'
+                            }`}
+                            style={{
+                              width: `${
+                                spindle.status === 'CRITICAL'
+                                  ? 100
+                                  : Math.max(5, Math.min(100, spindle.progressPct ?? 0))
+                              }%`,
+                            }}
+                          />
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-4">
-                      <span className="font-semibold text-gray-900">{spindle.flankWearUm} µm</span>
+                      <span className="font-semibold text-gray-600 font-mono">
+                        {spindle.flankWearUm != null ? `${spindle.flankWearUm} µm` : '--'}
+                      </span>
                     </td>
-                    <td className="px-4 py-4 text-gray-700 font-bold">{spindle.rulCuts} cuts left</td>
+                    <td className="px-4 py-4 text-gray-600 font-mono font-bold">
+                      {spindle.rulCuts != null ? `${spindle.rulCuts} cuts left` : '--'}
+                    </td>
                     <td className="px-4 py-4 font-sans">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -236,7 +328,7 @@ export function Dashboard() {
                     </td>
                     <td className="px-6 py-4 text-right font-sans">
                       <button
-                        onClick={() => navigate(`/machine-monitoring`)}
+                        onClick={() => navigate(`/machine-monitoring?machine=${spindle.id}&tool=${spindle.toolId}`)}
                         className="px-2.5 py-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition"
                       >
                         Monitor

@@ -3,7 +3,6 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
-  Sparkles,
   ScanEye,
   Crosshair,
   Layers,
@@ -28,7 +27,6 @@ export function OpticalScanViewport({
 }: OpticalScanViewportProps) {
   const [currentModality, setCurrentModality] = useState<ViewportModality>(activeModality);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
-  const [showGradCam, setShowGradCam] = useState<boolean>(false);
 
   const selectedModality = onModalityChange ? activeModality : currentModality;
   const setModality = (m: ViewportModality) => {
@@ -82,38 +80,23 @@ export function OpticalScanViewport({
         {/* Viewport Zoom & Filter Controls */}
         {hasImage && (
           <div className="flex items-center gap-1">
-            {selectedModality === 'TOOL_RAW' && (
-              <button
-                onClick={() => setShowGradCam(!showGradCam)}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition ${
-                  showGradCam
-                    ? 'bg-purple-100 text-purple-700 border border-purple-200'
-                    : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
-                }`}
-                title="Toggle Grad-CAM Attention Heatmap"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                <span>{showGradCam ? 'Grad-CAM ON' : 'Grad-CAM'}</span>
-              </button>
-            )}
-
             <button
               onClick={() => setZoomLevel((z) => Math.min(2.5, z + 0.25))}
-              className="p-1.5 text-gray-600 hover:bg-gray-200 rounded"
+              className="p-1.5 text-gray-600 hover:bg-gray-200 rounded cursor-pointer"
               title="Zoom In"
             >
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => setZoomLevel((z) => Math.max(1, z - 0.25))}
-              className="p-1.5 text-gray-600 hover:bg-gray-200 rounded"
+              className="p-1.5 text-gray-600 hover:bg-gray-200 rounded cursor-pointer"
               title="Zoom Out"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => setZoomLevel(1)}
-              className="p-1.5 text-gray-600 hover:bg-gray-200 rounded"
+              className="p-1.5 text-gray-600 hover:bg-gray-200 rounded cursor-pointer"
               title="Reset Zoom"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -144,15 +127,6 @@ export function OpticalScanViewport({
                 (e.target as HTMLElement).style.display = 'none';
               }}
             />
-
-            {/* Grad-CAM Overlay for raw tool scan */}
-            {showGradCam && selectedModality === 'TOOL_RAW' && (
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-rose-500/35 to-amber-500/40 mix-blend-screen pointer-events-none rounded border-2 border-rose-400/80 flex items-end p-2">
-                <span className="px-2 py-0.5 rounded bg-rose-900/90 text-white font-mono text-[10px] font-bold">
-                  Wear Zone High Activation (XAI Attention)
-                </span>
-              </div>
-            )}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center text-slate-700 pointer-events-none select-none z-10">

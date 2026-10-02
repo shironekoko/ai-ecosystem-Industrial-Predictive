@@ -22,49 +22,8 @@ def _model_to_item(m: Alarm) -> AlarmItem:
 
 
 def seed_alarms_if_empty(db):
-    try:
-        count = db.query(Alarm).count()
-        if count == 0:
-            seeds = [
-                Alarm(
-                    id="ALM-001",
-                    severity="CRITICAL",
-                    title="Safety Interlock: Spindle Halted on CRNN DULLED Classification",
-                    message="Model predicted tool condition DULLED at end of cutting pass. Automated emergency feed hold triggered.",
-                    source_service="Force_CRNN_Worker",
-                    machine_id="CNC-SP-01",
-                    tool_ref="Tool 10",
-                    is_read=False,
-                    action_url="/machine-monitoring",
-                ),
-                Alarm(
-                    id="ALM-002",
-                    severity="WARNING",
-                    title="High Tool Flank Wear Land Warning (ISO 8688-2)",
-                    message="Optical edge inspection estimates Vb = 118.5 µm approaching replacement threshold (125 µm).",
-                    source_service="Vision_YOLO_Worker",
-                    machine_id="CNC-SP-01",
-                    tool_ref="T10R12B1",
-                    is_read=False,
-                    action_url="/visual-qc?tool=10&run=12",
-                ),
-                Alarm(
-                    id="ALM-003",
-                    severity="INFO",
-                    title="Active Learning Dataset Checkpoint Ready",
-                    message="Ground truth samples accumulated in MinIO pool. Retraining threshold ready.",
-                    source_service="System_Core",
-                    machine_id="CNC-SP-01",
-                    tool_ref="Pool",
-                    is_read=True,
-                    action_url="/active-learning",
-                ),
-            ]
-            for s in seeds:
-                db.add(s)
-            db.commit()
-    except Exception:
-        db.rollback()
+    """No-op: Alarms are generated only by genuine machine telemetry and operator sign-offs."""
+    pass
 
 
 def get_alarms(severity: Optional[str] = "ALL", is_read: Optional[bool] = None) -> List[AlarmItem]:
@@ -135,6 +94,21 @@ def trigger_alarm(
 ) -> AlarmItem:
     db = SessionLocal()
     try:
+        # Prevent spamming duplicate unread alarms for the same machine and incident
+        existing = db.query(Alarm).filter(
+            Alarm.machine_id == machine_id,
+            Alarm.tool_ref == tool_ref,
+            Alarm.is_read == False,
+        ).first()
+        if existing:
+            existing.title = title
+            existing.message = message
+            existing.severity = severity.upper()
+            existing.created_at = datetime.utcnow()
+            db.commit()
+            db.refresh(existing)
+            return _model_to_item(existing)
+
         new_alarm = Alarm(
             id=f"ALM-{uuid.uuid4().hex[:6].upper()}",
             severity=severity.upper(),

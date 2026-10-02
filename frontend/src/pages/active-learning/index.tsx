@@ -29,20 +29,45 @@ export function ActiveLearningPage() {
   // Model Registry state
   const [models, setModels] = useState<ModelRegistryItem[]>([]);
   const [verifiedSamplesCount, setVerifiedSamplesCount] = useState<number>(0);
+  const [retrainEventCount, setRetrainEventCount] = useState<number>(0);
+  const [isWorkerOnline, setIsWorkerOnline] = useState<boolean>(true);
 
   useEffect(() => {
-    api.getRegisteredModels().then((data) => {
-      if (data && data.length > 0) {
-        setModels(data);
-      }
-    });
-    api.getAuditLogs('WEAR_CONFIRMED').then((data) => {
-      if (data && data.total !== undefined) {
-        setVerifiedSamplesCount(data.total);
-      } else if (data && Array.isArray(data.items)) {
-        setVerifiedSamplesCount(data.items.length);
-      }
-    });
+    let isMounted = true;
+    const fetchActiveLearningData = () => {
+      api.getRegisteredModels().then((data) => {
+        if (isMounted && data && data.length > 0) {
+          setModels(data);
+        }
+      });
+      api.getAuditLogs('WEAR_CONFIRMED').then((data) => {
+        if (isMounted && data && data.total !== undefined) {
+          setVerifiedSamplesCount(data.total);
+        } else if (isMounted && data && Array.isArray(data.items)) {
+          setVerifiedSamplesCount(data.items.length);
+        }
+      });
+      api.getAuditLogs('RETRAIN_TRIGGERED').then((data) => {
+        if (isMounted && data && data.total !== undefined) {
+          setRetrainEventCount(data.total);
+        } else if (isMounted && data && Array.isArray(data.items)) {
+          setRetrainEventCount(data.items.length);
+        }
+      });
+      api.pingWorker().then((online) => {
+        if (isMounted) setIsWorkerOnline(online);
+      });
+    };
+
+    fetchActiveLearningData();
+    const interval = setInterval(fetchActiveLearningData, 4000);
+    window.addEventListener('focus', fetchActiveLearningData);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', fetchActiveLearningData);
+    };
   }, []);
 
   return (
@@ -101,28 +126,28 @@ export function ActiveLearningPage() {
           trendLabel="MLflow tracking"
         />
         <StatCard
-          label="Retrain Policy"
-          value="HITL Auto-Trigger"
-          icon={GitBranch}
+          label="HITL Verified Samples"
+          value={`${verifiedSamplesCount} Samples`}
+          icon={CheckCircle2}
           accent="emerald"
           trend="neutral"
-          trendLabel="Trigger on Discrepancy"
+          trendLabel="Operator sign-offs"
         />
         <StatCard
-          label="Retraining Scope"
-          value="YOLOv8 Vision Only"
-          icon={Eye}
+          label="Auto-Retrain Triggers"
+          value={`${retrainEventCount} Events`}
+          icon={GitBranch}
           accent="blue"
           trend="neutral"
-          trendLabel="Keyence Optical Microscope"
+          trendLabel="False alarm enqueued"
         />
         <StatCard
-          label="Telemetry Data"
-          value="Runtime Stop Only"
-          icon={ZapOff}
-          accent="amber"
+          label="Queue Worker Status"
+          value={isWorkerOnline ? 'Online (ARQ)' : 'Offline'}
+          icon={Cpu}
+          accent={isWorkerOnline ? 'emerald' : 'red'}
           trend="neutral"
-          trendLabel="Not collected for retrain"
+          trendLabel="Redis queue backend"
         />
       </div>
 
@@ -138,9 +163,13 @@ export function ActiveLearningPage() {
               การทำงานร่วมกันระหว่าง Machine Monitoring, Human Verification Bench และ MLOps Worker
             </p>
           </div>
-          <span className="text-xs font-mono px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            Queue Worker: Online (ARQ + Redis)
+          <span className={`text-xs font-mono px-2.5 py-1 rounded font-bold flex items-center gap-1.5 ${
+            isWorkerOnline
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+              : 'bg-rose-50 text-rose-700 border border-rose-200'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${isWorkerOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
+            Queue Worker: {isWorkerOnline ? 'Online (ARQ + Redis)' : 'Offline / Reconnecting'}
           </span>
         </div>
 

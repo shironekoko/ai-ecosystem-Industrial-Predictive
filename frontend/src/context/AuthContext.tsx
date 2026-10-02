@@ -87,6 +87,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('pdm_refresh_token');
       });
     }
+    window.addEventListener('focus', refreshUsers);
+
+    return () => {
+      window.removeEventListener('focus', refreshUsers);
+    };
   }, [refreshUsers]);
 
   const login = async (email: string, password: string) => {

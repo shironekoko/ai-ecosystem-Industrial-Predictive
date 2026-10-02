@@ -13,11 +13,24 @@ export function AuditLogPage() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
 
   useEffect(() => {
-    api.getAuditLogs(filterType, searchQuery).then((data) => {
-      if (data && Array.isArray(data.items)) {
-        setEvents(data.items);
-      }
-    });
+    let isMounted = true;
+    const fetchLogs = () => {
+      api.getAuditLogs(filterType, searchQuery).then((data) => {
+        if (isMounted && data && Array.isArray(data.items)) {
+          setEvents(data.items);
+        }
+      });
+    };
+
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 4000);
+    window.addEventListener('focus', fetchLogs);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', fetchLogs);
+    };
   }, [filterType, searchQuery]);
 
   const filteredEvents = events;

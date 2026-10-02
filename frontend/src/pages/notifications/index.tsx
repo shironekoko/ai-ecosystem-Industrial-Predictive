@@ -34,34 +34,52 @@ export function NotificationsPage() {
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<'ALL' | 'CRITICAL' | 'WARNING' | 'INFO'>('ALL');
-  const [alarms, setAlarms] = useState<AlarmItem[]>([]);
+  const [allAlarms, setAllAlarms] = useState<AlarmItem[]>([]);
 
   useEffect(() => {
-    api.getAlarms(activeTab).then((data) => {
-      if (Array.isArray(data)) {
-        setAlarms(data);
-      }
-    });
-  }, [activeTab]);
+    let isMounted = true;
+    const fetchAlarms = () => {
+      // Always fetch all alarms so KPI summary overview remains accurate
+      api.getAlarms('ALL').then((data) => {
+        if (isMounted && Array.isArray(data)) {
+          setAllAlarms(data);
+        }
+      });
+    };
 
-  const criticalCount = alarms.filter((a) => a.severity === 'CRITICAL').length;
-  const warningCount = alarms.filter((a) => a.severity === 'WARNING').length;
-  const unreadCount = alarms.filter((a) => !a.isRead).length;
+    fetchAlarms();
+    const interval = setInterval(fetchAlarms, 2500);
+    window.addEventListener('focus', fetchAlarms);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', fetchAlarms);
+    };
+  }, []);
+
+  const criticalCount = allAlarms.filter((a) => a.severity === 'CRITICAL').length;
+  const warningCount = allAlarms.filter((a) => a.severity === 'WARNING').length;
+  const unreadCount = allAlarms.filter((a) => !a.isRead).length;
+
+  const displayedAlarms = activeTab === 'ALL'
+    ? allAlarms
+    : allAlarms.filter((a) => a.severity === activeTab);
 
   const handleMarkAllRead = async () => {
     await api.markAllAlarmsRead();
-    setAlarms((prev) => prev.map((a) => ({ ...a, isRead: true })));
+    setAllAlarms((prev) => prev.map((a) => ({ ...a, isRead: true })));
   };
 
   const handleDismiss = async (id: string) => {
     await api.deleteAlarm(id);
-    setAlarms((prev) => prev.filter((a) => a.id !== id));
+    setAllAlarms((prev) => prev.filter((a) => a.id !== id));
   };
 
   const handleItemClick = async (alarm: AlarmItem) => {
     if (!alarm.isRead) {
       await api.markAlarmRead(alarm.id);
-      setAlarms((prev) => prev.map((a) => (a.id === alarm.id ? { ...a, isRead: true } : a)));
+      setAllAlarms((prev) => prev.map((a) => (a.id === alarm.id ? { ...a, isRead: true } : a)));
     }
     if (alarm.actionUrl) {
       navigate(alarm.actionUrl);
@@ -97,7 +115,7 @@ export function NotificationsPage() {
         <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm flex items-center justify-between">
           <div>
             <span className="text-xs text-gray-500 font-semibold block">Total Alerts</span>
-            <span className="text-2xl font-mono font-bold text-gray-900">{alarms.length}</span>
+            <span className="text-2xl font-mono font-bold text-gray-900">{allAlarms.length}</span>
           </div>
           <div className="p-2.5 bg-gray-50 text-gray-600 rounded-xl">
             <Bell className="w-5 h-5" />
@@ -128,7 +146,7 @@ export function NotificationsPage() {
           <div>
             <span className="text-xs text-emerald-600 font-semibold block">System Status</span>
             <span className="text-base font-bold text-emerald-700 mt-1 block">
-              {alarms.length === 0 ? 'Normal / 0 Faults' : `${unreadCount} Unread`}
+              {allAlarms.length === 0 ? 'Normal / 0 Faults' : `${unreadCount} Unread`}
             </span>
           </div>
           <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
@@ -162,17 +180,21 @@ export function NotificationsPage() {
         </div>
 
         {/* Alarms Feed */}
-        {alarms.length === 0 ? (
+        {displayedAlarms.length === 0 ? (
           <div className="py-14">
             <EmptyState
               icon={CheckCircle2}
-              title="No Active System Alarms"
-              description="Spindle cutting forces, dynamic vibration, and optical edge verification are within normal operational limits. Real-time alerts will appear here when cutting anomalies occur."
+              title={activeTab === 'ALL' ? 'No Active System Alarms' : `No ${activeTab} Alarms`}
+              description={
+                activeTab === 'ALL'
+                  ? 'Spindle cutting forces, dynamic vibration, and optical edge verification are within normal operational limits. Real-time alerts will appear here when cutting anomalies occur.'
+                  : `There are currently no active alarms matching the ${activeTab} severity level.`
+              }
             />
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {alarms.map((alarm) => (
+            {displayedAlarms.map((alarm) => (
               <div
                 key={alarm.id}
                 className={`p-4 transition flex flex-col sm:flex-row items-start justify-between gap-4 ${

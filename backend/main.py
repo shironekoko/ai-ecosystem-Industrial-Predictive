@@ -86,11 +86,29 @@ async def lifespan(app: FastAPI):
 
         with SessionLocal() as db:
             if not get_user_by_email(db, "admin@machinery.internal"):
-                create_user(db, UserCreate(email="admin@machinery.internal", password="admin123", full_name="System Admin", username="admin", role="admin"))
+                create_user(
+                    db,
+                    email="admin@machinery.internal",
+                    username="admin",
+                    password="admin123",
+                    full_name="System Admin",
+                    role="admin",
+                    department="Operations & Security",
+                    title="Platform Administrator",
+                )
                 print("[OK] Seeded admin user")
             
             if not get_user_by_email(db, "engineer@machinery.internal"):
-                create_user(db, UserCreate(email="engineer@machinery.internal", password="engineer123", full_name="Maintenance Engineer", username="engineer", role="engineer"))
+                create_user(
+                    db,
+                    email="engineer@machinery.internal",
+                    username="engineer",
+                    password="engineer123",
+                    full_name="Maintenance Engineer",
+                    role="engineer",
+                    department="Maintenance Team",
+                    title="Reliability Engineer",
+                )
                 print("[OK] Seeded engineer user")
 
             from app.features.alarms.service import seed_alarms_if_empty
@@ -171,6 +189,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Anti-Caching Middleware for Real-time Industrial Telemetry ──
+from starlette.requests import Request
+
+@app.middleware("http")
+async def add_no_cache_header(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 
 # ── Include Routers ──
 from fastapi import APIRouter

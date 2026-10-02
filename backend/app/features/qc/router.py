@@ -61,13 +61,6 @@ async def get_microscope_image(record_id: str, type: Optional[str] = Query("tool
         raise HTTPException(status_code=404, detail=f"Image for {record_id} not found")
     return FileResponse(str(path), media_type="image/jpeg")
 
-@router.get("/gradcam/{record_id}.jpg", summary="Serve Grad-CAM heatmap visualization")
-async def get_gradcam_image(record_id: str):
-    """Serve Grad-CAM XAI explanation overlay"""
-    path = service.get_tool_image_file_path(record_id)
-    if not path or not path.exists():
-        raise HTTPException(status_code=404, detail=f"Grad-CAM image for {record_id} not found")
-    return FileResponse(str(path), media_type="image/jpeg")
 
 @router.post("/inspection-images", summary="Ingest optical photo from edge microscope camera")
 async def upload_inspection_image(
@@ -77,10 +70,19 @@ async def upload_inspection_image(
     image: UploadFile = File(...),
 ):
     """Edge endpoint for optical microscope camera to ingest a newly captured blade image"""
+    record_id = f"T{tool_id}R{pass_index}B{blade_index}"
+    ds_dir = service.get_dataset_dir()
+    saved = False
+    if ds_dir:
+        save_path = ds_dir / "tool" / f"{record_id}.jpg"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        content = await image.read()
+        with open(save_path, "wb") as f:
+            f.write(content)
+        saved = True
     return {
-        "job_id": f"qc-job-{tool_id}-{pass_index}-{blade_index}",
-        "status": "QUEUED",
-        "recordId": f"T{tool_id}R{pass_index}B{blade_index}",
+        "status": "SAVED" if saved else "NO_DATASET_DIR",
+        "recordId": record_id,
         "filename": image.filename,
-        "message": "Image received and queued for 3-Tier Multi-Modal inference pipeline",
+        "message": f"Image saved to dataset as {record_id}.jpg" if saved else "Image received but no dataset directory configured",
     }

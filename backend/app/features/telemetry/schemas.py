@@ -31,3 +31,4 @@ class MachineStatusResponse(BaseModel):
     status: str
     isStopped: bool
     stopReason: Optional[str] = None
+    stoppedRun: Optional[int] = None

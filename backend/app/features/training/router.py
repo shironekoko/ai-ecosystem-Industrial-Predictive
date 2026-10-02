@@ -97,6 +97,21 @@ async def get_retrain_pool_status():
     return get_retraining_pool_status()
 
 
+@router.get("/retrain/queue-count", summary="Get active retrain queue count")
+async def get_retrain_queue_count():
+    from core.database import SessionLocal
+    from app.features.audit.models import AuditLog
+    active = sum(1 for j in service._LOCAL_JOBS.values() if j.get("status") in ("queued", "in_progress", "QUEUED", "IN_PROGRESS"))
+    db = SessionLocal()
+    try:
+        flagged_count = db.query(AuditLog).filter(AuditLog.event_type == "RETRAIN_TRIGGERED").count()
+    except Exception:
+        flagged_count = 0
+    finally:
+        db.close()
+    return {"queueCount": max(active, flagged_count)}
+
+
 @router.websocket("/retrain/live/{job_id}")
 @router.websocket("/training/live/{job_id}")
 async def websocket_retraining_live(websocket: WebSocket, job_id: str):

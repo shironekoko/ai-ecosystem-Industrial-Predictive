@@ -27,6 +27,44 @@ async def get_raw_machine_sensor():
     machine = service.get_machine()
     return machine.get_raw_sensor_frame()
 
+@router.post("/machine/start", summary="Start machine physical cutting cycle")
+async def start_machine():
+    """
+    Hardware API to start the spindle motor and begin cutting telemetry.
+    """
+    machine = service.get_machine()
+    success = service.start_machine()
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot start machine while Safety Interlock is tripped (cutter reached DULL state). Mount fresh tool first."
+        )
+    return {
+        "success": True,
+        "machineId": machine.machine_id,
+        "toolId": machine.tool_id,
+        "status": machine.status,
+        "currentRun": machine.current_run,
+        "message": f"Spindle motor started at Pass #{machine.current_run}",
+    }
+
+@router.post("/machine/pause", summary="Pause machine physical cutting cycle")
+async def pause_machine(req: Optional[MachineStopRequest] = None):
+    """
+    Hardware API to pause the spindle motor without resetting progress.
+    """
+    reason = req.reason if req and req.reason else "Operator paused cutting stream"
+    machine = service.get_machine()
+    service.pause_machine(reason=reason)
+    return {
+        "success": True,
+        "machineId": machine.machine_id,
+        "toolId": machine.tool_id,
+        "status": machine.status,
+        "currentRun": machine.current_run,
+        "message": f"Spindle motor paused at Pass #{machine.current_run}. Reason: {reason}",
+    }
+
 @router.post("/machine/stop", response_model=MachineStopResponse, summary="Stop machine spindle at specific run")
 async def stop_machine(req: MachineStopRequest):
     """
@@ -73,6 +111,7 @@ async def get_machine_status():
         status=machine.status,
         isStopped=machine.status == "STOPPED",
         stopReason=machine.stop_reason,
+        stoppedRun=machine.stopped_run,
     )
 
 # ─────────────────────────────────────────────────────────────
@@ -125,9 +164,11 @@ async def websocket_spindle_stream(
             while True:
                 data = await websocket.receive_json()
                 cmd = data.get("command")
-                if cmd == "PAUSE_STREAM":
-                    is_paused = True
-                elif cmd == "RESUME_STREAM":
+                if cmd in ("PAUSE_STREAM", "PAUSE"):
+                    service.pause_machine("Operator paused streaming via WebSocket")
+                    is_paused = False
+                elif cmd in ("RESUME_STREAM", "START_STREAM", "START", "RESUME"):
+                    service.start_machine()
                     is_paused = False
                 elif cmd in ("RESET", "MOUNT_FRESH_TOOL"):
                     service.reset_machine()
@@ -147,13 +188,12 @@ async def websocket_spindle_stream(
 
     listener_task = asyncio.create_task(listen_commands())
 
+    queue = coordinator.subscribe()
     try:
         while True:
             if not is_paused:
-                await coordinator.wait_for_packet()
-                packet = coordinator.get_latest_packet()
-                if packet:
-                    await websocket.send_json(packet)
+                packet = await queue.get()
+                await websocket.send_json(packet)
             else:
                 await asyncio.sleep(0.1)
     except WebSocketDisconnect:
@@ -161,6 +201,7 @@ async def websocket_spindle_stream(
     except Exception:
         pass
     finally:
+        coordinator.unsubscribe(queue)
         listener_task.cancel()
 
 # ─────────────────────────────────────────────────────────────
@@ -181,14 +222,18 @@ async def control_spindle(req: SpindleControlRequest):
     )
 
 @router.get("/forces", summary="Query force telemetry snapshot for a specific pass")
-async def get_forces(tool_id: int = Query(10), run: int = Query(11)):
+async def get_forces(tool_id: int = Query(10, description="Tool ID (currently only Tool 10 is supported)"), run: int = Query(11)):
     """Fetch snapshot force metrics and AI prediction for a specific tool pass"""
+    if tool_id != 10:
+        raise HTTPException(status_code=400, detail=f"Tool {tool_id} telemetry data is not available. Only Tool 10 is currently supported.")
     packet = service.generate_telemetry_packet(0.0, pass_index=run)
     return packet
 
 @router.get("/waveform", summary="Get downsampled time-series force curve for charting a pass")
-async def get_waveform(tool_id: int = Query(10), run: int = Query(11), points: int = Query(50, ge=10, le=200)):
+async def get_waveform(tool_id: int = Query(10, description="Tool ID (currently only Tool 10 is supported)"), run: int = Query(11), points: int = Query(50, ge=10, le=200)):
     """Fetch time-series force waveform points (Fx, Fy, Fz, Fres) for historical charting"""
+    if tool_id != 10:
+        raise HTTPException(status_code=400, detail=f"Tool {tool_id} telemetry data is not available. Only Tool 10 is currently supported.")
     return service.get_run_waveform(run, target_points=points)
 
 @router.get("/status", summary="Get overall machine and tool status")

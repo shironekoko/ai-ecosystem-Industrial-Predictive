@@ -7,11 +7,12 @@ SPINDLES: List[SpindleFleetItem] = [
         id="CNC-SP-01",
         name="Haas VF-2SS (Spindle 1)",
         toolId=10,
-        currentRun=4,
-        currentBlade=2,
-        flankWearUm=48.5,
-        rulCuts=8,
-        healthIndex=88,
+        currentRun=1,
+        currentBlade=1,
+        progressPct=0.0,
+        flankWearUm=None,
+        rulCuts=None,
+        healthIndex=100,
         status="HEALTHY",
         feedRate=450.0,
         speedRpm=3200,
@@ -20,15 +21,32 @@ SPINDLES: List[SpindleFleetItem] = [
 
 def get_fleet_spindles() -> List[SpindleFleetItem]:
     try:
-        from app.features.telemetry.service import get_coordinator, TimeSeriesPredictor
+        from app.features.telemetry.service import get_coordinator, TimeSeriesPredictor, _load_tool10_cache
         coordinator = get_coordinator()
         machine = coordinator.get_machine_simulator()
         current_run = machine.current_run
         ai = TimeSeriesPredictor.predict_wear(current_run)
 
-        status_str = "CRITICAL" if ai["isDull"] or machine.status == "STOPPED" else ("WARNING" if current_run >= 7 else "HEALTHY")
-        rul = max(0, 11 - current_run)
-        health = max(5, int(100 - (ai["flankWearUm"] / 130.0 * 85)))
+        # Compute live progress percentage from physical machine state
+        cache = _load_tool10_cache()
+        run_data = cache.get(f"run_{current_run}", cache.get("run_1", {}))
+        total_pts = len(run_data.get("fx", [])) if "fx" in run_data else 2400
+        progress_pct = min(100.0, round((machine.point_index / max(1, total_pts)) * 100.0, 1))
+
+        is_interlock = bool(
+            machine.stop_reason
+            and ("Safety Interlock" in machine.stop_reason or "DULL" in machine.stop_reason)
+        )
+
+        if is_interlock or ai["isDull"]:
+            status_str = "CRITICAL"
+            health = 25
+        elif ai["condition"] == "USED":
+            status_str = "WARNING"
+            health = 70
+        else:
+            status_str = "HEALTHY"
+            health = 98
 
         sp1 = SpindleFleetItem(
             id="CNC-SP-01",
@@ -36,12 +54,13 @@ def get_fleet_spindles() -> List[SpindleFleetItem]:
             toolId=machine.tool_id,
             currentRun=current_run,
             currentBlade=1,
-            flankWearUm=round(float(ai["flankWearUm"]), 1),
-            rulCuts=rul,
+            progressPct=progress_pct,
+            flankWearUm=None,
+            rulCuts=None,
             healthIndex=health,
             status=status_str,
-            feedRate=450.0,
-            speedRpm=3200,
+            feedRate=450.0 if machine.status == "RUNNING" else 0.0,
+            speedRpm=3200 if machine.status == "RUNNING" else 0,
         )
         return [sp1]
     except Exception:

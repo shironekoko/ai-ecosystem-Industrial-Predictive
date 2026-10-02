@@ -7,8 +7,9 @@ class SpindleFleetItem(BaseModel):
     toolId: int
     currentRun: int
     currentBlade: int
-    flankWearUm: float
-    rulCuts: int
+    progressPct: float = 0.0
+    flankWearUm: Optional[float] = None
+    rulCuts: Optional[int] = None
     healthIndex: int
     status: Literal["HEALTHY", "WARNING", "CRITICAL"]
     feedRate: float

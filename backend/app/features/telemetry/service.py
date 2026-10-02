@@ -45,33 +45,75 @@ def _load_tool10_cache() -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Failed to load cache: {e}")
 
-    # Fallback synthesizer matching Tool 10 physical measurements
-    cache = {}
-    for r in range(1, 15):
-        wear_factor = 1.0 + (r - 1) * 0.08
-        pts_count = 2400
-        t = np.linspace(0, 10.0, pts_count, dtype=np.float32)
-        tooth_harmonics = np.sin(t * 50.0) * (18.0 * wear_factor)
-        chatter = np.sin(t * 120.0) * (8.0 * (wear_factor ** 1.5))
-        fx = (45.0 * wear_factor) + tooth_harmonics + chatter
-        fy = (65.0 * wear_factor) + (np.cos(t * 50.0) * 22.0) + (np.sin(t * 8.0) * 6.0)
-        fz = (110.0 * wear_factor) + (np.sin(t * 50.0 + 0.5) * 35.0)
-        fres = np.sqrt(fx**2 + fy**2 + fz**2)
+    # Directly extract real physical sensor forces from forces_xyz_raw.mat
+    try:
+        import glob
+        import re
+        import scipy.io as sio
 
-        cache[f"run_{r}"] = {
-            "run": r,
-            "id": f"T10R{r}",
-            "fx": fx,
-            "fy": fy,
-            "fz": fz,
-            "fres": fres,
-            "condition": "DULLED" if r >= 11 else ("USED" if r >= 7 else "SHARP"),
-            "confidence": 0.97 if r >= 11 else (0.92 if r >= 7 else 0.98),
-            "flankWearUm": round(107.3 + (r - 11) * 12.5, 1) if r >= 11 else (round(67.0 + (r - 7) * 8.3, 1) if r >= 7 else round(32.1 + (r - 1) * 5.6, 1)),
-            "chippingGapUm": round(18.4 if r >= 11 else (7.2 if r >= 7 else 2.5), 1),
-            "ptsCount": pts_count,
-        }
-    _TOOL10_CACHE = cache
+        mat_candidates = [
+            Path("/dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition/forces_xyz_raw.mat"),
+            Path("/dataset/forces_xyz_raw.mat"),
+            Path(__file__).resolve().parents[4] / "dataset" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)" / "Nonastreda Multimodal Dataset for Identifying Tool Wear Condition" / "forces_xyz_raw.mat",
+        ]
+        mat_path = None
+        for c in mat_candidates:
+            if c.exists():
+                mat_path = c
+                break
+        if not mat_path:
+            found = glob.glob("/dataset/**/forces_xyz_raw.mat", recursive=True)
+            if found:
+                mat_path = Path(found[0])
+
+        if mat_path and mat_path.exists():
+            d = sio.loadmat(str(mat_path))
+            ds = d["baseDatastore"]
+            cache = {}
+            for i in range(len(ds)):
+                name = str(ds[i, 0][0])
+                m = re.match(r"T10R(\d+)B1\.jpg", name)
+                if m:
+                    r = int(m.group(1))
+                    cond = str(ds[i, 1][0, 0][0]).upper()
+                    forces = ds[i, 3]  # shape (3, N) at 1 kHz raw
+                    fx, fy, fz = forces[0], forces[1], forces[2]
+                    fres = np.sqrt(fx**2 + fy**2 + fz**2)
+
+                    # Decimate 50x (1,000 Hz raw -> 20 Hz telemetry stream)
+                    step = 50
+                    fx_20hz = fx[::step].astype(np.float32)
+                    fy_20hz = fy[::step].astype(np.float32)
+                    fz_20hz = fz[::step].astype(np.float32)
+                    fres_20hz = fres[::step].astype(np.float32)
+
+                    cache[f"run_{r}"] = {
+                        "run": r,
+                        "id": f"T10R{r}",
+                        "fx": fx_20hz,
+                        "fy": fy_20hz,
+                        "fz": fz_20hz,
+                        "fres": fres_20hz,
+                        "condition": cond,
+                        "confidence": 0.98 if cond == "SHARP" else (0.92 if cond == "USED" else 0.96),
+                        "flankWearUm": None,
+                        "chippingGapUm": None,
+                        "ptsCount": len(fx_20hz),
+                    }
+            if cache:
+                _TOOL10_CACHE = cache
+                try:
+                    _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                    joblib.dump(cache, str(_CACHE_PATH))
+                except Exception:
+                    pass
+                logger.info(f"Successfully extracted {len(cache)} runs from forces_xyz_raw.mat")
+                return _TOOL10_CACHE
+    except Exception as err:
+        logger.error(f"Error loading forces_xyz_raw.mat: {err}")
+
+    # Fallback to minimal authentic container if mat unavailable
+    _TOOL10_CACHE = {}
     return _TOOL10_CACHE
 
 
@@ -86,16 +128,16 @@ class CNCMachineSimulator:
     - Exposes hardware control APIs: stop_spindle(reason, run) and reset_spindle().
     """
 
-    def __init__(self, machine_id: str = "CNC-MILLING-01", tool_id: int = 10):
+    def __init__(self, machine_id: str = "CNC-SP-01", tool_id: int = 10):
         self.machine_id = machine_id
         self.tool_id = tool_id
         self.current_run = 1  # 1 to 14
         self.point_index = 0
         self.step_size = 40  # points per packet (~4.8 seconds per run at 12.5 Hz)
         self.chunk_size = 12
-        self.status = "RUNNING"  # "RUNNING" | "STOPPED"
-        self.stop_reason: Optional[str] = None
-        self.stopped_run: Optional[int] = None
+        self.status = "STOPPED"  # Initially STANDBY awaiting operator start command
+        self.stop_reason = "Standby: Awaiting operator start command"
+        self.stopped_run = None
 
     def get_raw_sensor_frame(self) -> Dict[str, Any]:
         """Fetch raw sensor frame directly from machine telemetry bus"""
@@ -111,20 +153,20 @@ class CNCMachineSimulator:
         total_pts = len(fx_arr)
 
         if self.status == "STOPPED":
-            # Spindle is stopped by API: emit zero/idle cutting forces
+            # Spindle is stopped/paused: emit zero/idle cutting forces without advancing point_index!
             return {
                 "timestamp": now_ms,
                 "machineId": self.machine_id,
                 "toolId": self.tool_id,
                 "passIndex": self.current_run,
-                "runProgressPct": 100.0,
+                "runProgressPct": round((self.point_index / max(1, total_pts)) * 100.0, 1),
                 "forces": {"fx": 0.0, "fy": 0.0, "fz": 0.0, "fres": 0.0},
                 "waveformChunk": {
                     "fx": [0.0] * self.chunk_size,
                     "fy": [0.0] * self.chunk_size,
                     "fz": [0.0] * self.chunk_size,
                 },
-                "isPassCompleted": True,
+                "isPassCompleted": False,
                 "machineStatus": self.status,
                 "stopReason": self.stop_reason,
             }
@@ -172,6 +214,25 @@ class CNCMachineSimulator:
             "stopReason": self.stop_reason,
         }
 
+    def start_spindle(self) -> bool:
+        """Machine Start API: Starts physical milling cutting cycle"""
+        if self.stop_reason and "Safety Interlock" in self.stop_reason and not ("QC_CLEARED" in self.stop_reason):
+            logger.warning("Cannot start spindle while Safety Interlock is tripped. Cutter reached DULL state; mount fresh tool first.")
+            return False
+        self.status = "RUNNING"
+        self.stop_reason = None
+        self.stopped_run = None
+        logger.info(f"▶️ [Machine API] Spindle motor STARTED at Pass #{self.current_run}.")
+        return True
+
+    def pause_spindle(self, reason: str = "Operator paused cutting stream") -> bool:
+        """Machine Pause/Stop API: Halts physical spindle motor"""
+        self.status = "STOPPED"
+        self.stop_reason = reason
+        self.stopped_run = self.current_run
+        logger.info(f"⏸️ [Machine API] Spindle motor PAUSED at Pass #{self.current_run}.")
+        return True
+
     def stop_spindle(self, reason: str, run: Optional[int] = None) -> bool:
         """Machine Stop API: Halts the spindle motor at the specified run"""
         self.status = "STOPPED"
@@ -181,13 +242,13 @@ class CNCMachineSimulator:
         return True
 
     def reset_spindle(self) -> None:
-        """Machine Reset API: Mounts a fresh tool and resumes machine at Run #1"""
+        """Machine Reset API: Mounts a fresh tool and readies machine at Run #1 in STANDBY"""
         self.current_run = 1
         self.point_index = 0
-        self.status = "RUNNING"
-        self.stop_reason = None
+        self.status = "STOPPED"
+        self.stop_reason = "Fresh cutter mounted. Machine in Standby at Pass #1."
         self.stopped_run = None
-        logger.info(f"🔄 [Machine API] Spindle reset to fresh tool. Ready at Run #1.")
+        logger.info("🔄 [Machine API] Spindle reset to fresh tool. Ready in Standby at Run #1.")
 
     def advance_to_next_pass(self) -> None:
         """Advance physical workpiece pass if not stopped"""
@@ -220,10 +281,10 @@ class TimeSeriesPredictor:
             "passIndex": pass_index,
             "condition": condition,
             "confidence": confidence,
-            "flankWearUm": flank_wear,
-            "chippingGapUm": chipping_gap,
+            "flankWearUm": None,  # No online Vb regression model (requires physical microscope bench)
+            "chippingGapUm": None,
             "isDull": condition == "DULLED",
-            "estimatedRemainingCycles": max(0, 11 - pass_index),
+            "estimatedRemainingCycles": None,  # No RUL model (prevent ground truth future leakage)
         }
 
 
@@ -244,18 +305,29 @@ class EdgeTelemetryCoordinator:
         self.ai = TimeSeriesPredictor()
         self.completed_runs: List[Dict[str, Any]] = []
         self._latest_packet: Optional[Dict[str, Any]] = None
-        self._packet_event = asyncio.Event()
+        self._subscribers: set = set()
+
+    def subscribe(self) -> asyncio.Queue:
+        q = asyncio.Queue(maxsize=30)
+        self._subscribers.add(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue):
+        self._subscribers.discard(q)
 
     async def run_simulation_loop(self):
-        """Background loop that advances the CNC simulation independently of WebSocket clients."""
+        """Background loop that delivers CNC telemetry to subscribers."""
         while True:
-            if self.machine.status == 'RUNNING':
-                packet = self.get_next_telemetry_packet()
-                # Store latest packet for WebSocket clients to read
-                self._latest_packet = packet
-                self._packet_event.set()  # Notify waiting clients
-                self._packet_event = asyncio.Event()  # Reset for next
-            await asyncio.sleep(0.08)  # ~12.5 Hz sampling rate
+            packet = self.get_next_telemetry_packet()
+            self._latest_packet = packet
+            for q in list(self._subscribers):
+                try:
+                    if q.full():
+                        q.get_nowait()
+                    q.put_nowait(packet)
+                except Exception:
+                    pass
+            await asyncio.sleep(0.08 if self.machine.status == 'RUNNING' else 0.3)
 
     async def wait_for_packet(self):
         await self._packet_event.wait()
@@ -282,7 +354,7 @@ class EdgeTelemetryCoordinator:
 
         ai_result = None
         # 2. Only evaluate Time-Series model when the cutting pass finishes!
-        if is_completed:
+        if is_completed and self.machine.status == "RUNNING":
             ai_result = self.ai.predict_wear(current_run)
 
             # Record into completed_runs history if not already recorded
@@ -298,43 +370,47 @@ class EdgeTelemetryCoordinator:
                 })
 
             # Check if AI evaluates DULL upon pass completion
-            if self.machine.status == "RUNNING":
-                if ai_result["isDull"]:
-                    # 🛑 AI PREDICTS DULL: Command the machine to STOP via its API!
-                    stop_reason = (
-                        f"Time-Series CRNN Model evaluated cutter reached DULL state (Vb={ai_result['flankWearUm']} µm) "
-                        f"upon completing Pass #{current_run}. Spindle auto-stopped via Safety Interlock."
+            if ai_result["isDull"]:
+                stop_reason = (
+                    f"Time-Series CRNN Model evaluated cutter reached DULL state "
+                    f"upon completing Pass #{current_run} (cutting force anomaly detected). Spindle auto-stopped via Safety Interlock."
+                )
+                self.machine.stop_spindle(reason=stop_reason, run=current_run)
+                try:
+                    from app.features.alarms.service import trigger_alarm
+                    from app.features.audit.service import record_audit_event
+                    trigger_alarm(
+                        severity="CRITICAL",
+                        title=f"Spindle #{self.machine.tool_id} Safety Interlock Tripped",
+                        message=stop_reason,
+                        source_service="Force_CRNN_Interlock",
+                        machine_id=self.machine.machine_id,
+                        tool_ref=f"T{self.machine.tool_id}R{current_run}",
+                        action_url="/machine-monitoring",
                     )
-                    self.machine.stop_spindle(reason=stop_reason, run=current_run)
-                    try:
-                        from app.features.alarms.service import trigger_alarm
-                        from app.features.audit.service import record_audit_event
-                        trigger_alarm(
-                            severity="CRITICAL",
-                            title=f"Spindle #{self.machine.tool_id} Safety Interlock Tripped",
-                            message=stop_reason,
-                            source_service="Force_CRNN_Interlock",
-                            machine_id=self.machine.machine_id,
-                            tool_ref=f"T{self.machine.tool_id}R{current_run}",
-                            action_url="/machine-monitoring",
-                        )
-                        record_audit_event(
-                            event_type="WEAR_CONFIRMED",
-                            actor="Time-Series AI Agent",
-                            role="Edge Inference Service",
-                            target_resource=f"T{self.machine.tool_id}R{current_run}",
-                            summary=stop_reason,
-                            status="WARNING",
-                        )
-                    except Exception as err:
-                        logger.warning(f"Alarm/Audit trigger warning: {err}")
-                else:
-                    # ✅ CUTTER HEALTHY (SHARP or USED): Machine continues naturally to next pass
-                    self.machine.advance_to_next_pass()
+                    record_audit_event(
+                        event_type="WEAR_CONFIRMED",
+                        actor="Time-Series AI Agent",
+                        role="Edge Inference Service",
+                        target_resource=f"T{self.machine.tool_id}R{current_run}",
+                        summary=stop_reason,
+                        status="WARNING",
+                    )
+                except Exception as err:
+                    logger.warning(f"Alarm/Audit trigger warning: {err}")
+            else:
+                # ✅ CUTTER HEALTHY (SHARP or USED): Machine continues naturally to next pass
+                self.machine.advance_to_next_pass()
 
         # Format inference payload:
         # If pass just completed, send evaluated AI result.
         # While pass is actively cutting, status is IN_PROGRESS (sampling force waves).
+        is_interlock = bool(
+            self.machine.stop_reason
+            and ("Safety Interlock" in self.machine.stop_reason or "DULL" in self.machine.stop_reason)
+        )
+        is_stopped = (self.machine.status == "STOPPED")
+
         if ai_result:
             inference_payload = {
                 "condition": ai_result["condition"],
@@ -343,6 +419,15 @@ class EdgeTelemetryCoordinator:
                 "chippingGapUm": ai_result["chippingGapUm"],
                 "estimatedRemainingCycles": ai_result["estimatedRemainingCycles"],
                 "status": "COMPLETED",
+            }
+        elif is_stopped:
+            inference_payload = {
+                "condition": "DULLED" if is_interlock else "STANDBY",
+                "confidence": None,
+                "flankWearUm": None,
+                "chippingGapUm": None,
+                "estimatedRemainingCycles": None,
+                "status": "STOPPED",
             }
         else:
             inference_payload = {
@@ -355,18 +440,21 @@ class EdgeTelemetryCoordinator:
             }
 
         # 3. Format packet for Web Dashboard
-        is_stopped = (self.machine.status == "STOPPED")
-        interlock_status = "TRIPPED" if is_stopped else "NORMAL"
-        machine_state = "EMERGENCY_HALTED" if is_stopped else "ENGAGED"
+        interlock_status = "TRIPPED" if is_interlock else "NORMAL"
+        machine_state = "EMERGENCY_HALTED" if is_interlock else ("STANDBY" if is_stopped else "ENGAGED")
 
         return {
             "timestamp": raw_frame["timestamp"],
+            "machineId": self.machine.machine_id,
             "toolId": raw_frame["toolId"],
             "passIndex": current_run,
-            "cycleDurationSec": 45.2,
+            "cycleDurationSec": 122.0,  # ~122,000 raw samples at 1 kHz sampling rate
             "runProgressPct": raw_frame["runProgressPct"],
             "isPassCompleted": is_completed,
-            "samplingRateHz": 1000,
+            "samplingRateHz": 1000,  # Raw acquisition sampling rate: 1 kHz
+            "rawSamplingRateHz": 1000,  # 1,000 samples/sec (forces_xyz_raw.mat)
+            "telemetrySamplingRateHz": 20,  # Decimated stream: 20 Hz for web visualization
+            "sensorHardware": "Kistler 3-Component Dynamometer (1 kHz Raw)",
             "forces": raw_frame["forces"],
             "waveformChunk": raw_frame["waveformChunk"],
             "inference": inference_payload,
@@ -374,6 +462,7 @@ class EdgeTelemetryCoordinator:
             "interlockReason": self.machine.stop_reason,
             "machineState": machine_state,
         }
+
 
 
 # Global singleton instance of coordinator
@@ -389,6 +478,16 @@ def get_machine() -> CNCMachineSimulator:
 
 
 # ── External API Interfaces ──
+def start_machine() -> bool:
+    """API endpoint to start physical cutting"""
+    return get_machine().start_spindle()
+
+
+def pause_machine(reason: str = "Operator paused cutting stream") -> bool:
+    """API endpoint to pause physical cutting"""
+    return get_machine().pause_spindle(reason)
+
+
 def stop_machine(reason: str, run: Optional[int] = None) -> bool:
     """API endpoint to stop the physical machine"""
     return get_machine().stop_spindle(reason, run)
@@ -400,19 +499,18 @@ def reset_machine() -> None:
 
 
 def set_spindle_action(spindle_id: str, action: str) -> bool:
-    """Legacy/compatible spindle control interface"""
-    if action in ("MOUNT_FRESH_TOOL", "RESET"):
+    """Spindle control interface"""
+    action_upper = action.upper()
+    if action_upper in ("MOUNT_FRESH_TOOL", "RESET"):
         reset_machine()
-    elif action == "EMERGENCY_STOP":
-        stop_machine("Emergency Stop commanded via API")
-    elif action == "RESUME":
-        machine = get_machine()
-        if machine.stop_reason and "DULL" in machine.stop_reason:
-            logger.warning("Cannot resume while cutter is DULL. Fresh tool required.")
-            return False
-        machine.status = "RUNNING"
-        machine.stop_reason = None
-    return True
+        return True
+    elif action_upper in ("EMERGENCY_STOP", "STOP", "E_STOP"):
+        return stop_machine("Emergency Stop commanded via API")
+    elif action_upper in ("PAUSE", "FEED_HOLD", "STOP_STREAM"):
+        return pause_machine("Feed hold commanded via API")
+    elif action_upper in ("RESUME", "START", "START_STREAM"):
+        return start_machine()
+    return False
 
 
 def generate_telemetry_packet(t_offset: float = 0.0, pass_index: Optional[int] = None) -> Dict[str, Any]:

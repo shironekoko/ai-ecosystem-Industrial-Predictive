@@ -323,12 +323,41 @@ export class ApiService {
     return this.getRetrainStatus(jobId);
   }
 
+  public async getRetrainQueueCount(): Promise<number> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/retrain/queue-count`);
+      if (res.ok) {
+        const data = await res.json();
+        return typeof data.queueCount === 'number' ? data.queueCount : 0;
+      }
+    } catch (err) {
+      console.warn('[API] Backend getRetrainQueueCount error:', err);
+    }
+    return 0;
+  }
+
+  public async pingWorker(): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/workers/redis/ping`);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Fetch CNC spindle fleet status
    */
   public async getFleetSpindles() {
     try {
-      const res = await fetch(`${API_BASE_URL}/fleet/spindles`);
+      const res = await fetch(`${API_BASE_URL}/fleet/spindles?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          ...this.getAuthHeaders(),
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
+      });
       if (res.ok) {
         return await res.json();
       }
@@ -343,7 +372,14 @@ export class ApiService {
    */
   public async getFleetSummary() {
     try {
-      const res = await fetch(`${API_BASE_URL}/fleet/summary`);
+      const res = await fetch(`${API_BASE_URL}/fleet/summary?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          ...this.getAuthHeaders(),
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
+      });
       if (res.ok) {
         return await res.json();
       }
@@ -539,6 +575,39 @@ export class ApiService {
     return null;
   }
 
+  public async startMachine() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/telemetry/machine/start`, {
+        method: 'POST',
+        headers: { ...this.getAuthHeaders() },
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+      const errData = await res.json().catch(() => ({}));
+      return { success: false, detail: errData.detail || 'Start machine failed' };
+    } catch (err) {
+      console.warn('[API] Backend startMachine error:', err);
+      return { success: false, detail: String(err) };
+    }
+  }
+
+  public async pauseMachine(reason: string = 'Operator paused cutting stream') {
+    try {
+      const res = await fetch(`${API_BASE_URL}/telemetry/machine/pause`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+        body: JSON.stringify({ reason }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('[API] Backend pauseMachine error:', err);
+    }
+    return null;
+  }
+
   public async resetMachine() {
     try {
       const res = await fetch(`${API_BASE_URL}/telemetry/machine/reset`, {
@@ -556,7 +625,14 @@ export class ApiService {
 
   public async getMachineStatus() {
     try {
-      const res = await fetch(`${API_BASE_URL}/telemetry/machine/status`);
+      const res = await fetch(`${API_BASE_URL}/telemetry/machine/status?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          ...this.getAuthHeaders(),
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
+      });
       if (res.ok) {
         return await res.json();
       }
@@ -568,7 +644,14 @@ export class ApiService {
 
   public async getMillingHistory() {
     try {
-      const res = await fetch(`${API_BASE_URL}/telemetry/history`);
+      const res = await fetch(`${API_BASE_URL}/telemetry/history?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          ...this.getAuthHeaders(),
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
+      });
       if (res.ok) {
         return await res.json();
       }

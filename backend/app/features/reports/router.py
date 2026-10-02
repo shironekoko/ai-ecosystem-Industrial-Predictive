@@ -38,16 +38,6 @@ async def get_shift_summary(shift: str = Query("current", description="Shift ide
     finally:
         db.close()
 
-@router.get("/export/pdf", summary="Export degradation report as PDF")
-async def export_pdf(period: str = Query("30D")):
-    """Generate and download degradation summary report PDF"""
-    content = f"Nonastreda Industrial Predictive Maintenance Report\nGenerated for period: {period}\n"
-    return Response(
-        content=content.encode("utf-8"),
-        media_type="text/plain",
-        headers={"Content-Disposition": f"attachment; filename=pdm_report_{period}.txt"},
-    )
-
 @router.get("/export/csv", summary="Export degradation report as CSV")
 async def export_csv(period: str = Query("30D")):
     """Generate and download degradation summary report CSV"""

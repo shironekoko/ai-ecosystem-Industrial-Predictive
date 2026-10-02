@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Activity,
   Play,
@@ -15,6 +15,7 @@ import {
   Clock,
   Radio,
   Trash2,
+  Wrench,
 } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { StatusBadge } from '../../components/common/StatusBadge';
@@ -44,9 +45,13 @@ export interface StreamingDataPoint {
 
 export function MachineMonitoringPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  // Active Tool state
-  const [selectedToolId, setSelectedToolId] = useState<number>(10);
+  // Active Tool state (read from URL params if navigated from Dashboard)
+  const [selectedToolId, setSelectedToolId] = useState<number>(() => {
+    const toolParam = searchParams.get('tool');
+    return toolParam ? Number(toolParam) : 10;
+  });
 
   // Per-Run Progression items (Clean / empty by default awaiting API or stream)
   const [runs, setRuns] = useState<RunProgressionItem[]>([]);
@@ -76,9 +81,57 @@ export function MachineMonitoringPage() {
   const [streamStatus, setStreamStatus] = useState<'IDLE' | 'CONNECTING' | 'STREAMING' | 'ERROR'>('IDLE');
   const wsRef = useRef<WebSocket | null>(null);
 
-  // Restore history upon returning to the page or initial mount
+  const [machineStatus, setMachineStatus] = useState<{
+    status: string;
+    isStopped: boolean;
+    currentRun: number;
+    stoppedRun?: number;
+    stopReason?: string;
+  } | null>(null);
+
+  // Sync machine hardware status and milling history periodically
   useEffect(() => {
     let isMounted = true;
+
+    const syncMachineAndHistory = () => {
+      api.getMachineStatus().then((ms) => {
+        if (isMounted && ms) {
+          setMachineStatus(ms);
+          if (ms.status === 'RUNNING') {
+            setIsStreaming(true);
+            try { sessionStorage.setItem('pdm_streaming_active', 'true'); } catch {}
+          } else if (ms.isStopped) {
+            setIsStreaming(false);
+            try { sessionStorage.removeItem('pdm_streaming_active'); } catch {}
+          }
+        }
+      });
+
+      api.getMillingHistory()
+        .then((data: any) => {
+          if (!isMounted || !data) return;
+          if (Array.isArray(data.runs) && data.runs.length > 0) {
+            const loadedRuns: RunProgressionItem[] = data.runs.map((r: any) => ({
+              run: r.run,
+              tsPrediction: r.tsPrediction,
+              confidence: r.confidence ?? 0.95,
+              flankWearUm: r.flankWearUm,
+              gapsUm: r.chippingGapUm,
+              fres: r.fres,
+            }));
+            setRuns(loadedRuns);
+            setActiveRunNumber((prev) => prev ?? loadedRuns[loadedRuns.length - 1].run);
+            try {
+              sessionStorage.setItem('milling_runs_cache', JSON.stringify(loadedRuns));
+            } catch {}
+          } else if (data.currentRun) {
+            setActiveCuttingRun(data.currentRun);
+          }
+        })
+        .catch((err: any) => {
+          console.warn('[Telemetry] History fetch error:', err);
+        });
+    };
 
     // Fast local restore from sessionStorage to eliminate UI flash
     try {
@@ -92,40 +145,14 @@ export function MachineMonitoringPage() {
       }
     } catch {}
 
-    // Authoritative backend sync from /api/v1/telemetry/history
-    api.getMillingHistory()
-      .then((data: any) => {
-        if (!isMounted || !data) return;
-        if (data.isStopped) {
-          setIsStreaming(false);
-          try {
-            sessionStorage.removeItem('pdm_streaming_active');
-          } catch {}
-        }
-        if (Array.isArray(data.runs) && data.runs.length > 0) {
-          const loadedRuns: RunProgressionItem[] = data.runs.map((r: any) => ({
-            run: r.run,
-            tsPrediction: r.tsPrediction,
-            confidence: r.confidence ?? 0.95,
-            flankWearUm: r.flankWearUm,
-            gapsUm: r.chippingGapUm,
-            fres: r.fres,
-          }));
-          setRuns(loadedRuns);
-          setActiveRunNumber(loadedRuns[loadedRuns.length - 1].run);
-          try {
-            sessionStorage.setItem('milling_runs_cache', JSON.stringify(loadedRuns));
-          } catch {}
-        } else if (data.currentRun) {
-          setActiveCuttingRun(data.currentRun);
-        }
-      })
-      .catch((err: any) => {
-        console.warn('[Telemetry] History fetch error:', err);
-      });
+    syncMachineAndHistory();
+    const interval = setInterval(syncMachineAndHistory, 2500);
+    window.addEventListener('focus', syncMachineAndHistory);
 
     return () => {
       isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', syncMachineAndHistory);
     };
   }, []);
 
@@ -166,8 +193,10 @@ export function MachineMonitoringPage() {
   const isTwoFactorConfirmed = Boolean(isTimeSeriesAlert && chipAiCondition === 'DULLED');
 
   useEffect(() => {
+    let isMounted = true;
     if (isTimeSeriesAlert && activeRunNumber && !currentRunInfo?.chipPrediction) {
       api.getBladeQc(selectedToolId, activeRunNumber, 1).then((res: any) => {
+        if (!isMounted) return;
         if (res && res.tier2ChipAi) {
           setRuns((prev) => prev.map((r) => r.run === activeRunNumber ? {
             ...r,
@@ -177,6 +206,7 @@ export function MachineMonitoringPage() {
         }
       }).catch(console.error);
     }
+    return () => { isMounted = false; };
   }, [isTimeSeriesAlert, activeRunNumber, currentRunInfo?.chipPrediction, selectedToolId]);
 
   // WebSocket Live Telemetry Streaming Handler
@@ -292,8 +322,12 @@ export function MachineMonitoringPage() {
 
     return () => {
       if (socket) {
+        socket.onclose = null;
+        socket.onerror = null;
+        socket.onmessage = null;
         socket.close();
       }
+      wsRef.current = null;
     };
   }, [isStreaming]);
 
@@ -331,18 +365,48 @@ export function MachineMonitoringPage() {
   const thresholdY = chartHeight - 24 - (210 / maxForceScale) * (chartHeight - 48);
   const firstDulledRun = runs.find((r) => r.tsPrediction === 'DULLED');
 
-  const handleToggleStreaming = () => {
-    setIsStreaming((prev) => {
-      const next = !prev;
+  const handleToggleStreaming = async () => {
+    if (!isStreaming) {
+      if (
+        machineStatus?.isStopped &&
+        machineStatus?.stopReason?.includes('Safety Interlock') &&
+        !machineStatus?.stopReason?.includes('QC_CLEARED')
+      ) {
+        alert(
+          '⚠️ ไม่สามารถเริ่มทำงานได้เนื่องจาก Safety Interlock ถูกทริป (หัวมีดสึกหรอระดับ DULL)\nกรุณากดปุ่ม "Mount Fresh Tool (Reset)" เพื่อเปลี่ยนหัวมีดก่อน'
+        );
+        return;
+      }
       try {
-        if (next) {
-          sessionStorage.setItem('pdm_streaming_active', 'true');
-        } else {
-          sessionStorage.removeItem('pdm_streaming_active');
+        const res = await api.startMachine();
+        if (res && res.success === false) {
+          alert(`⚠️ ไม่สามารถเริ่มเครื่องจักรได้: ${res.detail || 'เกิดข้อผิดพลาด'}`);
+          return;
         }
-      } catch {}
-      return next;
-    });
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ command: 'START_STREAM' }));
+        }
+        setIsStreaming(true);
+        sessionStorage.setItem('pdm_streaming_active', 'true');
+        const ms = await api.getMachineStatus();
+        if (ms) setMachineStatus(ms);
+      } catch (err: any) {
+        console.error('Failed to start machine:', err);
+      }
+    } else {
+      try {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ command: 'PAUSE_STREAM' }));
+        }
+        await api.pauseMachine('Operator paused cutting stream');
+        setIsStreaming(false);
+        sessionStorage.removeItem('pdm_streaming_active');
+        const ms = await api.getMachineStatus();
+        if (ms) setMachineStatus(ms);
+      } catch (err: any) {
+        console.error('Failed to pause machine:', err);
+      }
+    }
   };
 
   const handleClearData = () => {
@@ -374,9 +438,27 @@ export function MachineMonitoringPage() {
     setActiveCuttingProgressPct(0);
     try {
       sessionStorage.removeItem('milling_runs_cache');
-      sessionStorage.setItem('pdm_streaming_active', 'true');
+      sessionStorage.removeItem('pdm_streaming_active');
     } catch {}
-    setIsStreaming(true);
+    setIsStreaming(false);
+    const ms = await api.getMachineStatus();
+    if (ms) setMachineStatus(ms);
+  };
+
+  const handleResumeSpindle = async () => {
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ command: 'RESUME' }));
+      }
+      const targetMachineId = (machineStatus as any)?.machineId || 'CNC-SP-01';
+      await api.controlSpindle('RESUME', targetMachineId);
+      const ms = await api.getMachineStatus();
+      if (ms) setMachineStatus(ms);
+      setIsStreaming(true);
+      try { sessionStorage.setItem('pdm_streaming_active', 'true'); } catch {}
+    } catch (err: any) {
+      console.error('Failed to resume spindle:', err);
+    }
   };
 
   return (
@@ -387,15 +469,10 @@ export function MachineMonitoringPage() {
         subtitle="โมเดล Time-Series CRNN (BiGRU + Attention) เช็คราย Run ตามลำดับรอบตัด ➔ หยุดทันทีเมื่อเจอ Dulled อันแรก เพื่อดึงภาพ Chip"
         actions={
           <div className="flex items-center gap-2">
-            <select
-              value={selectedToolId}
-              onChange={(e) => setSelectedToolId(Number(e.target.value))}
-              className="px-2 py-1 rounded border border-gray-300 text-sm font-medium bg-white"
-            >
-              <option value={10}>Tool 10</option>
-              <option value={11}>Tool 11</option>
-              <option value={12}>Tool 12</option>
-            </select>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs font-mono font-bold text-gray-800 shadow-2xs">
+              <Wrench className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Tool #{selectedToolId}</span>
+            </div>
             {/* Mount Fresh Tool / Reset Spindle Button */}
             <button
               onClick={handleMountFreshTool}
@@ -467,37 +544,77 @@ export function MachineMonitoringPage() {
 
       {/* Safety Interlock Auto-Halt Alert Banner */}
       {isTimeSeriesAlert && (
-        <div className="p-4 bg-gradient-to-r from-rose-950 via-slate-900 to-rose-950 text-white rounded-xl shadow-sm border border-rose-800/70 flex flex-wrap items-center justify-between gap-4 animate-in fade-in duration-200">
+        <div className={`p-4 bg-gradient-to-r ${
+          machineStatus?.stopReason?.includes('QC_CLEARED')
+            ? 'from-emerald-950 via-slate-900 to-emerald-950 border-emerald-800/70'
+            : 'from-rose-950 via-slate-900 to-rose-950 border-rose-800/70'
+        } text-white rounded-xl shadow-sm border flex flex-wrap items-center justify-between gap-4 animate-in fade-in duration-200`}>
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300">
+            <div className={`p-2.5 rounded-lg border ${
+              machineStatus?.stopReason?.includes('QC_CLEARED')
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+            }`}>
               <AlertTriangle className="w-5 h-5 animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/30 border border-rose-500/50 text-rose-200 font-bold">
-                  🛑 Safety Interlock Triggered · Spindle Halted at Run #{activeRunNumber}
+                <span className={`text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded border font-bold ${
+                  machineStatus?.stopReason?.includes('QC_CLEARED')
+                    ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-200'
+                    : machineStatus?.stopReason?.includes('QC_CONFIRMED')
+                    ? 'bg-rose-500/30 border-rose-500/50 text-rose-200'
+                    : 'bg-amber-500/30 border-amber-500/50 text-amber-200'
+                }`}>
+                  {machineStatus?.stopReason?.includes('QC_CLEARED')
+                    ? '✅ QC Cleared · Tool Verified Safe (False Alarm)'
+                    : machineStatus?.stopReason?.includes('QC_CONFIRMED')
+                    ? '🛑 QC Confirmed · Wear Verified (DULLED) — Fresh Tool Required'
+                    : `🛑 Safety Interlock Triggered · Spindle Halted at Run #${activeRunNumber}`}
                 </span>
-                <span className="text-xs text-rose-300 font-mono">
-                  Flank Wear Vb = {currentRunInfo?.flankWearUm ?? 107.3} µm
+                <span className="text-xs text-slate-300 font-mono">
+                  Tool Condition: {currentRunInfo?.tsPrediction || 'DULLED'} ({((currentRunInfo?.confidence ?? 0.95) * 100).toFixed(1)}% Conf)
                 </span>
               </div>
               <p className="text-xs text-slate-200 mt-1">
-                สปินเดิลและระบบสตรีมถูกสั่งหยุดการทำงานอัตโนมัติ เนื่องจากโมเดล Time-Series CRNN ตรวจพบว่ามีดอยู่ในสถานะ <strong>DULLED (มีดทื่อวิกฤต)</strong> ในรอบตัด Pass #{activeRunNumber} เพื่อป้องกันชิ้นงานเสียหาย
+                {machineStatus?.stopReason?.includes('QC_CLEARED')
+                  ? 'วิศวกรผู้เชี่ยวชาญได้ตรวจสอบภาพถ่ายคมมีดที่แท่นส่องกล้องแล้ว ยืนยันว่าคมมีดยังไม่สึกหรอวิกฤต (False Alarm) — ระบบอนุมัติให้เดินเครื่องตัดต่อได้'
+                  : machineStatus?.stopReason?.includes('QC_CONFIRMED')
+                  ? 'วิศวกรผู้เชี่ยวชาญตรวจสอบคมมีดที่แท่นส่องกล้องแล้ว ยืนยันว่ามีดสึกหรอวิกฤต (DULLED) จริง — กรุณากด "เปลี่ยนมีดใหม่" เพื่อเริ่มรอบตัดใหม่ด้วยมีดชุดใหม่'
+                  : `สปินเดิลและระบบสตรีมถูกสั่งหยุดการทำงานอัตโนมัติ เนื่องจากโมเดล Time-Series CRNN ตรวจพบว่ามีดอยู่ในสถานะ DULLED ในรอบตัด Pass #${activeRunNumber} กรุณาถอดมีดไปตรวจยืนยันที่แท่นส่องกล้อง`}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate(`/visual-qc?tool=${selectedToolId}&run=${activeRunNumber}`)}
-              className="px-3.5 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <ScanEye className="w-3.5 h-3.5" />
-              <span>ถอดมีดไปตรวจที่ Tool Verification</span>
-            </button>
+            {machineStatus?.stopReason?.includes('QC_CLEARED') ? (
+              <button
+                onClick={handleResumeSpindle}
+                className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer ring-2 ring-emerald-400/50"
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>ปลดล็อคและเดินเครื่องต่อ (Resume Cutting)</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => navigate(`/visual-qc?tool=${selectedToolId}&run=${activeRunNumber}`)}
+                className={`px-3.5 py-2 rounded-lg font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer ${
+                  machineStatus?.stopReason?.includes('QC_CONFIRMED')
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse'
+                }`}
+              >
+                <ScanEye className="w-3.5 h-3.5" />
+                <span>{machineStatus?.stopReason?.includes('QC_CONFIRMED') ? 'ดูผลการตรวจที่ Visual QC' : 'ถอดมีดไปตรวจที่ Tool Verification'}</span>
+              </button>
+            )}
             <button
               onClick={handleMountFreshTool}
-              className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
+              className={`px-3.5 py-2 rounded-lg font-bold text-xs transition flex items-center gap-1.5 cursor-pointer ${
+                machineStatus?.stopReason?.includes('QC_CONFIRMED')
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm ring-2 ring-emerald-400/50'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+              }`}
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>เปลี่ยนมีดใหม่ (Mount Fresh Tool)</span>
@@ -517,6 +634,9 @@ export function MachineMonitoringPage() {
                 <Activity className="w-4 h-4 text-indigo-600" />
                 <span className="font-bold text-xs text-gray-900 uppercase tracking-wider">
                   Cutting Dynamics Graph · Run #{activeRunNumber ?? '--'} (Tool #{selectedToolId})
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-semibold hidden sm:inline-block" title="Piezoelectric dynamometer sampling rate 1,000 Hz decimated to 20 Hz for web telemetry">
+                  Sensor: 1 kHz Raw · Stream: 20 Hz
                 </span>
                 {isStreaming && (
                   <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 animate-pulse">
@@ -871,7 +991,7 @@ export function MachineMonitoringPage() {
                   {/* Image container for real Chip morphology photo */}
                   <div className="w-full h-40 rounded-lg overflow-hidden border border-indigo-200 bg-slate-900 flex flex-col items-center justify-center relative select-none">
                     <img
-                      src={`/api/v1/qc/images/chip/T${selectedToolId}R${activeRunNumber}B1.jpg`}
+                      src={`${(import.meta as any).env?.VITE_API_URL || 'http://localhost:8000/api/v1'}/qc/images/chip/T${selectedToolId}R${activeRunNumber}B1.jpg`}
                       alt={`Chip morphology T${selectedToolId}R${activeRunNumber}`}
                       className="w-full h-full object-cover"
                       onError={(e) => {
@@ -922,7 +1042,7 @@ export function MachineMonitoringPage() {
               </div>
               <p className="text-[11px] text-gray-600 leading-relaxed">
                 {isTwoFactorConfirmed
-                  ? `ตรวจพบ Dulled อันแรกใน Run #${activeRunNumber} สั่งหยุดสปินเดิลเพื่อความปลอดภัย ให้ถอดหัวมีดไปส่องกล้องหาค่า Vb ที่หน้า Tool Verification`
+                  ? `ตรวจพบ Dulled อันแรกใน Run #${activeRunNumber} สั่งหยุดสปินเดิลเพื่อความปลอดภัย ให้ถอดหัวมีดไปส่องกล้องตรวจสภาพคมมีดที่หน้า Tool Verification`
                   : currentRunInfo && !isTimeSeriesAlert
                   ? `รอบตัด Run #${activeRunNumber} ยังไม่เข้าข่ายอันตราย โมเดล Non-Time ยังไม่ต้องทำ และเครื่องจักรกัดงานต่อได้`
                   : 'ระบบ 2-Factor พร้อมทำงานทันทีเมื่อได้รับข้อมูลสตรีมแรงตัดและรอบตัดส่งเข้ามาผ่าน API'}
@@ -932,10 +1052,10 @@ export function MachineMonitoringPage() {
               {isTwoFactorConfirmed && (
                 <button
                   onClick={() => navigate(`/visual-qc?tool=${selectedToolId}&run=${activeRunNumber}`)}
-                  className="w-full mt-2 py-2.5 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center justify-center gap-1.5"
+                  className="w-full mt-2 py-2.5 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <ScanEye className="w-4 h-4" />
-                  <span>ถอดมีดไปตรวจค่า Vb ที่ Tool Verification Bench (Run #{activeRunNumber}) ➔</span>
+                  <span>ถอดมีดไปตรวจสภาพคมมีดจริงที่ Tool Verification Bench (Run #{activeRunNumber}) ➔</span>
                 </button>
               )}
             </div>

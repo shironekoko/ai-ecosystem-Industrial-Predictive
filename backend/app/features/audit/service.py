@@ -20,43 +20,8 @@ def _model_to_event(m: AuditLog) -> AuditEvent:
 
 
 def seed_audit_logs_if_empty(db):
-    try:
-        count = db.query(AuditLog).count()
-        if count == 0:
-            seeds = [
-                AuditLog(
-                    id="AUD-104",
-                    event_type="WEAR_CONFIRMED",
-                    actor="Alex Tan",
-                    role="Maintenance Engineer",
-                    target_resource="T10R12B2",
-                    summary="Confirmed flank wear land Vb = 138 µm (ISO 8688-2 limit reached). Tool scheduled for replacement.",
-                    status="SUCCESS",
-                ),
-                AuditLog(
-                    id="AUD-103",
-                    event_type="RETRAIN_TRIGGERED",
-                    actor="Root Administrator",
-                    role="System Administrator",
-                    target_resource="YOLOv8-cls",
-                    summary="Triggered active learning fine-tune job on verified edge samples via ARQ queue.",
-                    status="SUCCESS",
-                ),
-                AuditLog(
-                    id="AUD-102",
-                    event_type="FALSE_ALARM_FLAGGED",
-                    actor="Alex Tan",
-                    role="Maintenance Engineer",
-                    target_resource="T10R8B4",
-                    summary="Flagged optical wear warning as false alarm: identified visual artifact as coolant reflection rather than chipping.",
-                    status="WARNING",
-                ),
-            ]
-            for s in seeds:
-                db.add(s)
-            db.commit()
-    except Exception as e:
-        db.rollback()
+    """No-op: Audit logs are recorded only by genuine human operator sign-offs and machine interlock actions."""
+    pass
 
 
 def get_audit_logs(
@@ -104,6 +69,15 @@ def record_audit_event(
 ) -> AuditEvent:
     db = SessionLocal()
     try:
+        # Prevent duplicate entries from automated monitoring loops
+        existing = db.query(AuditLog).filter(
+            AuditLog.event_type == event_type,
+            AuditLog.actor == actor,
+            AuditLog.target_resource == target_resource,
+        ).first()
+        if existing:
+            return _model_to_event(existing)
+
         new_log = AuditLog(
             id=f"AUD-{uuid.uuid4().hex[:6].upper()}",
             event_type=event_type,

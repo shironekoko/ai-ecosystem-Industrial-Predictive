@@ -1,9 +1,9 @@
 from pydantic import BaseModel
 
 class DegradationSummaryResponse(BaseModel):
-    meanToolLifeCuts: float
-    overallMachineOeePct: float
+    totalInspections: int
+    confirmedWearCount: int
+    falseAlarmCount: int
     falseAlarmRatePct: float
-    meanReplaceTimeMin: float
-    weibullBeta: float
-    weibullEtaCuts: float
+    meanToolLifeCuts: float
+    activeSpindlesCount: int

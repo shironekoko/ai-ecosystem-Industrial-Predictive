@@ -42,10 +42,12 @@ export function VisualQcPage() {
     stopReason?: string;
   } | null>(null);
 
-  // Sync with machine status if no explicit run parameter is in URL
+  // Sync with machine status periodically
   useEffect(() => {
-    api.getMachineStatus().then((ms) => {
-      if (ms) {
+    let isMounted = true;
+    const fetchStatus = () => {
+      api.getMachineStatus().then((ms) => {
+        if (!isMounted || !ms) return;
         setMachineStatus(ms);
         if (!runParam) {
           if (ms.isStopped && ms.stoppedRun) {
@@ -54,8 +56,18 @@ export function VisualQcPage() {
             setActivePassIndex(ms.currentRun);
           }
         }
-      }
-    });
+      });
+    };
+
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 2500);
+    window.addEventListener('focus', fetchStatus);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', fetchStatus);
+    };
   }, [runParam]);
 
   const passIndex = activePassIndex;
@@ -67,7 +79,7 @@ export function VisualQcPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Per-blade verification sign-off cache
-  const [verifiedBlades, setVerifiedBlades] = useState<Record<number, {
+  const [verifiedBlades, setVerifiedBlades] = useState<Record<string, {
     status: 'CONFIRMED_WEAR' | 'RETRAIN_FLAGGED';
     verifiedBy: string;
     verifiedAt: string;
@@ -88,69 +100,22 @@ export function VisualQcPage() {
       if (!isMounted) return;
       if (data) {
         setQcData(data);
-        if (data.status === 'CONFIRMED_WEAR' || data.status === 'RETRAIN_FLAGGED') {
+        if (data.status === 'CONFIRMED_WEAR' || data.status === 'RETRAIN_FLAGGED' || data.status === 'FALSE_ALARM') {
+          const normStatus = data.status === 'CONFIRMED_WEAR' ? 'CONFIRMED_WEAR' : 'RETRAIN_FLAGGED';
           setVerifiedBlades((prev) => ({
             ...prev,
-            [selectedBlade]: {
-              status: data.status as any,
+            [`${toolId}_${passIndex}_${selectedBlade}`]: {
+              status: normStatus,
               verifiedBy: data.verifiedBy || 'Maintenance Engineer',
               verifiedAt: data.verifiedAt || new Date().toLocaleTimeString(),
-              message: data.status === 'CONFIRMED_WEAR'
-                ? 'Tool replacement confirmed.'
-                : 'Flagged for Active Learning retraining.',
+              message: normStatus === 'CONFIRMED_WEAR'
+                ? 'Tool wear confirmed (DULLED) — Replacement required.'
+                : 'False alarm flagged — Active Learning retraining triggered.',
             },
           }));
         }
       } else {
-        // Fallback simulation based on run index
-        const isDulled = passIndex >= 12;
-        setQcData({
-          recordId: `T${toolId}R${passIndex}B${selectedBlade}`,
-          imageUrl: `/api/v1/qc/images/tool/T${toolId}R${passIndex}B${selectedBlade}.jpg`,
-          chipImageUrl: `/api/v1/qc/images/chip/T${toolId}R${passIndex}B${selectedBlade}.jpg`,
-          toolImageUrl: `/api/v1/qc/images/tool/T${toolId}R${passIndex}B${selectedBlade}.jpg`,
-          toolProcessedImageUrl: `/api/v1/qc/images/tool-processed/T${toolId}R${passIndex}B${selectedBlade}.jpg`,
-          gradCamUrl: `/api/v1/qc/gradcam/T${toolId}R${passIndex}B${selectedBlade}.jpg`,
-          tier1ForceAlert: {
-            condition: isDulled ? 'DULLED' : 'USED',
-            confidence: 0.92,
-            flankWearEstimateUm: isDulled ? 134.5 : 88.0,
-            triggerMetric: 'Fres > 210 N',
-            status: 'ALERT',
-          },
-          tier2ChipAi: {
-            condition: isDulled ? 'DULLED' : 'USED',
-            confidence: 0.94,
-            chipImageUrl: `/api/v1/qc/images/chip/T${toolId}R${passIndex}B${selectedBlade}.jpg`,
-            morphologyAnalysis: 'Segmented shear bands with thermal discoloration',
-            curlContinuity: isDulled ? 'DISCONTINUOUS_BRITTLE' : 'SEGMENTED',
-            surfaceRoughnessIndex: isDulled ? 4.8 : 2.5,
-          },
-          tier3ToolEdge: {
-            toolImageUrl: `/api/v1/qc/images/tool/T${toolId}R${passIndex}B${selectedBlade}.jpg`,
-            processedImageUrl: `/api/v1/qc/images/tool-processed/T${toolId}R${passIndex}B${selectedBlade}.jpg`,
-            flankWearUm: isDulled ? 135.2 : 88.4,
-            gapsUm: isDulled ? 18.4 : 6.2,
-            overhangUm: isDulled ? 14.1 : 7.0,
-            chippingDetected: isDulled,
-            isoLimitExceeded: isDulled,
-            edgeIntegrityScore: isDulled ? 38.5 : 72.0,
-            opticalVerdict: isDulled ? 'DULLED' : 'USED',
-          },
-          consensus: {
-            isAgreement: true,
-            discrepancyType: 'NONE',
-            consensusVerdict: isDulled ? 'CONFIRMED_WEAR' : 'CUTTER_NORMAL',
-            recommendedAction: isDulled ? 'REPLACE_TOOL' : 'CONTINUE_CUTTING',
-            rationale: 'Physical edge inspection confirms flank wear exceeding ISO limit.',
-          },
-          visionPrediction: isDulled ? 'DULLED' : 'USED',
-          visionConfidence: 0.94,
-          flankWearUm: isDulled ? 135.2 : 88.4,
-          gapsUm: isDulled ? 18.4 : 6.2,
-          overhangUm: isDulled ? 14.1 : 7.0,
-          status: 'PENDING_VERIFICATION',
-        });
+        setQcData(null);
       }
       setLoading(false);
     });
@@ -160,14 +125,16 @@ export function VisualQcPage() {
     };
   }, [toolId, passIndex, selectedBlade]);
 
-  const currentVerified = verifiedBlades[selectedBlade];
+  const bladeKey = `${toolId}_${passIndex}_${selectedBlade}`;
+  const currentVerified = verifiedBlades[bladeKey];
+  const isAlreadyVerified = Boolean(currentVerified || (qcData && qcData.status !== 'PENDING_VERIFICATION'));
   const recordId = `T${toolId}R${passIndex}B${selectedBlade}`;
 
-  // Image Processing Ground Truth Values
-  const flankWear = qcData?.tier3ToolEdge.flankWearUm ?? 0;
-  const gaps = qcData?.tier3ToolEdge.gapsUm ?? 0;
-  const overhang = qcData?.tier3ToolEdge.overhangUm ?? 0;
-  const isBrokenOrWorn = flankWear >= 130.0 || gaps > 15.0;
+  // Ground Truth / Metrology display states
+  const flankWear = qcData?.tier3ToolEdge?.flankWearUm ?? null;
+  const gaps = qcData?.tier3ToolEdge?.gapsUm ?? null;
+  const overhang = qcData?.tier3ToolEdge?.overhangUm ?? null;
+  const isBrokenOrWorn = Boolean((flankWear && flankWear >= 130.0) || (gaps && gaps > 15.0));
 
   // Active Retraining Queue State
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -185,9 +152,11 @@ export function VisualQcPage() {
   // Triggers YOLOv8 Vision Retraining immediately if the human overrides DULLED to SHARP or USED
   // Retrain คือการนำภาพจาก chip/ ร่วมกับคำตอบที่ผู้ใช้ระบุเป็น Ground Truth
   const handleHumanSignOff = async (actualCondition: 'SHARP' | 'USED' | 'DULLED') => {
+    if (isSubmitting || isAlreadyVerified) return; // Prevent spam-clicking or re-verifying
     setIsSubmitting(true);
     const engineerName = user?.name ? `${user.name} (QC Inspector)` : 'Senior Tooling Engineer';
-    const isDiscrepancy = actualCondition === 'SHARP' || actualCondition === 'USED';
+    const modelPrediction = qcData?.tier2ChipAi?.condition;
+    const isDiscrepancy = modelPrediction ? actualCondition !== modelPrediction : false;
     const decision = isDiscrepancy ? 'SEND_TO_RETRAIN' : 'CONFIRMED_WEAR';
 
     try {
@@ -207,7 +176,7 @@ export function VisualQcPage() {
       const nowTime = new Date().toLocaleTimeString();
       setVerifiedBlades((prev) => ({
         ...prev,
-        [selectedBlade]: {
+        [`${toolId}_${passIndex}_${selectedBlade}`]: {
           status: isDiscrepancy ? 'RETRAIN_FLAGGED' : 'CONFIRMED_WEAR',
           verifiedBy: engineerName,
           verifiedAt: nowTime,
@@ -269,12 +238,12 @@ export function VisualQcPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Tool Physical Verification Bench (Flank Wear Vb Inspection)"
-        subtitle="ตรวจเช็คภาพคมมีดจริงที่วิศวกรแกะออกมาด้วย Image Processing หาค่า Vb และรอยบิ่น เพื่อยืนยันว่าพังจริงไหม"
+        title="Tool Physical Verification Bench (Flute Optical Inspection)"
+        subtitle="ตรวจเช็คภาพคมมีดจริงกำลังขยายสูงด้วย Image Processing ตรวจรอยสึกและรอยบิ่น เพื่อยืนยันความเสียหายก่อนเปลี่ยนมีด"
         actions={
           <div className="flex items-center gap-2">
             <button
-              onClick={() => navigate(`/machine-monitoring`)}
+              onClick={() => navigate(`/machine-monitoring?tool=${toolId}`)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 transition"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -348,14 +317,11 @@ export function VisualQcPage() {
               <p className="text-xs text-slate-200 mt-1">
                 เมื่อระบบ Safety Interlock ตรวจพบ DULLED มีดจะถูกส่งมาตรวจที่แท่นนี้อัตโนมัติ
               </p>
-              <p className="text-xs text-slate-400 mt-1">
-                (ดูข้อมูลย้อนหลัง: สามารถเลือก Pass ที่ผ่านมาแล้วจากเมนูด้านล่างเพื่อดูประวัติได้)
-              </p>
             </div>
           </div>
           <div className="flex items-center gap-2 font-mono text-xs">
             <button
-              onClick={() => navigate('/machine-monitoring')}
+              onClick={() => navigate(`/machine-monitoring?tool=${toolId}`)}
               className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition"
             >
               เปิดดูสตรีมที่ Machine Monitoring
@@ -381,24 +347,6 @@ export function VisualQcPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
-          {/* Pass Selector */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-              Milling Pass:
-            </span>
-            <select
-              value={passIndex}
-              onChange={(e) => setActivePassIndex(Number(e.target.value))}
-              className="px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-mono font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-            >
-              {Array.from({ length: 14 }, (_, i) => i + 1).map((p) => (
-                <option key={p} value={p}>
-                  Pass #{p} {p >= 11 ? '(Dulled Stage)' : p >= 7 ? '(Used Stage)' : '(Sharp Stage)'}
-                </option>
-              ))}
-            </select>
-          </div>
-
           {/* 4-Flute Blade Selector */}
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
@@ -407,8 +355,8 @@ export function VisualQcPage() {
             <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-lg">
               {[1, 2, 3, 4].map((blade) => {
                 const isSelected = selectedBlade === blade;
-                const isConfirmed = verifiedBlades[blade]?.status === 'CONFIRMED_WEAR';
-                const isRetrain = verifiedBlades[blade]?.status === 'RETRAIN_FLAGGED';
+                const isConfirmed = verifiedBlades[`${toolId}_${passIndex}_${blade}`]?.status === 'CONFIRMED_WEAR';
+                const isRetrain = verifiedBlades[`${toolId}_${passIndex}_${blade}`]?.status === 'RETRAIN_FLAGGED';
 
                 return (
                   <button
@@ -437,7 +385,13 @@ export function VisualQcPage() {
       </div>
 
       {/* Main Grid: Microscope Viewport + Optical Vb Metrology & Consensus Sign-Off */}
-      {(!machineStatus?.isStopped && passIndex >= (machineStatus?.currentRun || 1)) ? (
+      {!qcData && !loading ? (
+        <div className="flex flex-col items-center justify-center p-12 bg-white rounded-xl border border-gray-200 border-dashed text-gray-400">
+          <ScanEye className="w-12 h-12 mb-3 text-gray-300" />
+          <h3 className="text-lg font-bold text-gray-500">ไม่พบข้อมูล QC</h3>
+          <p className="text-sm">ไม่มีข้อมูลการตรวจสอบสำหรับ T{toolId}R{passIndex}B{selectedBlade} กรุณาตรวจสอบว่า Backend API พร้อมใช้งานและ Dataset ถูกติดตั้ง</p>
+        </div>
+      ) : (!machineStatus?.isStopped && passIndex >= (machineStatus?.currentRun || 1)) ? (
         <div className="flex flex-col items-center justify-center p-12 bg-white rounded-xl border border-gray-200 border-dashed text-gray-400">
           <ScanEye className="w-12 h-12 mb-3 text-gray-300" />
           <h3 className="text-lg font-bold text-gray-500">Standby Mode</h3>
@@ -472,67 +426,37 @@ export function VisualQcPage() {
 
             {/* Explanation Note for Operators */}
             <p className="text-[11px] text-gray-500 leading-relaxed bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-              🔬 ระบบประมวลผลภาพ (OpenCV Contour Analysis) ตรวจวัดระยะความกว้างของรอยสึกหรอด้านข้าง (Flank Wear Land) จากภาพถ่ายกล้องจุลทรรศน์จริง เพื่อเป็นข้อมูลมาตรวิทยาช่วยวิศวกรยืนยันสภาพมีดจริงก่อนกด Sign-Off
+              🔬 <strong>การตรวจพินิจด้วยสายตา (Visual Flute Inspection):</strong> ระบบแสดงภาพถ่ายกำลังขยายจริงของคมมีดพร้อมเส้น Canny Edge Detection จากกล้องจุลทรรศน์ ให้วิศวกรผู้เชี่ยวชาญตรวจสอบสภาพรอยสึกและรอยบิ่นจริงด้วยสายตาก่อนลงนาม Sign-Off (ไม่มีโมเดลประมาณค่าตัวเลข Vb แบบอัตโนมัติ)
             </p>
 
-            {/* Flank Wear Land Vb Gauge */}
+            {/* Optical Inspection Status Box */}
             <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-100 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-gray-600 font-medium">Flank Wear Land (Vb):</span>
                 <div className="flex items-baseline gap-1">
-                  <span
-                    className={`text-2xl font-mono font-black ${
-                      flankWear >= 130
-                        ? 'text-rose-600'
-                        : flankWear >= 70
-                        ? 'text-amber-600'
-                        : 'text-emerald-600'
-                    }`}
-                  >
-                    {flankWear}
+                  <span className="text-2xl font-mono font-black text-gray-400">
+                    --
                   </span>
-                  <span className="text-xs text-gray-400 font-mono">µm</span>
+                  <span className="text-xs text-gray-400 font-mono">µm (ตรวจพินิจด้วยสายตา)</span>
                 </div>
               </div>
-
-              {/* Progress bar relative to 130 µm ISO limit */}
-              <div className="w-full h-2.5 bg-gray-200 rounded-full overflow-hidden flex">
-                <div
-                  className={`h-full rounded-full transition-all duration-300 ${
-                    flankWear >= 130
-                      ? 'bg-rose-500'
-                      : flankWear >= 70
-                      ? 'bg-amber-500'
-                      : 'bg-emerald-500'
-                  }`}
-                  style={{
-                    width: `${Math.min(100, (flankWear / 150) * 100)}%`,
-                  }}
-                />
-              </div>
-              <div className="flex justify-between text-[9px] text-gray-400 font-mono">
-                <span>30 µm (คมปกติ)</span>
-                <span>70 µm (เริ่มสึก)</span>
-                <span className="text-rose-600 font-bold">130 µm (เกณฑ์ขีดจำกัด ISO)</span>
-              </div>
+              <p className="text-[10px] text-gray-400 font-mono">
+                * ตรวจสอบความต่อเนื่องของแนวคมมีดจากช่องแสดงภาพกล้องจุลทรรศน์ด้านซ้าย
+              </p>
             </div>
 
             {/* Edge Chipping Gaps & Burr Overhang */}
             <div className="grid grid-cols-2 gap-2 text-center font-mono">
               <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-100">
                 <span className="text-[10px] text-gray-400 block uppercase">Chipping Gaps (รอยบิ่น)</span>
-                <span
-                  className={`text-xs font-bold ${
-                    gaps > 15 ? 'text-rose-600' : 'text-emerald-600'
-                  }`}
-                >
-                  {gaps} µm {gaps > 15 ? '(ตรวจพบรอยบิ่น)' : '(ขอบคมต่อเนื่อง)'}
+                <span className="text-xs font-bold text-gray-600">
+                  ตรวจพินิจจากกล้อง
                 </span>
               </div>
               <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-100">
-                <span className="text-[10px] text-gray-400 block uppercase">Burr Overhang</span>
-                <span className="text-xs font-bold text-gray-700">
-                  {overhang} µm
+                <span className="text-[10px] text-gray-400 block uppercase">Flute Target</span>
+                <span className="text-xs font-bold text-indigo-700">
+                  Flute #{selectedBlade}
                 </span>
               </div>
             </div>
@@ -629,11 +553,27 @@ export function VisualQcPage() {
                 คำตัดสินของวิศวกรผู้เชี่ยวชาญ (Human-in-the-Loop Sign-off):
               </span>
 
+              {isAlreadyVerified && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-mono space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-emerald-800">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>คมมีด Flute #{selectedBlade} นี้ได้รับการตรวจสอบและลงนามแล้ว</span>
+                  </div>
+                  <div className="text-[11px] text-emerald-700">
+                    สถานะ: <strong>{currentVerified?.status || qcData?.status}</strong> · ลงนามโดย: <strong>{currentVerified?.verifiedBy || qcData?.verifiedBy || 'QC Inspector'}</strong>
+                  </div>
+                </div>
+              )}
+
               {/* Option A: Confirm */}
               <button
-                disabled={isSubmitting}
+                disabled={isSubmitting || isAlreadyVerified}
                 onClick={() => handleHumanSignOff(qcData?.tier2ChipAi.condition as any)}
-                className="w-full p-2.5 rounded-xl border border-gray-200 hover:border-emerald-400 bg-white hover:bg-emerald-50/50 text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+                className={`w-full p-2.5 rounded-xl border text-left transition flex items-center justify-between group shadow-xs ${
+                  isAlreadyVerified
+                    ? 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
+                    : 'border-gray-200 hover:border-emerald-400 bg-white hover:bg-emerald-50/50 cursor-pointer'
+                }`}
               >
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 group-hover:scale-110 transition" />
@@ -653,9 +593,13 @@ export function VisualQcPage() {
 
               {/* Option B: Discrepancy 1 (Triggers YOLOv8 Retrain) */}
               <button
-                disabled={isSubmitting}
+                disabled={isSubmitting || isAlreadyVerified}
                 onClick={() => handleHumanSignOff(qcData?.tier2ChipAi.condition === 'SHARP' ? 'USED' : 'SHARP')}
-                className="w-full p-2.5 rounded-xl border border-amber-200 hover:border-amber-400 bg-amber-50/50 hover:bg-amber-100/60 text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+                className={`w-full p-2.5 rounded-xl border text-left transition flex items-center justify-between group shadow-xs ${
+                  isAlreadyVerified
+                    ? 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
+                    : 'border-amber-200 hover:border-amber-400 bg-amber-50/50 hover:bg-amber-100/60 cursor-pointer'
+                }`}
               >
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-amber-600 group-hover:scale-110 transition" />
@@ -675,9 +619,13 @@ export function VisualQcPage() {
 
               {/* Option C: Discrepancy 2 (Triggers YOLOv8 Retrain) */}
               <button
-                disabled={isSubmitting}
+                disabled={isSubmitting || isAlreadyVerified}
                 onClick={() => handleHumanSignOff(qcData?.tier2ChipAi.condition === 'DULLED' ? 'USED' : 'DULLED')}
-                className="w-full p-2.5 rounded-xl border border-indigo-200 hover:border-indigo-400 bg-indigo-50/50 hover:bg-indigo-100/60 text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+                className={`w-full p-2.5 rounded-xl border text-left transition flex items-center justify-between group shadow-xs ${
+                  isAlreadyVerified
+                    ? 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
+                    : 'border-indigo-200 hover:border-indigo-400 bg-indigo-50/50 hover:bg-indigo-100/60 cursor-pointer'
+                }`}
               >
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-indigo-600 group-hover:scale-110 transition" />

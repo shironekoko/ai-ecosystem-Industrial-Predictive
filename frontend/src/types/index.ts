@@ -18,10 +18,10 @@ export interface CNCSpindleAsset {
   toolId: number; // e.g., 10
   currentRun: number; // e.g., 1 to 14
   currentBlade: number; // 1 to 4
-  flankWearUm: number; // Flank Wear in micrometers
-  gapsUm: number;
-  overhangUm: number;
-  rulCuts: number;
+  flankWearUm?: number; // Flank Wear in micrometers (requires offline optical microscope metrology)
+  gapsUm?: number;
+  overhangUm?: number;
+  rulCuts?: number;
   healthIndex: number;
   status: 'HEALTHY' | 'WARNING' | 'CRITICAL';
   cuttingSpeedRpm: number;

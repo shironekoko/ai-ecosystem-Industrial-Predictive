@@ -12,7 +12,7 @@ class QCTargetResponse(BaseModel):
 class Tier1ForceAlert(BaseModel):
     condition: Literal["SHARP", "USED", "DULLED"]
     confidence: float
-    flankWearEstimateUm: float
+    flankWearEstimateUm: Optional[float] = None
     triggerMetric: str = "Fres > 210 N (Peak dynamic force spike)"
     status: Literal["NORMAL", "WARNING", "ALERT"] = "ALERT"
 
@@ -27,12 +27,12 @@ class Tier2ChipAiPrediction(BaseModel):
 class Tier3ToolEdgeMetrology(BaseModel):
     toolImageUrl: str
     processedImageUrl: str
-    flankWearUm: float
-    gapsUm: float
-    overhangUm: float
+    flankWearUm: Optional[float] = None
+    gapsUm: Optional[float] = None
+    overhangUm: Optional[float] = None
     chippingDetected: bool
     isoLimitExceeded: bool
-    edgeIntegrityScore: float
+    edgeIntegrityScore: Optional[float] = None
     opticalVerdict: Literal["SHARP", "USED", "DULLED"]
 
 class CrossVerificationConsensus(BaseModel):
@@ -60,10 +60,10 @@ class BladeQCResponse(BaseModel):
     # Legacy Compatibility Fields
     visionPrediction: Literal["SHARP", "USED", "DULLED"]
     visionConfidence: float
-    flankWearUm: float
-    gapsUm: float
-    overhangUm: float
-    status: Literal["PENDING_VERIFICATION", "CONFIRMED_WEAR", "FALSE_ALARM", "RETRAIN_FLAGGED"]
+    flankWearUm: Optional[float] = None
+    gapsUm: Optional[float] = None
+    overhangUm: Optional[float] = None
+    status: Literal["PENDING_VERIFICATION", "CONFIRMED_WEAR", "FALSE_ALARM", "RETRAIN_FLAGGED", "SEND_TO_RETRAIN"]
     sensorAiAssessment: Tier1ForceAlert
 
     verifiedBy: Optional[str] = None

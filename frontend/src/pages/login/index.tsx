@@ -87,10 +87,10 @@ export function LoginPage() {
             <Cpu className="w-6 h-6 text-white" />
           </div>
           <h1 className="text-xl font-bold tracking-tight text-gray-900">
-            Nonastreda CNC AI Platform
+            CNC Tool Life AI
           </h1>
           <p className="mt-1 text-xs text-gray-500">
-            Milling Tool Wear PdM & Dual-AI Quality Control
+            พยากรณ์อายุใช้งานที่เหลือของดอกกัดด้วยแบบจำลองอนุกรมเวลา
           </p>
 
           {/* Mode Switcher Tabs */}

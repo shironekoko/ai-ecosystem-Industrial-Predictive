@@ -1,0 +1,27 @@
+{
+ "direct": {
+  "MAE_all": 2.044,
+  "MAE_test20": 1.735,
+  "Late_pct_test20": 5.503
+ },
+ "direct+noise": {
+  "MAE_all": 1.327,
+  "MAE_test20": 1.063,
+  "Late_pct_test20": 0.0
+ },
+ "prior": {
+  "MAE_all": 1.351,
+  "MAE_test20": 1.082,
+  "Late_pct_test20": 0.0
+ },
+ "prior+noise": {
+  "MAE_all": 1.358,
+  "MAE_test20": 1.081,
+  "Late_pct_test20": 0.0
+ },
+ "fleet": {
+  "MAE_all": 1.368,
+  "MAE_test20": 1.091,
+  "Late_pct_test20": 0.0
+ }
+}

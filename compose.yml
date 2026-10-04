@@ -167,6 +167,9 @@ services:
       - DATABASE_URL=postgresql://myuser:mypassword@db:5432/mydatabase
       - MINIO_ENDPOINT=minio:9000
       - MLFLOW_TRACKING_URI=http://mlflow:5000
+      # ── Tool life (RUL) streaming: แบบจำลองดึงจาก MinIO bucket models/tool-rul/, ข้อมูลจาก ./dataset (LUH) ──
+      - TOOL_LIFE_AUTOSTART=true          # เริ่มสตรีมดอกที่สงวนไว้ (T3/T6/T9) ตามเวลาจริงเมื่อ backend เริ่ม
+      - TOOL_LIFE_HOLD_ON_REPLACE=true    # interlock: หยุดป้อนเมื่อระบบสั่ง REPLACE_NOW รอผู้ควบคุมยืนยัน
     depends_on:
       redis:
         condition: service_healthy
@@ -222,38 +225,6 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # -------------------------
-  # ส่วนของ Inference Worker (ARQ + MLflow)
-  # -------------------------
-  inference-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.inference
-    container_name: inference-worker
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - MINIO_ENDPOINT=minio:9000
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
-      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-    depends_on:
-      redis:
-        condition: service_healthy
-      mlflow:
-        condition: service_started
-    volumes:
-      - ./backend:/app
-      - /app/.venv
-      - ./logs:/logs
     logging:
       driver: json-file
       options:

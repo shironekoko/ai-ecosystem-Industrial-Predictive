@@ -5,13 +5,12 @@ import { AppLayout } from './components/layout/AppLayout';
 import { LoginPage } from './pages/login';
 import { DashboardPage } from './pages/dashboard';
 import { MachineMonitoringPage } from './pages/machine-monitoring';
-import { VisualQcPage } from './pages/visual-qc';
-import { ActiveLearningPage } from './pages/active-learning';
+import { ToolVisionPage } from './pages/tool-vision';
+import { ModelRegistryPage } from './pages/model-registry';
 import { AuditLogPage } from './pages/audit-log';
 import { NotificationsPage } from './pages/notifications';
 import { UserManagementPage } from './pages/user-management';
 import { ReportsPage } from './pages/reports';
-import { UserRole } from './types';
 import { api } from './services/api';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
@@ -19,7 +18,6 @@ const AppRoutes = () => {
   const { user } = useAuth();
   const currentRole = user?.role || 'engineer';
   const [unreadAlertCount, setUnreadAlertCount] = useState<number>(0);
-  const [retrainQueueCount, setRetrainQueueCount] = useState<number>(0);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -29,9 +27,6 @@ const AppRoutes = () => {
           const unread = alarms.filter((a: any) => !a.isRead).length;
           setUnreadAlertCount(unread);
         }
-      });
-      api.getRetrainQueueCount().then((count) => {
-        if (isMounted) setRetrainQueueCount(count);
       });
     };
 
@@ -57,15 +52,15 @@ const AppRoutes = () => {
                 currentRole={currentRole}
                 onRoleChange={() => {}} 
                 unreadAlertCount={unreadAlertCount}
-                retrainQueueCount={retrainQueueCount}
+                retrainQueueCount={0}
               />
             }
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="machine-monitoring" element={<MachineMonitoringPage />} />
-            <Route path="visual-qc" element={<VisualQcPage />} />
-            <Route path="active-learning" element={<ActiveLearningPage />} />
+            <Route path="tool-vision" element={<ToolVisionPage />} />
+            <Route path="model-registry" element={<ModelRegistryPage />} />
             <Route path="audit-log" element={<AuditLogPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="user-management" element={<UserManagementPage />} />

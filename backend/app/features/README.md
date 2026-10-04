@@ -8,22 +8,17 @@ Feature Module คือการแบ่งโครงสร้างขอ�
 - หากลบฟีเจอร์หนึ่งทิ้งไป ฟีเจอร์อื่น ๆ จะต้องไม่ได้รับผลกระทบ (หรือกระทบน้อยที่สุด)
 
 ## รายการฟีเจอร์ (Feature Modules)
+- **`tool_life/`** - แบบจำลอง RUL ดอกกัด (GRU จาก MinIO) + สตรีมข้อมูล LUH ตามเวลาจริง + interlock + ประเมินผลหลังถอดดอก
+- **`reports/`** - สรุปผลเทียบค่าจริงของดอกที่ถอดแล้ว + CSV
+- **`alarms/`** - แจ้งเตือนจากผลพยากรณ์ (INFO / WARNING / CRITICAL)
+- **`audit/`** - บันทึกการตัดสินใจของผู้ควบคุม
 - **`health/`** - Health Check & Concurrent Component Diagnostics
 - **`auth/`** - Authentication & Session Management (JWT Access & Refresh Token)
 - **`profile/`** - User Profile & Avatar Management (MinIO Storage)
-- **`fleet/`** - CNC Spindle Fleet Monitoring & Overall Factory KPI Summary
-- **`qc/`** - 3-Tier Multi-Modal Visual QC (Force Alert, Chip AI, Tool Edge Metrology, Consensus)
-- **`telemetry/`** - High-Frequency Dynamometer Force Telemetry (WebSocket) & Safety Interlock Trip
-- **`alarms/`** - Industrial Alarms & Event Dispatching
-- **`models/`** - MLflow Model Registry, Retraining Pool Monitoring & Model Hot-Reload
-- **`training/`** - ARQ/Redis Retraining Pipeline & Live WebSocket Metrics Stream
-- **`inference/`** - Pure Time-Series CRNN Force Inference (16 Physics Dynamic Features)
-- **`audit/`** - Immutable Action Audit Trail & Verification Logs
-- **`reports/`** - Tool Degradation Weibull Analytics, Shift Summary & PDF/CSV Export
-- **`storage/`** - MinIO Object Storage Integration (Datasets, Models, Profile Images)
-- **`labeling/`** - Label Studio Integration & Active Learning
-- **`users/`** - User Directory & Role-Based Access Control (Admin / Engineer RBAC)
-- **`workers/`** - ARQ Asynchronous Background Jobs & Redis Monitoring
+- **`storage/`** - MinIO Object Storage Integration
+- **`labeling/`** - Label Studio Integration
+- **`users/`** - User Directory & Role-Based Access Control
+- **`workers/`** - ARQ Background Jobs & Redis Monitoring
 
 ## โครงสร้างมาตรฐานของแต่ละฟีเจอร์
 แต่ละโฟลเดอร์ฟีเจอร์จะมีไฟล์หลักๆ ดังนี้:

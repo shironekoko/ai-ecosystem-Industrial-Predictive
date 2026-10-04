@@ -1,0 +1,17 @@
+{
+ "causal (deployed)": {
+  "MAE_all": 1.112,
+  "MAE_test20": 0.913,
+  "Late_pct_test20": 0.0
+ },
+ "offline STL (non-causal)": {
+  "MAE_all": 1.139,
+  "MAE_test20": 0.93,
+  "Late_pct_test20": 0.0
+ },
+ "no cleaning": {
+  "MAE_all": 1.169,
+  "MAE_test20": 0.941,
+  "Late_pct_test20": 0.0
+ }
+}

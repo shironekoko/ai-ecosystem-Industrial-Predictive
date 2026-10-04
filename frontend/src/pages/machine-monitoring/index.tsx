@@ -1,1069 +1,434 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  Activity,
-  Play,
-  Pause,
-  RotateCcw,
-  ScanEye,
-  Wifi,
-  WifiOff,
-  Scissors,
-  CheckCircle2,
-  AlertTriangle,
-  Layers,
-  Clock,
-  Radio,
-  Trash2,
-  Wrench,
-} from 'lucide-react';
-import { PageHeader } from '../../components/common/PageHeader';
-import { StatusBadge } from '../../components/common/StatusBadge';
+  Area,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Scatter,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { AlertOctagon, Pause, Play, RotateCcw, Wrench } from 'lucide-react';
+import { PageHeader } from '../../components/common';
+import {
+  Card,
+  ConnBadge,
+  MACHINE_COLOR,
+  PHASE_TEXT,
+  RecBadge,
+  STATE_STYLE,
+  StreamBadge,
+  WearBadge,
+  fmt,
+  fmtClock,
+} from '../../components/toollife/ui';
+import { useAuth } from '../../context/AuthContext';
+import { useFleet, useMachineHistory, useWaveform } from '../../hooks/useToolLife';
 import { api } from '../../services/api';
+import type { MachineSnapshot, RunRecord } from '../../types';
 
-// Interfaces for live telemetry & run progression
-export interface RunProgressionItem {
-  run: number;
-  tsPrediction: 'SHARP' | 'USED' | 'DULLED';
-  confidence: number;
-  flankWearUm?: number;
-  gapsUm?: number;
-  fres?: number;
-  note?: string;
-  chipImageUrl?: string;
-  chipPrediction?: 'SHARP' | 'USED' | 'DULLED';
-  chipConfidence?: number;
-}
+const LAYER_MIN = 164 / 60;
 
-export interface StreamingDataPoint {
-  timestamp: number;
-  fx: number;
-  fy: number;
-  fz?: number;
-  fres: number;
-}
+const SIGNALS = {
+  forces: { label: 'แรงตัด (dynamometer)', unit: 'N', keys: [['fx', 'Fx', '#6366f1'], ['fy', 'Fy', '#0ea5e9'], ['fz', 'Fz', '#14b8a6']] },
+  spindle: { label: 'แรงบิด spindle', unit: 'Nm', keys: [['sp', 'Spindle torque', '#f59e0b']] },
+  axis: { label: 'มอเตอร์แกนป้อน X/Y', unit: '', keys: [['ax', 'Axis X', '#8b5cf6'], ['ay', 'Axis Y', '#ec4899']] },
+} as const;
 
-export function MachineMonitoringPage() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+const REL_KEYS: [string, string, string][] = [
+  ['sp_rel', 'แรงบิด spindle', '#f59e0b'],
+  ['ay_rel', 'มอเตอร์แกน Y', '#ec4899'],
+  ['ax_rel', 'มอเตอร์แกน X', '#8b5cf6'],
+  ['fres_rel', 'แรงลัพธ์ Fres', '#6366f1'],
+  ['fx_rel', 'แรง Fx', '#0ea5e9'],
+];
 
-  // Active Tool state (read from URL params if navigated from Dashboard)
-  const [selectedToolId, setSelectedToolId] = useState<number>(() => {
-    const toolParam = searchParams.get('tool');
-    return toolParam ? Number(toolParam) : 10;
-  });
-
-  // Per-Run Progression items (Clean / empty by default awaiting API or stream)
-  const [runs, setRuns] = useState<RunProgressionItem[]>([]);
-  const [activeRunNumber, setActiveRunNumber] = useState<number | null>(null);
-
-  // Active in-progress pass metadata during live cutting
-  const [activeCuttingRun, setActiveCuttingRun] = useState<number>(1);
-  const [activeCuttingProgressPct, setActiveCuttingProgressPct] = useState<number>(0);
-
-  // Live streaming buffer (rolling window of the latest data points)
-  const [streamPoints, setStreamPoints] = useState<StreamingDataPoint[]>([]);
-  const [latestForces, setLatestForces] = useState<{
-    fx: number;
-    fy: number;
-    fz?: number;
-    fres: number;
-  } | null>(null);
-
-  // Stream connection state (restores streaming flag from sessionStorage if user previously turned it on)
-  const [isStreaming, setIsStreaming] = useState<boolean>(() => {
+const Controls: React.FC<{ m: MachineSnapshot; speeds: number[] }> = ({ m, speeds }) => {
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
     try {
-      return sessionStorage.getItem('pdm_streaming_active') === 'true';
-    } catch {
-      return false;
-    }
-  });
-  const [streamStatus, setStreamStatus] = useState<'IDLE' | 'CONNECTING' | 'STREAMING' | 'ERROR'>('IDLE');
-  const wsRef = useRef<WebSocket | null>(null);
-
-  const [machineStatus, setMachineStatus] = useState<{
-    status: string;
-    isStopped: boolean;
-    currentRun: number;
-    stoppedRun?: number;
-    stopReason?: string;
-  } | null>(null);
-
-  // Sync machine hardware status and milling history periodically
-  useEffect(() => {
-    let isMounted = true;
-
-    const syncMachineAndHistory = () => {
-      api.getMachineStatus().then((ms) => {
-        if (isMounted && ms) {
-          setMachineStatus(ms);
-          if (ms.status === 'RUNNING') {
-            setIsStreaming(true);
-            try { sessionStorage.setItem('pdm_streaming_active', 'true'); } catch {}
-          } else if (ms.isStopped) {
-            setIsStreaming(false);
-            try { sessionStorage.removeItem('pdm_streaming_active'); } catch {}
-          }
-        }
-      });
-
-      api.getMillingHistory()
-        .then((data: any) => {
-          if (!isMounted || !data) return;
-          if (Array.isArray(data.runs) && data.runs.length > 0) {
-            const loadedRuns: RunProgressionItem[] = data.runs.map((r: any) => ({
-              run: r.run,
-              tsPrediction: r.tsPrediction,
-              confidence: r.confidence ?? 0.95,
-              flankWearUm: r.flankWearUm,
-              gapsUm: r.chippingGapUm,
-              fres: r.fres,
-            }));
-            setRuns(loadedRuns);
-            setActiveRunNumber((prev) => prev ?? loadedRuns[loadedRuns.length - 1].run);
-            try {
-              sessionStorage.setItem('milling_runs_cache', JSON.stringify(loadedRuns));
-            } catch {}
-          } else if (data.currentRun) {
-            setActiveCuttingRun(data.currentRun);
-          }
-        })
-        .catch((err: any) => {
-          console.warn('[Telemetry] History fetch error:', err);
-        });
-    };
-
-    // Fast local restore from sessionStorage to eliminate UI flash
-    try {
-      const cached = sessionStorage.getItem('milling_runs_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setRuns(parsed);
-          setActiveRunNumber(parsed[parsed.length - 1].run);
-        }
-      }
-    } catch {}
-
-    syncMachineAndHistory();
-    const interval = setInterval(syncMachineAndHistory, 2500);
-    window.addEventListener('focus', syncMachineAndHistory);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-      window.removeEventListener('focus', syncMachineAndHistory);
-    };
-  }, []);
-
-  // Automatically load and display waveform curve for the active run when returning to the page or selecting a run
-  useEffect(() => {
-    if (isStreaming) return;
-    const targetRun = activeRunNumber ?? (runs.length > 0 ? runs[runs.length - 1].run : null);
-    if (!targetRun) return;
-
-    let isMounted = true;
-    api.getRunWaveform(selectedToolId, targetRun).then((points: StreamingDataPoint[]) => {
-      if (!isMounted || !Array.isArray(points) || points.length === 0) return;
-      setStreamPoints(points);
-      const last = points[points.length - 1];
-      setLatestForces({
-        fx: last.fx,
-        fy: last.fy,
-        fz: last.fz,
-        fres: last.fres,
-      });
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activeRunNumber, isStreaming, selectedToolId, runs.length]);
-
-  // Active run info derived from current runs array
-  const currentRunInfo = runs.find((r) => r.run === activeRunNumber) || (runs.length > 0 ? runs[runs.length - 1] : null);
-  const isTimeSeriesAlert = currentRunInfo?.tsPrediction === 'DULLED';
-
-  // Two-Factor Logic:
-  // Factor 1: Time-Series Force AI checks per-run.
-  // Factor 2: Non-Time-Series Chip AI triggers ONLY IF Factor 1 Alerts!
-  const isNonTimeActive = Boolean(currentRunInfo && isTimeSeriesAlert);
-  const chipAiCondition = currentRunInfo?.chipPrediction || (isTimeSeriesAlert ? 'PENDING' : 'SHARP');
-  const chipAiConfidence = currentRunInfo?.chipConfidence ?? 0;
-  const isTwoFactorConfirmed = Boolean(isTimeSeriesAlert && chipAiCondition === 'DULLED');
-
-  useEffect(() => {
-    let isMounted = true;
-    if (isTimeSeriesAlert && activeRunNumber && !currentRunInfo?.chipPrediction) {
-      api.getBladeQc(selectedToolId, activeRunNumber, 1).then((res: any) => {
-        if (!isMounted) return;
-        if (res && res.tier2ChipAi) {
-          setRuns((prev) => prev.map((r) => r.run === activeRunNumber ? {
-            ...r,
-            chipPrediction: res.tier2ChipAi.condition,
-            chipConfidence: res.tier2ChipAi.confidence
-          } : r));
-        }
-      }).catch(console.error);
-    }
-    return () => { isMounted = false; };
-  }, [isTimeSeriesAlert, activeRunNumber, currentRunInfo?.chipPrediction, selectedToolId]);
-
-  // WebSocket Live Telemetry Streaming Handler
-  useEffect(() => {
-    if (!isStreaming) {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      setStreamStatus('IDLE');
-      return;
-    }
-
-    setStreamStatus('CONNECTING');
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl =
-      (import.meta as any).env?.VITE_WS_URL ||
-      `${wsProtocol}//${window.location.hostname}:8000/api/v1/telemetry/spindle/stream`;
-
-    let socket: WebSocket;
-    try {
-      socket = new WebSocket(wsUrl);
-      wsRef.current = socket;
-    } catch {
-      setStreamStatus('ERROR');
-      return;
-    }
-
-    socket.onopen = () => {
-      setStreamStatus('STREAMING');
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data && data.forces) {
-          const newPoint: StreamingDataPoint = {
-            timestamp: data.timestamp || Date.now(),
-            fx: data.forces.fx,
-            fy: data.forces.fy,
-            fz: data.forces.fz,
-            fres: data.forces.fres,
-          };
-
-          setLatestForces(data.forces);
-
-          setStreamPoints((prev) => {
-            const next = [...prev, newPoint];
-            return next.length > 60 ? next.slice(next.length - 60) : next;
-          });
-
-          // Update live milling progress for current cutting pass
-          if (data.passIndex !== undefined) {
-            setActiveCuttingRun(Number(data.passIndex));
-          }
-          if (data.runProgressPct !== undefined) {
-            setActiveCuttingProgressPct(Number(data.runProgressPct));
-          }
-
-          // Evaluate Time-Series model prediction ONLY when the pass has finished cutting!
-          if (data.isPassCompleted && data.inference && data.inference.status === 'COMPLETED') {
-            const passNum = Number(data.passIndex);
-            const condition = data.inference.condition;
-            const conf = data.inference.confidence || 0.95;
-            const flankWear = data.inference.flankWearUm;
-
-            setRuns((prev) => {
-              const idx = prev.findIndex((r) => r.run === passNum);
-              const item: RunProgressionItem = {
-                run: passNum,
-                tsPrediction: condition,
-                confidence: conf,
-                flankWearUm: flankWear,
-                fres: data.forces.fres,
-              };
-              let next;
-              if (idx >= 0) {
-                next = [...prev];
-                next[idx] = item;
-              } else {
-                next = [...prev, item].sort((a, b) => a.run - b.run);
-              }
-              try {
-                sessionStorage.setItem('milling_runs_cache', JSON.stringify(next));
-              } catch {}
-              return next;
-            });
-
-            // Follow active milling run dynamically
-            setActiveRunNumber(passNum);
-
-            // Safety Interlock: If Time-Series model detects DULLED, auto-stop stream
-            if (condition === 'DULLED' || data.machineState === 'EMERGENCY_HALTED') {
-              setIsStreaming(false); // Safety cut on first dulled!
-              try {
-                sessionStorage.removeItem('pdm_streaming_active');
-              } catch {}
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[Stream] Parse error:', err);
-      }
-    };
-
-    socket.onerror = () => {
-      setStreamStatus('ERROR');
-    };
-
-    socket.onclose = () => {
-      setStreamStatus('IDLE');
-    };
-
-    return () => {
-      if (socket) {
-        socket.onclose = null;
-        socket.onerror = null;
-        socket.onmessage = null;
-        socket.close();
-      }
-      wsRef.current = null;
-    };
-  }, [isStreaming]);
-
-  // Chart dimensions & coordinate math
-  const chartHeight = 220;
-  const chartWidth = 720;
-  const maxForceScale = 320; // 0 to 320 N
-
-  // Calculate SVG Polyline from streaming points
-  const getStreamingPolyline = (points: StreamingDataPoint[]) => {
-    if (points.length < 2) return '';
-    return points
-      .map((p, idx) => {
-        const x = (idx / (points.length - 1)) * chartWidth;
-        const clampedFres = Math.max(0, Math.min(maxForceScale, p.fres));
-        const y = chartHeight - 24 - (clampedFres / maxForceScale) * (chartHeight - 48);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(' ');
-  };
-
-  const getStreamingFxyPolyline = (points: StreamingDataPoint[], key: 'fx' | 'fy') => {
-    if (points.length < 2) return '';
-    return points
-      .map((p, idx) => {
-        const x = (idx / (points.length - 1)) * chartWidth;
-        const val = Math.abs(p[key]);
-        const clamped = Math.max(0, Math.min(maxForceScale, val));
-        const y = chartHeight - 24 - (clamped / maxForceScale) * (chartHeight - 48);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(' ');
-  };
-
-  const thresholdY = chartHeight - 24 - (210 / maxForceScale) * (chartHeight - 48);
-  const firstDulledRun = runs.find((r) => r.tsPrediction === 'DULLED');
-
-  const handleToggleStreaming = async () => {
-    if (!isStreaming) {
-      if (
-        machineStatus?.isStopped &&
-        machineStatus?.stopReason?.includes('Safety Interlock') &&
-        !machineStatus?.stopReason?.includes('QC_CLEARED')
-      ) {
-        alert(
-          '⚠️ ไม่สามารถเริ่มทำงานได้เนื่องจาก Safety Interlock ถูกทริป (หัวมีดสึกหรอระดับ DULL)\nกรุณากดปุ่ม "Mount Fresh Tool (Reset)" เพื่อเปลี่ยนหัวมีดก่อน'
-        );
-        return;
-      }
-      try {
-        const res = await api.startMachine();
-        if (res && res.success === false) {
-          alert(`⚠️ ไม่สามารถเริ่มเครื่องจักรได้: ${res.detail || 'เกิดข้อผิดพลาด'}`);
-          return;
-        }
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ command: 'START_STREAM' }));
-        }
-        setIsStreaming(true);
-        sessionStorage.setItem('pdm_streaming_active', 'true');
-        const ms = await api.getMachineStatus();
-        if (ms) setMachineStatus(ms);
-      } catch (err: any) {
-        console.error('Failed to start machine:', err);
-      }
-    } else {
-      try {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ command: 'PAUSE_STREAM' }));
-        }
-        await api.pauseMachine('Operator paused cutting stream');
-        setIsStreaming(false);
-        sessionStorage.removeItem('pdm_streaming_active');
-        const ms = await api.getMachineStatus();
-        if (ms) setMachineStatus(ms);
-      } catch (err: any) {
-        console.error('Failed to pause machine:', err);
-      }
+      await fn();
+    } catch (e: any) {
+      alert(e.message || String(e));
+    } finally {
+      setBusy(false);
     }
   };
-
-  const handleClearData = () => {
-    setStreamPoints([]);
-    setLatestForces(null);
-    setRuns([]);
-    setActiveRunNumber(null);
-    setActiveCuttingProgressPct(0);
-    try {
-      sessionStorage.removeItem('milling_runs_cache');
-      sessionStorage.removeItem('pdm_streaming_active');
-    } catch {}
-  };
-
-  const handleMountFreshTool = async () => {
-    try {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ command: 'MOUNT_FRESH_TOOL' }));
-      }
-      await api.resetMachine();
-    } catch {
-      // ignore
-    }
-    setStreamPoints([]);
-    setLatestForces(null);
-    setRuns([]);
-    setActiveRunNumber(1);
-    setActiveCuttingRun(1);
-    setActiveCuttingProgressPct(0);
-    try {
-      sessionStorage.removeItem('milling_runs_cache');
-      sessionStorage.removeItem('pdm_streaming_active');
-    } catch {}
-    setIsStreaming(false);
-    const ms = await api.getMachineStatus();
-    if (ms) setMachineStatus(ms);
-  };
-
-  const handleResumeSpindle = async () => {
-    try {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ command: 'RESUME' }));
-      }
-      const targetMachineId = (machineStatus as any)?.machineId || 'CNC-SP-01';
-      await api.controlSpindle('RESUME', targetMachineId);
-      const ms = await api.getMachineStatus();
-      if (ms) setMachineStatus(ms);
-      setIsStreaming(true);
-      try { sessionStorage.setItem('pdm_streaming_active', 'true'); } catch {}
-    } catch (err: any) {
-      console.error('Failed to resume spindle:', err);
-    }
-  };
-
   return (
-    <div className="space-y-6">
-      {/* Top Header */}
-      <PageHeader
-        title="Time-Series Per-Run Progression & 2-Factor In-Process Tracking"
-        subtitle="โมเดล Time-Series CRNN (BiGRU + Attention) เช็คราย Run ตามลำดับรอบตัด ➔ หยุดทันทีเมื่อเจอ Dulled อันแรก เพื่อดึงภาพ Chip"
-        actions={
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs font-mono font-bold text-gray-800 shadow-2xs">
-              <Wrench className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Tool #{selectedToolId}</span>
-            </div>
-            {/* Mount Fresh Tool / Reset Spindle Button */}
-            <button
-              onClick={handleMountFreshTool}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 transition shadow-xs cursor-pointer"
-              title="เปลี่ยนหัวมีดใหม่ (Mount Fresh Tool) และรีเซ็ตการตัดเริ่มจาก Run #1"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Mount Fresh Tool (Reset)</span>
-            </button>
+    <div className="flex flex-wrap items-center gap-2">
+      {m.state === 'IDLE' || m.state === 'COMPLETED' ? (
+        <button disabled={busy} onClick={() => run(() => api.controlMachine(m.machine, 'start'))} className="btn-primary">
+          <Play className="w-3.5 h-3.5" /> {m.state === 'COMPLETED' ? 'ติดตั้งดอกใหม่ & เริ่ม' : 'เริ่มตัด'}
+        </button>
+      ) : m.state === 'PAUSED' ? (
+        <button disabled={busy} onClick={() => run(() => api.controlMachine(m.machine, 'resume'))} className="btn-primary">
+          <Play className="w-3.5 h-3.5" /> ตัดต่อ
+        </button>
+      ) : m.state === 'CUTTING' ? (
+        <button disabled={busy} onClick={() => run(() => api.controlMachine(m.machine, 'pause'))} className="btn-secondary">
+          <Pause className="w-3.5 h-3.5" /> หยุดชั่วคราว
+        </button>
+      ) : null}
+      <button
+        disabled={busy}
+        onClick={() => confirm('รีเซ็ตสตรีมและเริ่มดอกนี้ใหม่จากรันแรก?') && run(() => api.controlMachine(m.machine, 'reset'))}
+        className="btn-secondary"
+      >
+        <RotateCcw className="w-3.5 h-3.5" /> รีเซ็ต
+      </button>
+      <label className="flex items-center gap-1.5 text-xs text-gray-600 ml-1">
+        ความเร็วเล่นซ้ำ
+        <select
+          value={m.speed}
+          onChange={(e) => run(() => api.setSpeed(m.machine, Number(e.target.value)))}
+          className="border border-gray-200 rounded-md px-2 py-1 text-xs bg-white"
+        >
+          {speeds.map((s) => (
+            <option key={s} value={s}>
+              {s === 1 ? '1× (เวลาจริง)' : `${s}× (เร่งเวลา)`}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+};
 
-            {/* Clear Buffer Button */}
-            {(runs.length > 0 || streamPoints.length > 0) && (
-              <button
-                onClick={handleClearData}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition shadow-xs cursor-pointer"
-                title="ล้างข้อมูลกราฟและรอบตัดเพื่อเริ่มรับข้อมูลใหม่"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Clear Buffer</span>
-              </button>
-            )}
-
-            {/* Live Streaming Toggle */}
-            <button
-              onClick={handleToggleStreaming}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold border transition shadow-xs cursor-pointer ${
-                isStreaming
-                  ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white border-transparent'
-              }`}
-            >
-              {isStreaming ? (
-                <>
-                  <Pause className="w-3.5 h-3.5" />
-                  <span>Stop Telemetry Stream</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-3.5 h-3.5" />
-                  <span>Start Telemetry Stream</span>
-                </>
-              )}
-            </button>
-
-            {/* Connection Status Badge */}
-            <StatusBadge
-              status={
-                isTwoFactorConfirmed
-                  ? 'critical'
-                  : isStreaming
-                  ? 'connected'
-                  : streamStatus === 'CONNECTING'
-                  ? 'warning'
-                  : 'disconnected'
-              }
-              label={
-                isTwoFactorConfirmed
-                  ? `2-FACTOR ALERT: STOPPED AT RUN #${activeRunNumber}`
-                  : isStreaming
-                  ? `STREAMING ACTIVE (${streamPoints.length} pts)`
-                  : streamStatus === 'CONNECTING'
-                  ? 'CONNECTING TO WS...'
-                  : 'STREAM STANDBY'
-              }
-            />
-          </div>
-        }
-      />
-
-      {/* Safety Interlock Auto-Halt Alert Banner */}
-      {isTimeSeriesAlert && (
-        <div className={`p-4 bg-gradient-to-r ${
-          machineStatus?.stopReason?.includes('QC_CLEARED')
-            ? 'from-emerald-950 via-slate-900 to-emerald-950 border-emerald-800/70'
-            : 'from-rose-950 via-slate-900 to-rose-950 border-rose-800/70'
-        } text-white rounded-xl shadow-sm border flex flex-wrap items-center justify-between gap-4 animate-in fade-in duration-200`}>
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-lg border ${
-              machineStatus?.stopReason?.includes('QC_CLEARED')
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-            }`}>
-              <AlertTriangle className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className={`text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded border font-bold ${
-                  machineStatus?.stopReason?.includes('QC_CLEARED')
-                    ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-200'
-                    : machineStatus?.stopReason?.includes('QC_CONFIRMED')
-                    ? 'bg-rose-500/30 border-rose-500/50 text-rose-200'
-                    : 'bg-amber-500/30 border-amber-500/50 text-amber-200'
-                }`}>
-                  {machineStatus?.stopReason?.includes('QC_CLEARED')
-                    ? '✅ QC Cleared · Tool Verified Safe (False Alarm)'
-                    : machineStatus?.stopReason?.includes('QC_CONFIRMED')
-                    ? '🛑 QC Confirmed · Wear Verified (DULLED) — Fresh Tool Required'
-                    : `🛑 Safety Interlock Triggered · Spindle Halted at Run #${activeRunNumber}`}
-                </span>
-                <span className="text-xs text-slate-300 font-mono">
-                  Tool Condition: {currentRunInfo?.tsPrediction || 'DULLED'} ({((currentRunInfo?.confidence ?? 0.95) * 100).toFixed(1)}% Conf)
-                </span>
-              </div>
-              <p className="text-xs text-slate-200 mt-1">
-                {machineStatus?.stopReason?.includes('QC_CLEARED')
-                  ? 'วิศวกรผู้เชี่ยวชาญได้ตรวจสอบภาพถ่ายคมมีดที่แท่นส่องกล้องแล้ว ยืนยันว่าคมมีดยังไม่สึกหรอวิกฤต (False Alarm) — ระบบอนุมัติให้เดินเครื่องตัดต่อได้'
-                  : machineStatus?.stopReason?.includes('QC_CONFIRMED')
-                  ? 'วิศวกรผู้เชี่ยวชาญตรวจสอบคมมีดที่แท่นส่องกล้องแล้ว ยืนยันว่ามีดสึกหรอวิกฤต (DULLED) จริง — กรุณากด "เปลี่ยนมีดใหม่" เพื่อเริ่มรอบตัดใหม่ด้วยมีดชุดใหม่'
-                  : `สปินเดิลและระบบสตรีมถูกสั่งหยุดการทำงานอัตโนมัติ เนื่องจากโมเดล Time-Series CRNN ตรวจพบว่ามีดอยู่ในสถานะ DULLED ในรอบตัด Pass #${activeRunNumber} กรุณาถอดมีดไปตรวจยืนยันที่แท่นส่องกล้อง`}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {machineStatus?.stopReason?.includes('QC_CLEARED') ? (
-              <button
-                onClick={handleResumeSpindle}
-                className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer ring-2 ring-emerald-400/50"
-              >
-                <Activity className="w-3.5 h-3.5" />
-                <span>ปลดล็อคและเดินเครื่องต่อ (Resume Cutting)</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => navigate(`/visual-qc?tool=${selectedToolId}&run=${activeRunNumber}`)}
-                className={`px-3.5 py-2 rounded-lg font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer ${
-                  machineStatus?.stopReason?.includes('QC_CONFIRMED')
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-                    : 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse'
-                }`}
-              >
-                <ScanEye className="w-3.5 h-3.5" />
-                <span>{machineStatus?.stopReason?.includes('QC_CONFIRMED') ? 'ดูผลการตรวจที่ Visual QC' : 'ถอดมีดไปตรวจที่ Tool Verification'}</span>
-              </button>
-            )}
-            <button
-              onClick={handleMountFreshTool}
-              className={`px-3.5 py-2 rounded-lg font-bold text-xs transition flex items-center gap-1.5 cursor-pointer ${
-                machineStatus?.stopReason?.includes('QC_CONFIRMED')
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm ring-2 ring-emerald-400/50'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-              }`}
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>เปลี่ยนมีดใหม่ (Mount Fresh Tool)</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Main Grid: Per-Run Dynamics Graph + Timeline (70%) + 2-Factor In-Process HUD (30%) */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Left Column: กราฟตอน Run ราย Run + Timeline ลำดับรอบตัด */}
-        <div className="col-span-12 lg:col-span-8 space-y-5">
-          {/* Section 1: กราฟตัดชิ้นงานราย Run (Per-Run Signal & Cutting Dynamics Graph) */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col">
-            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/70">
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-indigo-600" />
-                <span className="font-bold text-xs text-gray-900 uppercase tracking-wider">
-                  Cutting Dynamics Graph · Run #{activeRunNumber ?? '--'} (Tool #{selectedToolId})
-                </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-semibold hidden sm:inline-block" title="Piezoelectric dynamometer sampling rate 1,000 Hz decimated to 20 Hz for web telemetry">
-                  Sensor: 1 kHz Raw · Stream: 20 Hz
-                </span>
-                {isStreaming && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 animate-pulse">
-                    <Radio className="w-3 h-3" /> Live Stream
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-4 text-xs font-mono">
-                <span className="text-blue-600 font-bold">
-                  Fx: {latestForces ? `${latestForces.fx.toFixed(1)} N` : '-- N'}
-                </span>
-                <span className="text-emerald-600 font-bold">
-                  Fy: {latestForces ? `${latestForces.fy.toFixed(1)} N` : '-- N'}
-                </span>
-                <span
-                  className={`font-black ${
-                    latestForces && latestForces.fres > 210
-                      ? 'text-rose-600 animate-pulse'
-                      : latestForces
-                      ? 'text-amber-500'
-                      : 'text-gray-400'
-                  }`}
-                >
-                  Fres:{' '}
-                  {latestForces ? `${latestForces.fres.toFixed(1)} N` : '-- N'}{' '}
-                  {latestForces && latestForces.fres > 210 ? '(SPIKE!)' : ''}
-                </span>
-              </div>
-            </div>
-
-            {/* SVG Visualizer Canvas for Current Run / Streaming Data */}
-            <div className="p-4 bg-slate-950 flex-1 flex flex-col justify-center relative select-none min-h-[220px]">
-              {/* Background Grid Lines */}
-              <div className="absolute inset-0 grid grid-rows-4 grid-cols-8 pointer-events-none opacity-10">
-                {Array.from({ length: 32 }).map((_, i) => (
-                  <div key={i} className="border border-white" />
-                ))}
-              </div>
-
-              {streamPoints.length >= 2 ? (
-                /* Active Waveform Rendering */
-                <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-48 overflow-visible">
-                  {/* 210 N Threshold Limit Line */}
-                  <line
-                    x1="0"
-                    y1={thresholdY}
-                    x2={chartWidth}
-                    y2={thresholdY}
-                    stroke="#f43f5e"
-                    strokeWidth="1.5"
-                    strokeDasharray="4 4"
-                    opacity="0.85"
-                  />
-                  <text
-                    x="12"
-                    y={thresholdY - 6}
-                    fill="#f43f5e"
-                    fontSize="10"
-                    fontFamily="monospace"
-                    fontWeight="bold"
-                  >
-                    ISO DYNAMIC ANOMALY THRESHOLD (Fres = 210 N)
-                  </text>
-
-                  {/* Fx Waveform (Faint Blue) */}
-                  <polyline
-                    fill="none"
-                    stroke="#3b82f6"
-                    strokeWidth="1.2"
-                    opacity="0.4"
-                    points={getStreamingFxyPolyline(streamPoints, 'fx')}
-                  />
-
-                  {/* Fy Waveform (Faint Emerald) */}
-                  <polyline
-                    fill="none"
-                    stroke="#10b981"
-                    strokeWidth="1.2"
-                    opacity="0.4"
-                    points={getStreamingFxyPolyline(streamPoints, 'fy')}
-                  />
-
-                  {/* Primary Resultant Waveform (Fres) */}
-                  <polyline
-                    fill="none"
-                    stroke={
-                      latestForces && latestForces.fres > 210
-                        ? '#f43f5e'
-                        : latestForces && latestForces.fres > 130
-                        ? '#f59e0b'
-                        : '#10b981'
-                    }
-                    strokeWidth="2.2"
-                    points={getStreamingPolyline(streamPoints)}
-                  />
-                </svg>
-              ) : (
-                /* Empty / Standby Oscilloscope Screen awaiting stream */
-                <div className="h-48 flex flex-col items-center justify-center text-center z-10 space-y-2">
-                  <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500">
-                    {isStreaming ? (
-                      <Activity className="w-5 h-5 text-indigo-400 animate-spin" />
-                    ) : (
-                      <WifiOff className="w-5 h-5 text-slate-500" />
-                    )}
-                  </div>
-                  <p className="text-xs font-mono font-bold text-slate-300">
-                    {isStreaming ? 'LISTENING FOR STREAMING DATA PACKETS...' : 'AWAITING TELEMETRY STREAM'}
-                  </p>
-                  <p className="text-[11px] font-mono text-slate-500 max-w-sm">
-                    {isStreaming
-                      ? 'เชื่อมต่อ WebSocket แล้ว กำลังรอข้อมูลแรงตัด (Fx, Fy, Fres) ส่งเข้ามา...'
-                      : 'กดปุ่ม "Start Telemetry Stream" หรือส่งข้อมูลสตรีมผ่าน API เพื่อเริ่มแสดงกราฟแบบ Real-time'}
-                  </p>
-                </div>
-              )}
-
-              {/* Live Milling Pass In-Progress Bar */}
-              {isStreaming && (
-                <div className="bg-slate-900/90 rounded-lg p-2.5 my-2 border border-slate-800 flex items-center justify-between text-xs font-mono">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-slate-200 font-bold">
-                      Workpiece Milling Pass #{activeCuttingRun}:
-                    </span>
-                    <span className="text-emerald-400 font-bold">
-                      {activeCuttingProgressPct.toFixed(0)}%
-                    </span>
-                  </div>
-                  <div className="flex-1 max-w-xs mx-4 bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-700">
-                    <div
-                      className="bg-emerald-500 h-full transition-all duration-100 ease-out"
-                      style={{ width: `${Math.min(100, Math.max(0, activeCuttingProgressPct))}%` }}
-                    />
-                  </div>
-                  <span className="text-slate-400 text-[11px] hidden sm:inline">
-                    CRNN Model evaluates at 100%
-                  </span>
-                </div>
-              )}
-
-              {/* In-Chart Run Status Overlay */}
-              <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono pt-2 border-t border-slate-800">
-                <span>Pass Cycle: #{activeRunNumber ?? '--'}</span>
-                <span className="text-white font-bold">
-                  Status:{' '}
-                  <span
-                    className={
-                      isTimeSeriesAlert
-                        ? 'text-rose-400'
-                        : currentRunInfo?.tsPrediction === 'USED'
-                        ? 'text-amber-400'
-                        : currentRunInfo?.tsPrediction === 'SHARP'
-                        ? 'text-emerald-400'
-                        : 'text-slate-400'
-                    }
-                  >
-                    {currentRunInfo?.tsPrediction || 'Awaiting Data'}
-                  </span>
-                </span>
-                <span>
-                  {streamPoints.length >= 2
-                    ? isTimeSeriesAlert
-                      ? '🔴 Chatter & Force Spikes Detected'
-                      : '🟢 Real-time Telemetry Active'
-                    : '⚪ Stream Ingestion Standby'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 2: Per-Run Progression Timeline (คลิกเลือกรอบตัดได้ เมื่อมีข้อมูลจาก API) */}
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-indigo-600" />
-                <span>Per-Run Progression Timeline (ลำดับรอบตัดราย Run)</span>
-              </h4>
-              <span className="text-[11px] text-gray-400 font-mono">
-                {firstDulledRun ? (
-                  <>
-                    First Dulled: <strong className="text-rose-600">Run #{firstDulledRun.run}</strong>
-                  </>
-                ) : (
-                  <span>Status: Awaiting Ingestion</span>
-                )}
-              </span>
-            </div>
-
-            {/* Stepper Cards Grid or Empty State */}
-            {runs.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
-                {runs.map((item) => {
-                  const isSelected = activeRunNumber === item.run;
-                  const isDulled = item.tsPrediction === 'DULLED';
-                  const isUsed = item.tsPrediction === 'USED';
-
-                  return (
-                    <button
-                      key={item.run}
-                      onClick={() => setActiveRunNumber(item.run)}
-                      className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between min-h-[85px] relative ${
-                        isSelected
-                          ? isDulled
-                            ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-400/30 shadow-xs'
-                            : isUsed
-                            ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-400/30 shadow-xs'
-                            : 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-400/30 shadow-xs'
-                          : 'bg-gray-50/70 border-gray-200 hover:bg-gray-100/80'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between w-full">
-                        <span className="font-mono font-bold text-xs text-gray-900">
-                          Run #{item.run}
-                        </span>
-                        {isDulled ? (
-                          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-                        ) : isUsed ? (
-                          <span className="w-2 h-2 rounded-full bg-amber-500" />
-                        ) : (
-                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                        )}
-                      </div>
-
-                      <div className="mt-2">
-                        <span
-                          className={`text-[10px] font-black font-mono block px-1.5 py-0.5 rounded text-center ${
-                            isDulled
-                              ? 'bg-rose-600 text-white'
-                              : isUsed
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-emerald-100 text-emerald-700'
-                          }`}
-                        >
-                          {item.tsPrediction}
-                        </span>
-                      </div>
-
-                      {item.fres !== undefined && (
-                        <span className="text-[9px] text-gray-400 mt-1 block truncate font-mono">
-                          Fres: {Math.round(item.fres)} N
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              /* Empty state waiting for API runs */
-              <div className="py-8 px-4 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-center">
-                <Clock className="w-6 h-6 text-gray-400 mb-2" />
-                <p className="text-xs font-bold text-gray-700">
-                  ยังไม่มีข้อมูลรอบตัด (Awaiting Run Progression Data)
-                </p>
-                <p className="text-[11px] text-gray-400 font-mono mt-1 max-w-md">
-                  เมื่อเริ่มสตรีมข้อมูลหรือดึง API รอบตัดสำเร็จ ข้อมูล Run #1, Run #2 ... จะถูกเพิ่มเข้ามาใน Timeline อัตโนมัติ
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right Column: 2-Factor In-Process Verification HUD (30%) */}
-        <div className="col-span-12 lg:col-span-4 space-y-4">
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-800 flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-indigo-600" />
-                <span>2-Factor In-Process Verification</span>
-              </h4>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-bold">
-                Run #{activeRunNumber ?? '--'}
-              </span>
-            </div>
-
-            {/* Factor 1: Time-Series Per-Run Check */}
-            <div
-              className={`p-3.5 rounded-xl border transition ${
-                !currentRunInfo
-                  ? 'bg-gray-50 border-gray-200 text-gray-700'
-                  : isTimeSeriesAlert
-                  ? 'bg-rose-50/80 border-rose-200 text-rose-950'
-                  : currentRunInfo.tsPrediction === 'USED'
-                  ? 'bg-amber-50/80 border-amber-200 text-amber-950'
-                  : 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold flex items-center gap-1.5">
-                  <Activity className="w-4 h-4" />
-                  <span>Factor 1: Time-Series AI</span>
-                </span>
-                <span
-                  className={`text-[10px] font-mono px-2 py-0.5 rounded font-black ${
-                    !currentRunInfo
-                      ? 'bg-gray-200 text-gray-600'
-                      : isTimeSeriesAlert
-                      ? 'bg-rose-600 text-white'
-                      : currentRunInfo.tsPrediction === 'USED'
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-emerald-600 text-white'
-                  }`}
-                >
-                  {!currentRunInfo
-                    ? 'IDLE (STANDBY)'
-                    : isTimeSeriesAlert
-                    ? 'ALERT (DULLED)'
-                    : currentRunInfo.tsPrediction}
-                </span>
-              </div>
-              <p className="text-[11px] text-gray-600 mt-1 font-mono">
-                {!currentRunInfo
-                  ? 'รอข้อมูลการตัดราย Run จาก Time-Series Stream เพื่อประเมินความคมมีด'
-                  : isTimeSeriesAlert
-                  ? `ตรวจพบสถานะ DULLED ใน Run #${activeRunNumber} (หยุดเครื่องทันที & สั่งทริกเกอร์ Factor 2)`
-                  : `Run #${activeRunNumber} อยู่ในเกณฑ์ ${currentRunInfo.tsPrediction} (ยังใช้งานต่อได้)`}
-              </p>
-            </div>
-
-            {/* Factor 2: Non-Time-Series Vision AI (รูปภาพของ Chip + คำตอบจากโมเดล) */}
-            <div
-              className={`p-3.5 rounded-xl border transition ${
-                !isNonTimeActive
-                  ? 'bg-gray-50 border-gray-200 opacity-60'
-                  : 'bg-indigo-50/90 border-indigo-200 text-indigo-950 shadow-xs'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold flex items-center gap-1.5">
-                  <Scissors className="w-4 h-4 text-indigo-600" />
-                  <span>Factor 2: Non-Time-Series Chip AI</span>
-                </span>
-                <span
-                  className={`text-[10px] font-mono px-2 py-0.5 rounded font-black ${
-                    !isNonTimeActive
-                      ? 'bg-gray-200 text-gray-500'
-                      : 'bg-indigo-600 text-white'
-                  }`}
-                >
-                  {!isNonTimeActive ? 'STANDBY (IDLE)' : 'ACTIVE (VERIFIED)'}
-                </span>
-              </div>
-
-              {!isNonTimeActive ? (
-                /* ถ้ายังไม่เจอ Dulled -> Factor 2 ยังไม่ทำ */
-                <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
-                  ⚪ <strong>ยังไม่ทำงาน:</strong> โมเดล Non-Time-Series จะไม่ดึงภาพเศษตัดมาประมวลผลจนกว่า Time-Series จะตรวจพบ Dulled อันแรก
-                </p>
-              ) : (
-                /* เมื่อเจอ Dulled อันแรก -> ขึ้นเป็นรูปของ Chip พร้อมคำตอบจากโมเดล */
-                <div className="mt-3 space-y-3">
-                  {/* Image container for real Chip morphology photo */}
-                  <div className="w-full h-40 rounded-lg overflow-hidden border border-indigo-200 bg-slate-900 flex flex-col items-center justify-center relative select-none">
-                    <img
-                      src={`${(import.meta as any).env?.VITE_API_URL || 'http://localhost:8000/api/v1'}/qc/images/chip/T${selectedToolId}R${activeRunNumber}B1.jpg`}
-                      alt={`Chip morphology T${selectedToolId}R${activeRunNumber}`}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
-                    />
-                    <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 text-[9px] font-mono text-white">
-                      T{selectedToolId}R{activeRunNumber}B1.jpg
-                    </div>
-                  </div>
-
-                  {/* คำตอบจากโมเดล Non-Time-Series Chip AI */}
-                  <div className="p-3 bg-white rounded-lg border border-indigo-200 flex items-center justify-between text-xs">
-                    <span className="text-gray-600 font-medium">คำตอบโมเดล (Chip AI):</span>
-                    <span className="px-2.5 py-1 rounded bg-rose-100 text-rose-700 font-bold font-mono text-xs">
-                      {chipAiCondition} ({chipAiConfidence}%)
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Two-Factor Consensus Outcome */}
-            <div
-              className={`p-3.5 rounded-xl border text-xs space-y-2 ${
-                isTwoFactorConfirmed
-                  ? 'bg-rose-50 border-rose-300 text-rose-900'
-                  : currentRunInfo && !isTimeSeriesAlert
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                  : 'bg-slate-50 border-slate-200 text-slate-700'
-              }`}
-            >
-              <div className="flex items-center gap-2 font-bold text-xs">
-                {isTwoFactorConfirmed ? (
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                ) : currentRunInfo && !isTimeSeriesAlert ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                ) : (
-                  <Activity className="w-4 h-4 text-slate-400 shrink-0" />
-                )}
-                <span>
-                  {isTwoFactorConfirmed
-                    ? 'ผลยืนยันร่วม (2FA): สองโมเดลคอนเฟิร์มมีดสึกหรอตรงกัน'
-                    : currentRunInfo && !isTimeSeriesAlert
-                    ? 'สถานะการกัดงาน: ปกติ (ไม่ต้องถอดมีด)'
-                    : 'สถานะระบบ: สแตนด์บายรอรับข้อมูล (Awaiting Stream)'}
-                </span>
-              </div>
-              <p className="text-[11px] text-gray-600 leading-relaxed">
-                {isTwoFactorConfirmed
-                  ? `ตรวจพบ Dulled อันแรกใน Run #${activeRunNumber} สั่งหยุดสปินเดิลเพื่อความปลอดภัย ให้ถอดหัวมีดไปส่องกล้องตรวจสภาพคมมีดที่หน้า Tool Verification`
-                  : currentRunInfo && !isTimeSeriesAlert
-                  ? `รอบตัด Run #${activeRunNumber} ยังไม่เข้าข่ายอันตราย โมเดล Non-Time ยังไม่ต้องทำ และเครื่องจักรกัดงานต่อได้`
-                  : 'ระบบ 2-Factor พร้อมทำงานทันทีเมื่อได้รับข้อมูลสตรีมแรงตัดและรอบตัดส่งเข้ามาผ่าน API'}
-              </p>
-
-              {/* Action Button: นำทางไปยังหน้า Tool Verification */}
-              {isTwoFactorConfirmed && (
-                <button
-                  onClick={() => navigate(`/visual-qc?tool=${selectedToolId}&run=${activeRunNumber}`)}
-                  className="w-full mt-2 py-2.5 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <ScanEye className="w-4 h-4" />
-                  <span>ถอดมีดไปตรวจสภาพคมมีดจริงที่ Tool Verification Bench (Run #{activeRunNumber}) ➔</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+const HoldBanner: React.FC<{ m: MachineSnapshot }> = ({ m }) => {
+  const { user } = useAuth();
+  const actor = user?.name || 'operator';
+  const p = m.prediction;
+  return (
+    <div className="p-4 rounded-xl border-2 border-red-300 bg-red-50 flex flex-col md:flex-row md:items-center gap-4">
+      <AlertOctagon className="w-8 h-8 text-red-600 shrink-0" />
+      <div className="flex-1">
+        <p className="font-bold text-red-800">Interlock: ระบบแนะนำให้เปลี่ยนดอก {m.tool_id} บน {m.machine_id}</p>
+        <p className="text-sm text-red-700">
+          RUL ≈ {fmt(p?.rul_min)} นาที (P10 {fmt(p?.rul_lo)}) — เครื่องหยุดป้อน (feed hold) รอการตัดสินใจของผู้ควบคุม การตัดสินใจทุกครั้งถูกบันทึกใน Audit Trail
+        </p>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={() => api.acknowledge(m.machine, 'replace', actor)} className="btn-danger">
+          <Wrench className="w-3.5 h-3.5" /> ถอดดอก / เปลี่ยนดอก
+        </button>
+        <button onClick={() => api.acknowledge(m.machine, 'continue', actor)} className="btn-secondary">
+          ตัดต่อ (override)
+        </button>
       </div>
     </div>
   );
-}
+};
+
+const WaveformPanel: React.FC<{ machine: number; m: MachineSnapshot }> = ({ machine, m }) => {
+  const { points, run } = useWaveform(machine);
+  const [sig, setSig] = useState<keyof typeof SIGNALS>('forces');
+  const cfg = SIGNALS[sig];
+  const unit = sig === 'axis' ? (m.machine === 1 ? 'Nm' : 'N') : cfg.unit;
+  return (
+    <Card
+      title={`สัญญาณสด — รัน ${run ?? '—'}`}
+      right={
+        <div className="flex gap-1">
+          {(Object.keys(SIGNALS) as (keyof typeof SIGNALS)[]).map((k) => (
+            <button
+              key={k}
+              onClick={() => setSig(k)}
+              className={`px-2 py-1 rounded-md text-[11px] font-medium ${sig === k ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              {SIGNALS[k].label}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      <div className="h-56">
+        {points.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-sm text-gray-400 text-center px-6">
+            {m.state === 'CUTTING' && m.current && !m.current.recorded
+              ? 'เครื่องกำลังตัดแนวที่ไม่ได้ถูกบันทึกในชุดข้อมูล — สัญญาณจะกลับมาเมื่อถึงรันถัดไป'
+              : m.state === 'CUTTING'
+              ? 'กำลังรับสัญญาณ…'
+              : 'ไม่มีการตัดในขณะนี้'}
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={points} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="#f1f5f9" />
+              <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => `${v.toFixed(1)}s`} tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} width={48} unit={unit ? ` ${unit}` : ''} />
+              <Tooltip formatter={(v: number) => v.toFixed(2)} labelFormatter={(l) => `t = ${Number(l).toFixed(3)} s`} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              {cfg.keys.map(([k, label, color]) => (
+                <Line key={k} dataKey={k} name={label} stroke={color} dot={false} strokeWidth={1.3} isAnimationActive={false} />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+      <p className="text-[11px] text-gray-400 mt-2">
+        ข้อมูลจริงจากไฟล์ h5 ของรันนี้ เล่นที่อัตรา controller 500 Hz (แรง dynamometer 25 kHz เฉลี่ยเป็นบล็อก) · หน้าต่าง 3 วินาทีล่าสุด
+      </p>
+    </Card>
+  );
+};
+
+const RulChart: React.FC<{ history: RunRecord[]; color: string }> = ({ history, color }) => {
+  const data = useMemo(
+    () =>
+      history
+        .filter((h) => h.rul !== null && h.rul !== undefined)
+        .map((h) => ({ t: h.t_min, rul: h.rul, band: [h.rul_lo, h.rul_hi], raw: h.raw_rul })),
+    [history],
+  );
+  if (data.length === 0)
+    return <div className="h-72 flex items-center justify-center text-sm text-gray-400">ยังไม่มีผลพยากรณ์ (ต้องผ่าน break-in + เก็บค่าตั้งต้น 29 รันก่อน)</div>;
+  return (
+    <div className="h-72">
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke="#f1f5f9" />
+          <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v.toFixed(0)}`} label={{ value: 'เวลาตัดสะสม (นาที)', position: 'insideBottom', offset: -2, fontSize: 10 }} />
+          <YAxis tick={{ fontSize: 10 }} width={40} domain={[0, 'auto']} label={{ value: 'RUL (นาที)', angle: -90, position: 'insideLeft', fontSize: 10 }} />
+          <Tooltip
+            formatter={(v: any, n: string) => (Array.isArray(v) ? `${v[0].toFixed(1)}–${v[1].toFixed(1)}` : Number(v).toFixed(2)) + ' นาที'}
+            labelFormatter={(l) => `เวลาตัด ${Number(l).toFixed(2)} นาที`}
+          />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Area dataKey="band" name="ช่วง P10–P90" stroke="none" fill={color} fillOpacity={0.15} isAnimationActive={false} />
+          <Scatter dataKey="raw" name="ค่าประมาณดิบรายรัน (GRU)" fill="#94a3b8" shape={(p: any) => <circle cx={p.cx} cy={p.cy} r={1.4} fill="#94a3b8" />} isAnimationActive={false} />
+          <Line dataKey="rul" name="RUL (หลังข้อจำกัดฟิสิกส์)" stroke={color} strokeWidth={2} dot={false} isAnimationActive={false} />
+          <ReferenceLine y={LAYER_MIN} stroke="#ef4444" strokeDasharray="4 3" label={{ value: 'เปลี่ยนทันที (1 ชั้น)', fontSize: 9, fill: '#ef4444', position: 'insideTopRight' }} />
+          <ReferenceLine y={3 * LAYER_MIN} stroke="#f97316" strokeDasharray="4 3" label={{ value: 'วางแผน (3 ชั้น)', fontSize: 9, fill: '#f97316', position: 'insideTopRight' }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+const SensorTrend: React.FC<{ history: RunRecord[] }> = ({ history }) => {
+  const data = useMemo(
+    () =>
+      history
+        .filter((h) => h.rel)
+        .map((h) => ({ t: h.t_min, ...Object.fromEntries(REL_KEYS.map(([k]) => [k, +(100 * (h.rel as any)[k]).toFixed(2)])) })),
+    [history],
+  );
+  if (data.length === 0) return <div className="h-56 flex items-center justify-center text-sm text-gray-400">รอค่าตั้งต้นของดอก</div>;
+  return (
+    <div className="h-56">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke="#f1f5f9" />
+          <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => v.toFixed(0)} />
+          <YAxis tick={{ fontSize: 10 }} width={40} unit="%" />
+          <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} labelFormatter={(l) => `เวลาตัด ${Number(l).toFixed(2)} นาที`} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          {REL_KEYS.map(([k, label, color]) => (
+            <Line key={k} dataKey={k} name={label} stroke={color} dot={false} strokeWidth={1.2} isAnimationActive={false} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+const StateStrip: React.FC<{ history: RunRecord[] }> = ({ history }) => {
+  const pts = history.filter((h) => h.state);
+  if (pts.length < 2) return null;
+  const t0 = history[0]?.t_min ?? 0;
+  const t1 = history[history.length - 1].t_min;
+  const span = Math.max(t1 - t0, 1e-6);
+  return (
+    <div>
+      <div className="relative h-4 rounded bg-gray-100 overflow-hidden">
+        {pts.map((h, i) => {
+          const next = pts[i + 1]?.t_min ?? t1;
+          return (
+            <div
+              key={i}
+              className="absolute inset-y-0"
+              style={{ left: `${((h.t_min - t0) / span) * 100}%`, width: `${((next - h.t_min) / span) * 100 + 0.2}%`, background: STATE_STYLE[h.state!].color }}
+            />
+          );
+        })}
+      </div>
+      <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+        <span>{t0.toFixed(1)} นาที</span>
+        <span className="flex gap-3">
+          {Object.entries(STATE_STYLE).map(([k, v]) => (
+            <span key={k} className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-sm" style={{ background: v.color }} />
+              {v.th}
+            </span>
+          ))}
+        </span>
+        <span>{t1.toFixed(1)} นาที</span>
+      </div>
+    </div>
+  );
+};
+
+export const MachineMonitoringPage: React.FC = () => {
+  const [params, setParams] = useSearchParams();
+  const machine = Number(params.get('machine') || 1);
+  const { fleet, conn } = useFleet();
+  const { history } = useMachineHistory(machine);
+  const m = fleet?.machines.find((x) => x.machine === machine);
+  const last = history[history.length - 1];
+  const p = m?.prediction;
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="Machine Monitoring"
+        subtitle="ติดตามดอกกัดทีละรัน: สัญญาณจริง → ฟีเจอร์รายรัน → แบบจำลองอนุกรมเวลา → RUL / สถานะการสึก / คำแนะนำ"
+        actions={<ConnBadge conn={conn} />}
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
+          {(fleet?.machines ?? []).map((x) => (
+            <button
+              key={x.machine}
+              onClick={() => setParams({ machine: String(x.machine) })}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 ${
+                x.machine === machine ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-sm" style={{ background: MACHINE_COLOR[x.machine] }} />
+              {x.machine_id} · {x.tool_id}
+              {x.prediction?.recommendation === 'REPLACE_NOW' && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+            </button>
+          ))}
+        </div>
+        {m && fleet && <Controls m={m} speeds={fleet.speeds} />}
+      </div>
+
+      {!m ? (
+        <div className="text-center text-sm text-gray-400 py-16">กำลังโหลด…</div>
+      ) : (
+        <>
+          {m.state === 'HOLD' && <HoldBanner m={m} />}
+          {m.state === 'COMPLETED' && (
+            <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-sm text-indigo-800">
+              ดอก {m.tool_id} ถูกถอดแล้ว ({m.completed?.reason === 'REPLACED_BY_OPERATOR' ? 'ผู้ควบคุมเปลี่ยนดอก' : 'สิ้นสุดข้อมูลการทดลอง'} ที่เวลาตัด {fmt(m.completed?.t_min)} นาที) —
+              ผลเทียบกับ VB ที่วัดจริงอยู่ในหน้า Reports
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+            <div className="col-span-2 p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+              <p className="text-[11px] text-gray-500">อายุใช้งานที่เหลือ (RUL)</p>
+              {p ? (
+                <>
+                  <p className="text-3xl font-bold tabular-nums">
+                    {fmt(p.rul_min)} <span className="text-sm font-medium text-gray-400">นาทีของเวลาตัด</span>
+                  </p>
+                  <p className="text-xs text-gray-500 tabular-nums">
+                    P10–P90 {fmt(p.rul_lo)}–{fmt(p.rul_hi)} นาที · ครบอายุราว {fmtClock(p.eta_utc)}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-gray-500 mt-2">{m.model_ready ? PHASE_TEXT[m.phase] : 'แบบจำลองยังไม่พร้อม'}</p>
+              )}
+            </div>
+            <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+              <p className="text-[11px] text-gray-500">คำแนะนำ</p>
+              <div className="mt-2">{p ? <RecBadge rec={p.recommendation} size="md" /> : '—'}</div>
+            </div>
+            <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+              <p className="text-[11px] text-gray-500">สถานะการสึก</p>
+              <div className="mt-2">{p ? <WearBadge state={p.wear_state} /> : '—'}</div>
+              {p && <p className="text-[10px] text-gray-400 mt-1">สึกเร่งอีก {fmt(p.rul_accel_min)} นาที</p>}
+            </div>
+            <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+              <p className="text-[11px] text-gray-500">เวลาตัดสะสม</p>
+              <p className="text-xl font-bold tabular-nums">{fmt(m.t_min)}</p>
+              <p className="text-[10px] text-gray-400">นาที</p>
+            </div>
+            <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+              <p className="text-[11px] text-gray-500">สตรีม</p>
+              <div className="mt-1.5">
+                <StreamBadge state={m.state} speed={m.speed} />
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1 tabular-nums">
+                รัน {m.run_index}/{m.n_runs}
+                {m.current && !m.current.recorded ? ' · ตัดแนวที่ไม่บันทึก' : ''}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <WaveformPanel machine={machine} m={m} />
+            <Card title="RUL ตามเวลาตัด (ผลพยากรณ์ระหว่างใช้งาน — ไม่แสดงค่าจริง)">
+              <RulChart history={history} color={MACHINE_COLOR[machine]} />
+              <div className="mt-3">
+                <StateStrip history={history} />
+              </div>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div className="xl:col-span-2">
+              <Card title="health indicator: การเปลี่ยนแปลงของค่าเฉลี่ยรายรันเทียบค่าตั้งต้นของดอก (%)">
+                <SensorTrend history={history} />
+                <p className="text-[11px] text-gray-400 mt-2">
+                  ค่ารายรันมีรูปแบบฤดูกาลคาบ 29 รัน (ตำแหน่งแนวตัดบนชิ้นงาน) — แบบจำลองจึงรับหน้าต่าง 29 รันล่าสุด (= 1 ชั้นงาน) เป็นอินพุต
+                </p>
+              </Card>
+            </div>
+            <Card title={`รันล่าสุด${last ? ` (#${last.run})` : ''}`}>
+              {!last ? (
+                <p className="text-sm text-gray-400">ยังไม่มีรันที่จบ</p>
+              ) : (
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">ตำแหน่งแนวตัด x</span>
+                    <span className="font-mono">{last.x_pos} mm</span>
+                  </div>
+                  {Object.entries(last.raw).map(([k, v]) => (
+                    <div key={k} className="flex justify-between">
+                      <span className="text-gray-500">{k}</span>
+                      <span className="font-mono">{v.toFixed(3)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between pt-2 border-t border-gray-100">
+                    <span className="text-gray-500">drift |z|max เทียบข้อมูลฝึก</span>
+                    <span className={`font-mono ${last.input_z_max && last.input_z_max > 4 ? 'text-red-600 font-bold' : ''}`}>{fmt(last.input_z_max, 2)}</span>
+                  </div>
+                  {last.flagged.length > 0 && <p className="text-amber-700">ค่าผิดปกติชั่วขณะ: {last.flagged.join(', ')} (แทนด้วยค่าคาดหมาย)</p>}
+                  {last.blocked && <p className="text-red-600">{last.blocked}</p>}
+                  <p className="text-gray-400 pt-1">ตัวแปรแกนป้อน: {last.axis_kind === 'torque' ? 'แรงบิดมอเตอร์ (Nm)' : 'แรงมอเตอร์ (N)'}</p>
+                </div>
+              )}
+            </Card>
+          </div>
+
+          <Card title="เหตุการณ์ของเครื่องนี้">
+            {m.events.length === 0 ? (
+              <p className="text-sm text-gray-400">—</p>
+            ) : (
+              <ul className="space-y-1.5 text-xs">
+                {[...m.events].reverse().map((e, i) => (
+                  <li key={i} className="flex gap-3">
+                    <span className="text-gray-400 tabular-nums w-16 shrink-0">{fmtClock(e.at)}</span>
+                    <span className={e.level === 'CRITICAL' ? 'text-red-700 font-medium' : e.level === 'WARNING' ? 'text-amber-700' : 'text-gray-700'}>{e.message}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  );
+};
 
 export default MachineMonitoringPage;

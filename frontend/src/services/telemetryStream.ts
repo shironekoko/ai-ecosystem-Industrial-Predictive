@@ -1,173 +1,93 @@
 /**
- * Real-time CNC Spindle Telemetry Streaming Service
- * Production WebSocket client for: /api/v1/telemetry/spindle/stream
+ * WebSocket client: /api/v1/tool-life/stream
  *
- * Prepared for real-time streaming API.
- * Keeps stream idle/empty when server is not connected.
+ * ข้อความจาก backend (ข้อมูลจริงจากชุดข้อมูล LUH เล่นตามเวลาจริง — ไม่มีการจำลองค่าในฝั่งเว็บ)
+ *  - snapshot : สถานะทุกเครื่อง + ผลพยากรณ์ล่าสุด
+ *  - run      : ฟีเจอร์ + ผลพยากรณ์ของรันที่เพิ่งจบ
+ *  - event    : เหตุการณ์/การแจ้งเตือน
+ *  - frame    : สัญญาณดิบทุก 0.1 วินาที (เฉพาะเครื่องที่เลือกดู)
+ * ถ้าการเชื่อมต่อหลุด จะลองเชื่อมใหม่เรื่อย ๆ และแสดงสถานะ DISCONNECTED (ไม่เติมข้อมูลปลอม)
  */
+import type { StreamConnectionStatus, StreamMessage } from '../types';
 
-import { TelemetryPacket, StreamConnectionStatus } from '../types';
+type Listener = (msg: StreamMessage) => void;
+type StatusListener = (s: StreamConnectionStatus) => void;
 
-type PacketListener = (packet: TelemetryPacket) => void;
-type StatusListener = (status: StreamConnectionStatus) => void;
-
-export class TelemetryStreamService {
-  private static instance: TelemetryStreamService;
-
-  // WebSocket configuration
-  private wsUrl: string;
+class ToolLifeStream {
   private ws: WebSocket | null = null;
-  private connectionStatus: StreamConnectionStatus = 'CONNECTING';
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private isPaused: boolean = false;
+  private listeners = new Set<Listener>();
+  private statusListeners = new Set<StatusListener>();
+  private status: StreamConnectionStatus = 'DISCONNECTED';
+  private waveform: number | null = null;
+  private retry: ReturnType<typeof setTimeout> | null = null;
+  private refCount = 0;
 
-  // Event Listeners
-  private packetListeners: Set<PacketListener> = new Set();
-  private statusListeners: Set<StatusListener> = new Set();
-
-  private constructor() {
-    const defaultWsHost = typeof window !== 'undefined' ? window.location.host : 'localhost:8000';
-    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.wsUrl =
-      (import.meta as any).env?.VITE_WS_URL ||
-      `${protocol}//${defaultWsHost}/api/v1/telemetry/spindle/stream`;
-
-    this.connectWebSocket();
+  private url(): string {
+    const explicit = (import.meta as any).env?.VITE_WS_URL as string | undefined;
+    if (explicit) return explicit;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/api/v1/tool-life/stream`;
   }
 
-  public static getInstance(): TelemetryStreamService {
-    if (!TelemetryStreamService.instance) {
-      TelemetryStreamService.instance = new TelemetryStreamService();
-    }
-    return TelemetryStreamService.instance;
+  private setStatus(s: StreamConnectionStatus) {
+    this.status = s;
+    this.statusListeners.forEach((l) => l(s));
   }
 
-  /**
-   * Subscribe to incoming live telemetry packets from the WebSocket server
-   */
-  public subscribe(listener: PacketListener): () => void {
-    this.packetListeners.add(listener);
-    return () => {
-      this.packetListeners.delete(listener);
+  private connect() {
+    if (this.ws || this.refCount === 0) return;
+    this.setStatus('CONNECTING');
+    const qs = this.waveform ? `?waveform=${this.waveform}` : '';
+    const ws = new WebSocket(this.url() + qs);
+    this.ws = ws;
+    ws.onopen = () => {
+      this.setStatus('CONNECTED');
+      ws.send(JSON.stringify({ waveform: this.waveform })); // ค่าที่เลือกระหว่างกำลังเชื่อมต่อ
     };
-  }
-
-  /**
-   * Subscribe to connection status changes
-   */
-  public subscribeStatus(listener: StatusListener): () => void {
-    this.statusListeners.add(listener);
-    listener(this.connectionStatus);
-    return () => {
-      this.statusListeners.delete(listener);
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data) as StreamMessage;
+        this.listeners.forEach((l) => l(msg));
+      } catch {
+        /* ignore malformed */
+      }
     };
-  }
-
-  public getConnectionStatus(): StreamConnectionStatus {
-    return this.connectionStatus;
-  }
-
-  public getWsUrl(): string {
-    return this.wsUrl;
-  }
-
-  public pause(): void {
-    this.isPaused = true;
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      try {
-        this.ws.send(JSON.stringify({ command: 'PAUSE_STREAM' }));
-      } catch {
-        // ignore send error
-      }
-    }
-  }
-
-  public resume(): void {
-    this.isPaused = false;
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      try {
-        this.ws.send(JSON.stringify({ command: 'RESUME_STREAM' }));
-      } catch {
-        // ignore send error
-      }
-    }
-  }
-
-  public isStreamPaused(): boolean {
-    return this.isPaused;
-  }
-
-  public reconnect(): void {
-    if (this.ws) {
-      try {
-        this.ws.close();
-      } catch {
-        // ignore
-      }
+    ws.onclose = () => {
       this.ws = null;
-    }
-    this.connectWebSocket();
+      this.setStatus('DISCONNECTED');
+      if (this.refCount > 0) this.retry = setTimeout(() => this.connect(), 2000);
+    };
+    ws.onerror = () => ws.close();
   }
 
-  /**
-   * Connect to backend WebSocket endpoint
-   */
-  private connectWebSocket(): void {
-    if (typeof WebSocket === 'undefined') {
-      this.updateStatus('DISCONNECTED');
-      return;
+  subscribe(listener: Listener, onStatus?: StatusListener): () => void {
+    this.listeners.add(listener);
+    if (onStatus) {
+      this.statusListeners.add(onStatus);
+      onStatus(this.status);
     }
-
-    this.updateStatus('CONNECTING');
-
-    try {
-      this.ws = new WebSocket(this.wsUrl);
-
-      this.ws.onopen = () => {
-        this.updateStatus('CONNECTED');
-        if (this.reconnectTimer) {
-          clearTimeout(this.reconnectTimer);
-          this.reconnectTimer = null;
-        }
-      };
-
-      this.ws.onmessage = (event) => {
-        if (this.isPaused) return;
-        try {
-          const packet: TelemetryPacket = JSON.parse(event.data);
-          this.emitPacket(packet);
-        } catch (err) {
-          console.error('[TelemetryStream] Failed to parse incoming WebSocket packet:', err);
-        }
-      };
-
-      this.ws.onerror = () => {
-        this.updateStatus('DISCONNECTED');
-      };
-
-      this.ws.onclose = () => {
-        this.updateStatus('DISCONNECTED');
-        // Retry connection in background every 10 seconds
-        if (!this.reconnectTimer) {
-          this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
-            this.connectWebSocket();
-          }, 10000);
-        }
-      };
-    } catch {
-      this.updateStatus('DISCONNECTED');
-    }
+    this.refCount += 1;
+    this.connect();
+    return () => {
+      this.listeners.delete(listener);
+      if (onStatus) this.statusListeners.delete(onStatus);
+      this.refCount -= 1;
+      if (this.refCount <= 0) {
+        this.refCount = 0;
+        if (this.retry) clearTimeout(this.retry);
+        this.ws?.close();
+        this.ws = null;
+      }
+    };
   }
 
-  private updateStatus(status: StreamConnectionStatus): void {
-    this.connectionStatus = status;
-    this.statusListeners.forEach((listener) => listener(status));
-  }
-
-  private emitPacket(packet: TelemetryPacket): void {
-    this.packetListeners.forEach((listener) => listener(packet));
+  /** เลือกเครื่องที่ต้องการรับสัญญาณดิบ (null = ไม่รับ) */
+  setWaveform(machine: number | null) {
+    this.waveform = machine;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ waveform: machine }));
+    }
   }
 }
 
-export const telemetryStream = TelemetryStreamService.getInstance();
+export const toolLifeStream = new ToolLifeStream();

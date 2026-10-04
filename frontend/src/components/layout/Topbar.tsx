@@ -33,8 +33,8 @@ export const Topbar: React.FC<TopbarProps> = ({ unreadCount, onToggleSidebar }) 
             <Cpu className="w-4 h-4 text-white" />
           </div>
           <div className="hidden md:block">
-            <span className="font-bold text-sm text-gray-900">Nonastreda CNC AI</span>
-            <p className="text-[10px] text-indigo-600 font-semibold -mt-0.5">Milling Tool Wear PdM & Dual-AI QC</p>
+            <span className="font-bold text-sm text-gray-900">CNC Tool Life AI</span>
+            <p className="text-[10px] text-indigo-600 font-semibold -mt-0.5">Remaining useful life of milling tools</p>
           </div>
         </div>
       </div>

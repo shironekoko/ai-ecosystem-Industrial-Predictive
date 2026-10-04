@@ -75,15 +75,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     >
       <div className="p-2 space-y-0.5 overflow-y-auto flex-1">
         <SectionLabel>CNC Operations</SectionLabel>
-        <NavItem to="/dashboard" icon={LayoutDashboard} label="Fleet Dashboard" />
-        <NavItem to="/machine-monitoring" icon={Activity} label="Per-Run Tracking (2FA)" />
-        <NavItem to="/visual-qc" icon={ScanEye} label="Tool Verification (Bench)" />
+        <NavItem to="/dashboard" icon={LayoutDashboard} label="Tool Life Dashboard" />
+        <NavItem to="/machine-monitoring" icon={Activity} label="Machine Monitoring" />
+        <NavItem to="/tool-vision" icon={ScanEye} label="Tool Image Wear (soon)" />
 
         <SectionLabel>MLOps & Governance</SectionLabel>
         <NavItem to="/notifications" icon={Bell} label="Alarm & Alerts" badge={unreadAlertCount} />
-        <NavItem to="/active-learning" icon={BrainCircuit} label="Model Registry & MLOps" badge={retrainQueueCount} />
+        <NavItem to="/model-registry" icon={BrainCircuit} label="Model Registry (MinIO)" />
         <NavItem to="/audit-log" icon={History} label="Audit Trail" />
-        <NavItem to="/reports" icon={BarChart3} label="Degradation Reports" />
+        <NavItem to="/reports" icon={BarChart3} label="Tool Life Reports" />
 
         {/* Only visible to System Administrators */}
         {isAdmin && (
@@ -99,9 +99,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-3 border-t border-gray-100 bg-gray-50/50">
           <div className="flex items-center gap-2">
             <Cpu className="w-3.5 h-3.5 text-indigo-500" />
-            <p className="text-[11px] font-medium text-gray-600">Nonastreda CNC AI</p>
+            <p className="text-[11px] font-medium text-gray-600">CNC Tool Life AI</p>
           </div>
-          <p className="text-[10px] text-gray-400 mt-0.5">v2.0 · Predictive PdM</p>
+          <p className="text-[10px] text-gray-400 mt-0.5">Time-series RUL · LUH milling data</p>
         </div>
       )}
     </aside>

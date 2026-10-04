@@ -51,12 +51,9 @@ tags_metadata = [
         "description": "จัดการ Background Jobs ผ่าน ARQ + Redis — สร้าง job, ดูสถานะ, ข้อมูล Redis",
     },
     {
-        "name": "Model Retraining (Continuous Active Learning)",
-        "description": "Retrain โมเดลเดิมในระบบ (Time-Series CRNN และ YOLOv8 Vision) เมื่อมีข้อมูลใหม่จาก Active Learning / Human Sign-off",
-    },
-    {
-        "name": "Inference (Model Prediction)",
-        "description": "Inference ด้วยโมเดลจาก MLflow — ส่งงาน predict เข้าคิว, ดูผลลัพธ์ผ่าน job_id",
+        "name": "Tool Life (RUL)",
+        "description": "แบบจำลองอนุกรมเวลา (GRU) พยากรณ์อายุใช้งานที่เหลือของดอกกัด — โหลดจาก MinIO, "
+                       "สตรีมข้อมูลจริงของชุดข้อมูล LUH (ดอกที่ไม่ได้ใช้ฝึก) ตามเวลาจริง",
     },
 ]
 
@@ -81,7 +78,6 @@ async def lifespan(app: FastAPI):
 
         # Seed default accounts
         from app.features.auth.service import create_user, get_user_by_email
-        from app.features.auth.schemas import UserCreate
         from core.database import SessionLocal
 
         with SessionLocal() as db:
@@ -130,15 +126,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[WARN] MinIO bucket setup failed (server may not be ready): {e}")
 
-    import asyncio
-    from app.features.telemetry.service import get_coordinator
-    coordinator = get_coordinator()
-    sim_task = asyncio.create_task(coordinator.run_simulation_loop())
+    # ── Tool-life streaming: โหลดแบบจำลองจาก MinIO + เริ่มสตรีมดอกที่สงวนไว้ (ไม่ได้ใช้ฝึก) ตามเวลาจริง ──
+    from app.features.tool_life.streamer import manager as tool_life_manager
+    await tool_life_manager.start()
 
     yield
 
     # ── Shutdown ──
-    sim_task.cancel()
+    await tool_life_manager.stop()
     print("[INFO] Application shutting down")
 
 
@@ -211,13 +206,8 @@ from app.features.profile.router import router as profile_router
 from app.features.storage.router import router as storage_router
 from app.features.labeling.router import router as labeling_router
 from app.features.workers.router import router as workers_router
-from app.features.training.router import router as training_router
-from app.features.inference.router import router as inference_router
-from app.features.fleet.router import router as fleet_router
-from app.features.qc.router import router as qc_router
-from app.features.telemetry.router import router as telemetry_router
+from app.features.tool_life.router import router as tool_life_router
 from app.features.alarms.router import router as alarms_router
-from app.features.models.router import router as models_router
 from app.features.audit.router import router as audit_router
 from app.features.reports.router import router as reports_router
 from app.features.users.router import router as users_router
@@ -229,13 +219,8 @@ app.include_router(profile_router)
 app.include_router(storage_router)
 app.include_router(labeling_router)
 app.include_router(workers_router)
-app.include_router(training_router)
-app.include_router(inference_router)
-app.include_router(fleet_router)
-app.include_router(qc_router)
-app.include_router(telemetry_router)
+app.include_router(tool_life_router)
 app.include_router(alarms_router)
-app.include_router(models_router)
 app.include_router(audit_router)
 app.include_router(reports_router)
 app.include_router(users_router)
@@ -248,13 +233,8 @@ api_v1.include_router(profile_router)
 api_v1.include_router(storage_router)
 api_v1.include_router(labeling_router)
 api_v1.include_router(workers_router)
-api_v1.include_router(training_router)
-api_v1.include_router(inference_router)
-api_v1.include_router(fleet_router)
-api_v1.include_router(qc_router)
-api_v1.include_router(telemetry_router)
+api_v1.include_router(tool_life_router)
 api_v1.include_router(alarms_router)
-api_v1.include_router(models_router)
 api_v1.include_router(audit_router)
 api_v1.include_router(reports_router)
 api_v1.include_router(users_router)

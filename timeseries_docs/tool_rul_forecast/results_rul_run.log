@@ -1,0 +1,57 @@
+windows built: 5934 (1s)
+selected variant: direct+noise
+                   MAE_all  MAE_test20  Late_pct_test20
+variant                                                
+(Fleet reference)    1.368       1.091            0.000
+direct               2.044       1.735            5.503
+direct+noise         1.327       1.063            0.000
+prior                1.351       1.082            0.000
+prior+noise          1.358       1.081            0.000
+  LOTO T1: 19s
+  LOTO T2: 17s
+  LOTO T3: 15s
+  LOTO T4: 15s
+  LOTO T5: 15s
+  LOTO T6: 15s
+  LOTO T7: 15s
+  LOTO T8: 15s
+  LOTO T9: 16s
+                          MAE_all  MAE_test20  Bias_test20  Late_pct_test20
+model             output                                                   
+Fleet             smooth     1.16        0.90         0.05             0.00
+GRU[full]         raw        1.28        1.27        -0.22             0.00
+                  smooth     1.11        0.91        -0.19             0.00
+GRU[sensors+time] raw        3.47        1.46        -0.12             6.32
+                  smooth     4.89        0.93        -0.14             0.00
+GRU[time+machine] raw        1.32        1.16         0.21             6.67
+                  smooth     1.31        0.94        -0.20             0.00
+StateSpace        smooth     1.58        1.75         0.05            13.34
+                     acc  macroF1
+model                            
+Fleet              0.944    0.881
+GRU[full]          0.936    0.865
+GRU[sensors+time]  0.930    0.857
+GRU[time+machine]  0.941    0.868
+StateSpace         0.894    0.751
+                   margin_min  plan_lead_min  late
+model                                             
+Fleet                    5.19          10.65   0.0
+GRU[full]                4.89          10.39   0.0
+GRU[sensors+time]        4.93          10.07   0.0
+GRU[time+machine]        5.25          10.67   0.0
+StateSpace               7.02          11.69   0.0
+  LOMO M1 done
+  LOMO M2 done
+  LOMO M3 done
+                    MAE_all  MAE_test20  Late_pct_test20
+model                                                   
+Fleet (ทุกเครื่อง)    16.57       10.66            66.67
+GRU[sensors+time]     23.80       18.01            66.67
+GRU[time]             18.96       14.26            66.67
+C:\Users\Klong\OneDrive\เอกสาร\Code\ai-ecosystem-Industrial-Predictive\timeseries_docs\tool_rul_forecast\experiments_rul.py:216: Pandas4Warning: Timestamp.utcnow is deprecated and will be removed in a future version. Use Timestamp.now('UTC') instead.
+  model_name="tool-rul-gru", version=MODEL_VERSION, created_utc=pd.Timestamp.utcnow().isoformat(),
+   tool  machine  MAE_all  MAE_test20  Late_pct_test20  cover_P10_P90  T_eol_true  t_replace  margin_min  plan_lead_min  life_used_pct
+0     3        1     2.29        1.59              0.0          45.61       57.93      50.93        7.00          12.42          87.92
+1     6        2     1.63        1.40              0.0          98.28       84.00      77.85        6.15          11.63          92.68
+2     9        3     0.55        0.24              0.0         100.00       53.50      49.62        3.88           9.37          92.74
+done in 277s

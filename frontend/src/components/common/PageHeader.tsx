@@ -11,13 +11,13 @@ interface PageHeaderProps {
 const routeLabels: Record<string, string> = {
   dashboard: 'Dashboard',
   login: 'Authentication',
-  'machine-monitoring': 'Live Telemetry',
-  'visual-qc': 'Tool Verification',
-  'active-learning': 'Model Registry',
+  'machine-monitoring': 'Machine Monitoring',
+  'tool-vision': 'Tool Image Wear',
+  'model-registry': 'Model Registry',
   'audit-log': 'Audit Trail',
   notifications: 'Notifications',
   'user-management': 'User Management',
-  reports: 'Reports & Analytics',
+  reports: 'Tool Life Reports',
 };
 
 export const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle, actions }) => {

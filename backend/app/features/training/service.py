@@ -19,8 +19,8 @@ _LOCAL_JOBS: dict[str, dict[str, Any]] = {}
 
 
 async def enqueue_retraining(
-    dataset_name: str = "chip",
-    model_name: str = "yolov8_chip_wear",
+    dataset_name: str = "tool",
+    model_name: str = "yolov8_tool_wear",
     start_time: datetime | None = None,
     model_type: str = "yolo_vision",
     epochs: int = 10,

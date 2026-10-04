@@ -181,26 +181,26 @@ export function VisualQcPage() {
           verifiedBy: engineerName,
           verifiedAt: nowTime,
           message: isDiscrepancy
-            ? `โมเดลบอก DULLED แต่มีดจริงเป็น ${actualCondition} ➔ ดึงภาพ chip/${recordId}.jpg คู่กับคำตอบส่งคิว Retrain YOLOv8 ทันที!`
+            ? `โมเดลบอก DULLED แต่มีดจริงเป็น ${actualCondition} ➔ ดึงภาพคมมีด tool/${recordId}.jpg คู่กับคำตอบส่งคิว Retrain YOLOv8 ทันที!`
             : 'มีดพังจริง (DULLED): อนุมัติคำสั่งเปลี่ยนหัวมีดใหม่',
         },
       }));
 
       if (res?.autoRetrainTriggered && res?.retrainJobId) {
-        const chipImg = res.chipImageRetrained || `chip/${recordId}.jpg`;
+        const toolImg = res.chipImageRetrained || `tool/${recordId}.jpg`;
         const userAns = res.userAnswer || actualCondition;
 
         setActiveRetrainJob({
           jobId: res.retrainJobId,
-          modelName: res.modelRetrained || 'yolov8_chip_wear',
+          modelName: res.modelRetrained || 'yolov8_tool_wear',
           correctedLabel: actualCondition,
-          chipImage: chipImg,
+          chipImage: toolImg,
           userAnswer: userAns,
           status: 'QUEUED',
-          progressMsg: `นำภาพจาก ${chipImg} คู่กับคำตอบของผู้ใช้ ('${userAns}') เข้าคิว ARQ Worker เรียบร้อย กำลังเริ่ม Fine-tune YOLOv8 Vision...`,
+          progressMsg: `นำภาพจาก ${toolImg} คู่กับคำตอบของผู้ใช้ ('${userAns}') เข้าคิว ARQ Worker เรียบร้อย กำลังเริ่ม Fine-tune YOLOv8 Vision...`,
         });
 
-        showToast(`🚀 นำภาพ ${chipImg} + คำตอบ [${userAns}] สั่ง Retrain YOLOv8 ทันที! (Job ID: ${res.retrainJobId.slice(0, 14)})`);
+        showToast(`🚀 นำภาพ ${toolImg} + คำตอบ [${userAns}] สั่ง Retrain YOLOv8 ทันที! (Job ID: ${res.retrainJobId.slice(0, 14)})`);
 
         // Poll retrain status
         const pollTimer = window.setInterval(async () => {
@@ -608,7 +608,7 @@ export function VisualQcPage() {
                       โมเดลบอก {qcData?.tier2ChipAi.condition} แต่มีดจริงเป็น [ {qcData?.tier2ChipAi.condition === 'SHARP' ? 'USED' : 'SHARP'} ]
                     </span>
                     <span className="text-[10px] text-amber-700 font-mono">
-                      ⚡ ดึงภาพ chip/{recordId}.jpg คู่กับคำตอบ [ {qcData?.tier2ChipAi.condition === 'SHARP' ? 'USED' : 'SHARP'} ] สั่ง Retrain ทันที!
+                      ⚡ ดึงภาพ tool/{recordId}.jpg คู่กับคำตอบ [ {qcData?.tier2ChipAi.condition === 'SHARP' ? 'USED' : 'SHARP'} ] สั่ง Retrain ทันที!
                     </span>
                   </div>
                 </div>
@@ -634,7 +634,7 @@ export function VisualQcPage() {
                       โมเดลบอก {qcData?.tier2ChipAi.condition} แต่มีดจริงเป็น [ {qcData?.tier2ChipAi.condition === 'DULLED' ? 'USED' : 'DULLED'} ]
                     </span>
                     <span className="text-[10px] text-indigo-700 font-mono">
-                      ⚡ ดึงภาพ chip/{recordId}.jpg คู่กับคำตอบ [ {qcData?.tier2ChipAi.condition === 'DULLED' ? 'USED' : 'DULLED'} ] สั่ง Retrain ทันที!
+                      ⚡ ดึงภาพ tool/{recordId}.jpg คู่กับคำตอบ [ {qcData?.tier2ChipAi.condition === 'DULLED' ? 'USED' : 'DULLED'} ] สั่ง Retrain ทันที!
                     </span>
                   </div>
                 </div>

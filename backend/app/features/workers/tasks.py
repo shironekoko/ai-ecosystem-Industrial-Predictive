@@ -324,8 +324,8 @@ async def train_timeseries_model(
 # ─────────────────────────────────────────────────────────────
 async def train_yolo_model(
     ctx: dict,
-    dataset_name: str = "chip",
-    model_name: str = "yolov8_chip_wear",
+    dataset_name: str = "tool",
+    model_name: str = "yolov8_tool_wear",
     epochs: int = 10,
     batch_size: int = 16,
     sample_record_id: str | None = None,
@@ -334,7 +334,8 @@ async def train_yolo_model(
 ) -> str:
     """
     ARQ Task สำหรับ Fine-tune / Retrain โมเดล YOLOv8 Classification (Non-Time Series Vision)
-    โดยการนำภาพจากโฟลเดอร์ chip คู่กับคำตอบที่ผู้ใช้ (วิศวกร) ระบุเป็น Ground Truth เข้า Fine-tune ทันที
+    รองรับทั้งภาพถ่ายคมมีด (tool/) และภาพถ่ายเศษตัด (chip/)
+    โดยนำภาพและคำตอบที่วิศวกรระบุเป็น Ground Truth เข้า Fine-tune ทันที
     """
     import asyncio
     import shutil
@@ -345,18 +346,23 @@ async def train_yolo_model(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     version_path = f"{model_name}/v{timestamp}"
 
-    chip_desc = f" | Sample: chip/{sample_record_id}.jpg ➔ Label: '{user_answer.upper()}'" if sample_record_id and user_answer else ""
-    print(f"🚀 [Job {job_id}] เริ่ม Retrain YOLOv8: dataset={dataset_name}, model={model_name}{chip_desc}, epochs={epochs}")
+    folder_source = "tool" if dataset_name == "tool" else "chip"
+    sample_desc = f" | Sample: {folder_source}/{sample_record_id}.jpg ➔ Label: '{user_answer.upper()}'" if sample_record_id and user_answer else ""
+    print(f"🚀 [Job {job_id}] เริ่ม Retrain YOLOv8: dataset={dataset_name}, model={model_name}{sample_desc}, epochs={epochs}")
 
     backend_dir = Path(__file__).resolve().parents[3]
     data_dir = backend_dir / f"data_yolo_{dataset_name}"
 
     if not data_dir.exists() or not (data_dir / "train").exists():
         raw_dataset_dir = get_nonastreda_dataset_dir()
-        from scripts.train_yolov8_chip import prepare_chip_dataset
-        prepare_chip_dataset(str(raw_dataset_dir), str(data_dir))
+        if dataset_name == "tool":
+            from scripts.train_yolov8_tool import prepare_tool_dataset
+            prepare_tool_dataset(raw_dataset_dir, data_dir)
+        else:
+            from scripts.train_yolov8_chip import prepare_chip_dataset
+            prepare_chip_dataset(str(raw_dataset_dir), str(data_dir))
 
-    # Ingest chip image + User Ground Truth into data_yolo_chip/train/{user_answer}/
+    # Ingest image + User Ground Truth into data_yolo_{dataset_name}/train/{user_answer}/
     if sample_record_id and user_answer:
         u_ans = user_answer.strip().lower()
         if u_ans in ["sharp", "used", "dulled"]:
@@ -368,13 +374,12 @@ async def train_yolo_model(
             if sample_chip_path and Path(sample_chip_path).exists():
                 src_file = Path(sample_chip_path)
             else:
-                raw_chip = get_nonastreda_dataset_dir() / "chip" / f"{sample_record_id}.jpg"
-                if raw_chip.exists():
-                    src_file = raw_chip
+                raw_file = get_nonastreda_dataset_dir() / folder_source / f"{sample_record_id}.jpg"
+                if raw_file.exists():
+                    src_file = raw_file
 
             if src_file:
                 shutil.copy2(src_file, target_file)
-                # ลบไฟล์ออกจากคลาสเดิมหากเคยอยู่ผิดกลุ่ม
                 for other_cls in ["sharp", "used", "dulled"]:
                     if other_cls != u_ans:
                         for split in ["train", "val"]:
@@ -384,10 +389,11 @@ async def train_yolo_model(
                                     old_p.unlink()
                                 except Exception:
                                     pass
-                print(f"📥 [HITL Active Learning] นำภาพเศษตัด '{src_file.name}' คู่กับคำตอบของผู้ใช้ ('{user_answer.upper()}') เข้าโฟลเดอร์: train/{u_ans}/")
+                print(f"📥 [HITL Active Learning] นำภาพ {folder_source} '{src_file.name}' คู่กับคำตอบของผู้ใช้ ('{user_answer.upper()}') เข้าโฟลเดอร์: train/{u_ans}/")
 
     existing_candidates = [
         backend_dir / "models_nontime" / model_name / "weights" / "best.pt",
+        backend_dir / "models_nontime" / "yolov8_tool_wear" / "weights" / "best.pt",
         backend_dir / "models_nontime" / "yolov8_chip_wear" / "weights" / "best.pt",
         backend_dir / "models" / model_name / "weights" / "best.pt",
     ]

@@ -21,13 +21,13 @@ class RetrainRequest(BaseModel):
     )
     model_name: str = Field(
         default="Pure_Time_Series_CRNN_NoTool4",
-        description="ชื่อโมเดลเดิมในระบบ: 'Pure_Time_Series_CRNN_NoTool4' หรือ 'yolov8_chip_wear'",
-        examples=["Pure_Time_Series_CRNN_NoTool4", "yolov8_chip_wear"],
+        description="ชื่อโมเดลเดิมในระบบ: 'Pure_Time_Series_CRNN_NoTool4' หรือ 'yolov8_tool_wear'",
+        examples=["Pure_Time_Series_CRNN_NoTool4", "yolov8_tool_wear"],
     )
     dataset_name: str = Field(
         default="forces",
-        description="ชื่อ dataset: 'forces' (สำหรับ time-series) หรือ 'chip'/'tool' (สำหรับ vision)",
-        examples=["forces", "chip"],
+        description="ชื่อ dataset: 'forces' (สำหรับ time-series) หรือ 'tool'/'chip' (สำหรับ vision)",
+        examples=["forces", "tool"],
     )
     epochs: int = Field(
         default=10,

@@ -298,8 +298,8 @@ export class ApiService {
   }
 
   public async enqueueTraining(
-    modelName: string = 'yolov8_chip_wear',
-    datasetName: string = 'chip',
+    modelName: string = 'yolov8_tool_wear',
+    datasetName: string = 'tool',
     options?: { modelType?: string; epochs?: number; batchSize?: number }
   ) {
     return this.triggerRetrain(modelName, datasetName, options);

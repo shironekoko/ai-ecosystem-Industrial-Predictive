@@ -209,10 +209,10 @@ export function ActiveLearningPage() {
               <span>ระบุคำตอบจริง (Ground Truth)</span>
             </h5>
             <p className="text-[11px] text-rose-900 leading-relaxed">
-              หากโมเดลบอก <strong>DULLED</strong> แต่วิศวกรพบว่ามีดจริงเป็น <strong>SHARP</strong> หรือ <strong>USED</strong> ระบบจะดึงภาพจาก <strong>chip/</strong> ของใบมีดนั้นคู่กับ<strong>คำตอบของผู้ใช้</strong>เข้าคิว Retrain ทันที
+              หากโมเดลบอก <strong>DULLED</strong> แต่วิศวกรพบว่ามีดจริงเป็น <strong>SHARP</strong> หรือ <strong>USED</strong> ระบบจะดึงภาพคมมีดจาก <strong>tool/</strong> ของใบมีดนั้นคู่กับ<strong>คำตอบของผู้ใช้</strong>เข้าคิว Retrain ทันที
             </p>
             <div className="text-[10px] font-mono text-rose-700 bg-white px-2 py-1 rounded border border-rose-200 font-bold">
-              Input: chip/ + User Answer
+              Input: tool/ + User Answer
             </div>
           </div>
 
@@ -223,7 +223,7 @@ export function ActiveLearningPage() {
               <span>Fine-Tune YOLOv8 Vision</span>
             </h5>
             <p className="text-[11px] text-emerald-900 leading-relaxed">
-              ARQ Worker นำภาพจาก <strong>chip/</strong> พร้อมคำตอบของผู้ใช้ไปเพิ่มในโฟลเดอร์ <code>train/{'{user_answer}'}/</code> แล้ว Fine-tune <strong>yolov8_chip_wear</strong> บันทึก Checkpoint ลง MLflow
+              ARQ Worker นำภาพจาก <strong>tool/</strong> พร้อมคำตอบของผู้ใช้ไปเพิ่มในโฟลเดอร์ <code>train/{'{user_answer}'}/</code> แล้ว Fine-tune <strong>yolov8_tool_wear</strong> บันทึก Checkpoint ลง MLflow
             </p>
             <div className="text-[10px] font-mono text-emerald-700 bg-white px-2 py-1 rounded border border-emerald-200">
               MLflow Model Version Updated
@@ -276,10 +276,10 @@ export function ActiveLearningPage() {
             </span>
           </div>
           <p className="text-xs text-gray-600 leading-relaxed">
-            โมเดลวิเคราะห์ภาพถ่ายกล้องจุลทรรศน์สำหรับตรวจสอบรอยสึกบนคมมีดและเศษตัด (Chips) เป็นโมเดลเดียวในระบบที่ทำการ Retrain ผ่าน Human-in-the-Loop เมื่อวิศวกรแย้งผลทำนาย
+            โมเดลวิเคราะห์ภาพถ่ายกล้องจุลทรรศน์สำหรับตรวจสอบรอยสึกบนหน้าลายคมมีด (Flank Wear - tool/) เป็นโมเดลหลักในระบบที่ทำการ Retrain ผ่าน Human-in-the-Loop เมื่อวิศวกรแย้งผลทำนาย
           </p>
           <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs font-mono text-gray-500">
-            <span>Model: yolov8_chip_wear</span>
+            <span>Model: yolov8_tool_wear</span>
             <span className="text-emerald-600 font-bold">Status: Auto-Retrain on HITL Discrepancy</span>
           </div>
         </div>

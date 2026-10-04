@@ -1,0 +1,57 @@
+{
+  "model_name": "yolov8_tool_wear",
+  "dataset_modality": "optical_tool_flute (tool/)",
+  "protocol": "Leave-One-Tool-Out (LOTO) on Tool #10",
+  "test_samples_count": 56,
+  "top1_accuracy_pct": 83.93,
+  "macro_f1_score": 80.44,
+  "weighted_f1_score": 83.23,
+  "avg_inference_latency_ms": 38.2,
+  "confusion_matrix": {
+    "sharp": {
+      "sharp": 28,
+      "used": 0,
+      "dulled": 0
+    },
+    "used": {
+      "sharp": 4,
+      "used": 11,
+      "dulled": 0
+    },
+    "dulled": {
+      "sharp": 1,
+      "used": 4,
+      "dulled": 8
+    }
+  },
+  "class_metrics": {
+    "sharp": {
+      "samples": 28,
+      "true_positive": 28,
+      "false_positive": 5,
+      "false_negative": 0,
+      "precision_pct": 84.85,
+      "recall_pct": 100.0,
+      "f1_score": 91.8
+    },
+    "used": {
+      "samples": 15,
+      "true_positive": 11,
+      "false_positive": 4,
+      "false_negative": 4,
+      "precision_pct": 73.33,
+      "recall_pct": 73.33,
+      "f1_score": 73.33
+    },
+    "dulled": {
+      "samples": 13,
+      "true_positive": 8,
+      "false_positive": 0,
+      "false_negative": 5,
+      "precision_pct": 100.0,
+      "recall_pct": 61.54,
+      "f1_score": 76.19
+    }
+  },
+  "generated_at": "2026-10-04 08:41:36"
+}

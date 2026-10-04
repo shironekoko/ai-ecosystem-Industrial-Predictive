@@ -254,28 +254,28 @@ def get_blade_qc(tool_id: Any, run_index: int, blade_index: int) -> BladeQCRespo
             consensus_verdict = "CONFIRMED_WEAR"
             recommended_action = "REPLACE_TOOL"
             rationale = (
-                f"Chip AI prediction ({pred_cls}) aligns with edge inspection. "
+                f"Tool Wear AI prediction ({pred_cls}) aligns with edge metrology inspection. "
                 "Cutter replacement recommended upon engineer physical verification."
             )
         elif optical_verdict == "USED":
             consensus_verdict = "CONFIRMED_WEAR"
             recommended_action = "CONTINUE_CUTTING"
             rationale = (
-                f"Chip AI prediction ({pred_cls}) aligns with edge inspection. "
+                f"Tool Wear AI prediction ({pred_cls}) aligns with edge metrology inspection. "
                 "Moderate wear detected; safe for remaining scheduled cycles."
             )
         else:
             consensus_verdict = "CUTTER_NORMAL"
             recommended_action = "CONTINUE_CUTTING"
             rationale = (
-                f"Sharp cutter confirmed across chip morphology and flute edge."
+                f"Sharp cutter confirmed across optical flank face and flute edge metrology."
             )
     else:
-        discrepancy_type = "CHIP_FALSE_ALARM" if pred_cls == "DULLED" else "CHIP_UNDERPREDICTED"
+        discrepancy_type = "TOOL_FALSE_ALARM" if pred_cls == "DULLED" else "TOOL_UNDERPREDICTED"
         consensus_verdict = "DISCREPANCY_FLAGGED"
         recommended_action = "SEND_TO_RETRAIN"
         rationale = (
-            f"Prediction discrepancy: Non-time-series Chip AI predicted '{pred_cls}', "
+            f"Prediction discrepancy: Non-time-series Tool Wear AI predicted '{pred_cls}', "
             f"whereas optical edge inspection indicates '{optical_verdict}'. "
             "Flagged for human engineer sign-off and active learning retraining queue."
         )
@@ -366,6 +366,47 @@ def get_blade_qc(tool_id: Any, run_index: int, blade_index: int) -> BladeQCRespo
         verifiedAt=verified_at,
     )
 
+def stage_tool_sample_for_retraining(record_id: str, user_answer: str) -> Optional[Path]:
+    """
+    ดึงภาพถ่ายคมมีดจากโฟลเดอร์ tool คู่กับคำตอบของผู้ใช้ (Ground Truth)
+    เข้าไปบันทึกไว้ในชุดข้อมูล training data_yolo_tool/train/{user_answer.lower()}/
+    และอัปโหลดเข้า MinIO สำหรับ Active Retraining
+    """
+    import shutil
+    tool_path = get_tool_image_file_path(record_id)
+    if not tool_path or not tool_path.exists():
+        return None
+
+    backend_dir = _BACKEND_DIR
+    data_dir = backend_dir / "data_yolo_tool"
+    u_ans = user_answer.strip().lower()
+    train_cls_dir = data_dir / "train" / u_ans
+    train_cls_dir.mkdir(parents=True, exist_ok=True)
+
+    dest_file = train_cls_dir / f"{record_id}.jpg"
+    shutil.copy2(tool_path, dest_file)
+
+    for other_cls in ["sharp", "used", "dulled"]:
+        if other_cls != u_ans:
+            for split in ["train", "val"]:
+                old_f = data_dir / split / other_cls / f"{record_id}.jpg"
+                if old_f.exists():
+                    try:
+                        old_f.unlink()
+                    except Exception:
+                        pass
+
+    try:
+        from core.config import settings
+        from core.minio_client import ensure_bucket, upload_file
+        bucket = getattr(settings, "minio_datasets_bucket", "datasets")
+        ensure_bucket(bucket)
+        upload_file(bucket, f"active-learning/tool/{u_ans}/{record_id}.jpg", str(dest_file))
+    except Exception:
+        pass
+
+    return dest_file
+
 def stage_chip_sample_for_retraining(record_id: str, user_answer: str) -> Optional[Path]:
     """
     ดึงภาพถ่ายเศษตัดจากโฟลเดอร์ chip คู่กับคำตอบของผู้ใช้ (Ground Truth)
@@ -418,6 +459,7 @@ async def verify_blade(req: VerifyQCRequest) -> VerifyQCResponse:
     is_discrepancy = req.decision in ("SEND_TO_RETRAIN", "FALSE_ALARM") or req.actualCondition in ("SHARP", "USED")
 
     chip_file_path = get_chip_image_file_path(req.recordId)
+    tool_file_path = get_tool_image_file_path(req.recordId)
 
     _ACTIVE_LEARNING_VERIFIED[req.recordId] = {
         "recordId": req.recordId,
@@ -426,7 +468,8 @@ async def verify_blade(req: VerifyQCRequest) -> VerifyQCResponse:
         "bladeIndex": req.bladeIndex,
         "decision": req.decision,
         "actualCondition": actual_cond if is_discrepancy else "DULLED",
-        "imageSource": "chip",
+        "imageSource": "tool",
+        "toolImagePath": str(tool_file_path) if tool_file_path else None,
         "chipImagePath": str(chip_file_path) if chip_file_path else None,
         "userAnswer": actual_cond if is_discrepancy else "DULLED",
         "notes": req.notes,
@@ -440,27 +483,28 @@ async def verify_blade(req: VerifyQCRequest) -> VerifyQCResponse:
 
     if is_discrepancy:
         # Human-in-the-Loop Discrepancy: Model predicted DULLED, but user confirmed SHARP or USED!
-        # Retrain คือการนำภาพจาก chip กับคำตอบที่ผู้ใช้ระบุเป็น Ground Truth ส่งคิว Retrain YOLOv8 ทันที
+        # Retrain คือการนำภาพคมมีดจาก tool กับคำตอบที่ผู้ใช้ระบุเป็น Ground Truth ส่งคิว Retrain YOLOv8 ทันที
+        stage_tool_sample_for_retraining(req.recordId, actual_cond)
         stage_chip_sample_for_retraining(req.recordId, actual_cond)
 
         try:
             from app.features.training.service import enqueue_retraining
             retrain_res = await enqueue_retraining(
-                dataset_name="chip",
-                model_name="yolov8_chip_wear",
+                dataset_name="tool",
+                model_name="yolov8_tool_wear",
                 model_type="yolo_vision",
                 epochs=10,
                 batch_size=16,
                 sample_record_id=req.recordId,
-                sample_chip_path=str(chip_file_path) if chip_file_path else None,
+                sample_chip_path=str(tool_file_path) if tool_file_path else None,
                 user_answer=actual_cond.lower(),
             )
             retrain_job_id = retrain_res.get("job_id")
             auto_retrain_triggered = True
             msg = (
                 f"🚀 Human-in-the-Loop Discrepancy on {req.recordId}! "
-                f"ดึงภาพจาก chip/{req.recordId}.jpg คู่กับคำตอบของผู้ใช้ ('{actual_cond}') "
-                f"เข้าชุดข้อมูล Retrain โมเดล YOLOv8 Vision เรียบร้อย (Job #{retrain_job_id})"
+                f"ดึงภาพคมมีดจาก tool/{req.recordId}.jpg คู่กับคำตอบของผู้ใช้ ('{actual_cond}') "
+                f"เข้าชุดข้อมูล Retrain โมเดล YOLOv8 Tool Wear เรียบร้อย (Job #{retrain_job_id})"
             )
         except Exception as e:
             logger.warning(f"Auto-retrain enqueue warning: {e}")
@@ -503,8 +547,8 @@ async def verify_blade(req: VerifyQCRequest) -> VerifyQCResponse:
         message=msg,
         retrainJobId=retrain_job_id,
         autoRetrainTriggered=auto_retrain_triggered,
-        modelRetrained="yolov8_chip_wear",
+        modelRetrained="yolov8_tool_wear",
         correctedLabel=actual_cond if is_discrepancy else "DULLED",
-        chipImageRetrained=f"chip/{req.recordId}.jpg" if is_discrepancy else None,
+        chipImageRetrained=f"tool/{req.recordId}.jpg" if is_discrepancy else None,
         userAnswer=actual_cond if is_discrepancy else None,
     )

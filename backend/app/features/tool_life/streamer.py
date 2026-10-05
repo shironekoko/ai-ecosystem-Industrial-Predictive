@@ -25,6 +25,8 @@ from typing import Callable
 
 import numpy as np
 
+from core import observability as obs
+
 from . import luh_dataset as ds
 from .registry import registry
 from .runtime import (FEATURE_NAMES, LAYER_MIN, RAW_SENSORS, VB_ACCEL, VB_EOL, EOLTracker, FeatureState, interval,
@@ -292,15 +294,17 @@ class MachineStream:
                     if self.tracker_version is not None:
                         self._event("INFO", f"เปลี่ยนแบบจำลองเป็น {meta.get('version')} — เริ่มรวมค่าประมาณอายุใหม่")
                     self.tracker, self.tracker_version = EOLTracker(), meta.get("version")
-                X = self.features.window_array()
-                pred = registry.model.predict(X[None])[0]
-                tr = self.tracker.update(t_min, pred)
-                lo, hi = interval(tr["rul_eol"], meta["interval"])
-                st = wear_state(tr["rul_acc"], tr["rul_eol"])
-                z = (X[-1, :7] - registry.model.mean[:7]) / registry.model.std[:7]
+                with obs.timed("tool_rul.inference.duration", machine=f"M{self.machine}"):
+                    X = self.features.window_array()
+                    pred = registry.model.predict(X[None])[0]
+                    tr = self.tracker.update(t_min, pred)
+                    lo, hi = interval(tr["rul_eol"], meta["interval"])
+                    st = wear_state(tr["rul_acc"], tr["rul_eol"])
+                    z = (X[-1, :7] - registry.model.mean[:7]) / registry.model.std[:7]
                 rec.update(rul=tr["rul_eol"], rul_lo=lo, rul_hi=hi, rul_acc=tr["rul_acc"], T_eol=tr["T_eol"],
                            T_acc=tr["T_acc"], raw_rul=float(pred[1]), state=st, recommendation=recommend(st, lo, meta["policy"]),
                            input_z_max=round(float(np.max(np.abs(z))), 2), model_version=meta.get("version"))
+                obs.inc("tool_rul.predictions", machine=f"M{self.machine}", recommendation=rec["recommendation"])
         elif f["ready"]:
             rec["blocked"] = "แบบจำลองยังไม่พร้อม (โหลดจาก MinIO ไม่สำเร็จ)"
         self.history.append({k: (round(v, 4) if isinstance(v, float) else v) for k, v in rec.items()})
@@ -349,6 +353,7 @@ class MachineStream:
         self.state = "COMPLETED"
         self._running.clear()
         self.completed = dict(reason=reason, at=_now().isoformat(), t_min=t_end, by=actor or "system")
+        obs.inc("tool_rul.tool_removals", machine=f"M{self.machine}", reason=reason)
         try:
             self.evaluation = self._evaluate(t_end, reason)
             self.manager.store_evaluation(self.evaluation)
@@ -478,7 +483,8 @@ class StreamManager:
     async def _notify_removed(self, s: MachineStream, ctx: dict):
         for fn in self.removal_listeners:
             try:
-                res = await asyncio.to_thread(fn, ctx)
+                with obs.span("tool_life.tool_removed", machine=ctx["machine_id"], tool=ctx["tool_id"], cycle_id=ctx["cycle_id"]):
+                    res = await asyncio.to_thread(fn, ctx)
             except Exception as e:
                 log.exception("tool-removed listener failed")
                 s._event("WARNING", f"ส่งดอก {ctx['tool_id']} ไปตรวจใบมีดไม่สำเร็จ: {e} — สั่งถ่ายภาพได้ที่หน้า Tool Inspection")

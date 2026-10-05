@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
@@ -139,6 +140,22 @@ def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int
                              base_recent=brief(base_recent)))
 
 
-async def retrain_tool_vision(ctx: dict, job_ref: str, base_version: str, labels: list[dict], epochs: int = 15) -> dict:
-    """ARQ task — ฝึกใน thread แยกเพื่อไม่บล็อก event loop ของ worker"""
-    return await asyncio.to_thread(run_retrain, job_ref, base_version, labels, epochs)
+async def retrain_tool_vision(ctx: dict, job_ref: str, base_version: str, labels: list[dict], epochs: int = 15,
+                              trace_ctx: dict | None = None) -> dict:
+    """ARQ task — ฝึกใน thread แยกเพื่อไม่บล็อก event loop ของ worker
+
+    trace_ctx = trace context จาก request ที่สั่ง retrain → span ของงานนี้ต่อเป็น trace เดียวกันใน Tempo
+    """
+    from core import observability as obs
+
+    t0 = time.perf_counter()
+    outcome = "error"
+    try:
+        with obs.span("tool_vision.retrain", parent=trace_ctx, job=job_ref, base_version=base_version,
+                      labels=len(labels), epochs=epochs):
+            res = await asyncio.to_thread(run_retrain, job_ref, base_version, labels, epochs)
+        outcome = "gate_passed" if res["gate"]["passed"] else "gate_failed"
+        return res
+    finally:
+        obs.inc("tool_vision.retrain.jobs", outcome=outcome)
+        obs.observe("tool_vision.retrain.duration", time.perf_counter() - t0, outcome=outcome)

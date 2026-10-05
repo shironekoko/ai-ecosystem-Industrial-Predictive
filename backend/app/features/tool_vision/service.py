@@ -24,6 +24,7 @@ from datetime import datetime
 
 from sqlalchemy import func
 
+from core import observability as obs
 from core.database import SessionLocal
 from core.minio_client import ensure_bucket, get_minio_client
 
@@ -187,6 +188,7 @@ def _create(machine: int, images: list[bytes], refs: list[str], actor: str, seq:
         db.flush()
         _store_images(ins_id, images)               # อัปโหลดเมื่อบันทึกฐานข้อมูลได้แล้ว แล้วจึง commit
         db.commit()
+        obs.inc("tool_vision.inspections", machine=f"M{machine}", verdict=summary["verdict"])
         _audit("VISION_INSPECTION", actor, f"M{machine}", f"ถ่ายภาพใบมีดของดอก {ctx.get('tool_id')} ที่ถอดจาก M{machine} "
                f"({ins_id}): AI วัด VB เฉลี่ย {summary['mean_vb']:.0f} µm ({', '.join(f'B{b.blade} {b.pred_vb:.0f}' for b in blades)}) รอผู้ตรวจยืนยัน")
         return _ins_dict(ins, blades)
@@ -205,7 +207,7 @@ def capture_eol(ctx: dict, actor: str | None = None) -> dict:
         raise WorkflowError(f"ไม่มีสถานีตรวจของเครื่อง M{machine}")
     if not ctx.get("cycle_id") or not ctx.get("removed_at"):
         raise WorkflowError("ดอกยังอยู่บนเครื่อง — ระบบถ่ายภาพเมื่อ Machine Monitoring แจ้งหมดอายุและผู้ควบคุมถอดดอกแล้ว")
-    with _capture_lock:
+    with _capture_lock, obs.span("tool_vision.capture_eol", machine=f"M{machine}", cycle_id=ctx["cycle_id"]):
         with SessionLocal() as db:
             ex = db.query(VisionInspection).filter(VisionInspection.cycle_id == ctx["cycle_id"]).first()
             if ex:
@@ -350,6 +352,10 @@ def review(ins_id: str, decisions: dict[int, dict], actor: str, note: str | None
         measured = [b for b in blades if b.review == "MEASURED"]
         tool = (_ctx(ins) or {}).get("tool_id") or "-"
         result = _ins_dict(ins, blades)
+        for b in blades:
+            obs.inc("tool_vision.blade_reviews", source=b.vb_source)
+        for b in measured:
+            obs.observe("tool_vision.ai_abs_error", abs(b.pred_vb - b.final_vb), source=b.vb_source)
     _audit("VISION_REVIEW", actor, f"M{ins.machine}", f"ยืนยัน {ins_id}: ยอมรับค่า AI {4 - len(measured)}/4 ใบ"
            + (f", วัดจริง {', '.join(f'B{b.blade} {b.final_vb:.0f} µm (AI {b.pred_vb:.0f})' for b in measured)}" if measured else ""))
     if fs["verdict"] != "OK":
@@ -498,7 +504,8 @@ async def start_retrain(actor: str, epochs: int = 15) -> dict:
         job_id = job.id
     redis = await create_pool(get_arq_redis_settings())
     try:
-        arq_job = await redis.enqueue_job("retrain_tool_vision", job_id, registry.meta["version"], labels, epochs)
+        arq_job = await redis.enqueue_job("retrain_tool_vision", job_id, registry.meta["version"], labels, epochs,
+                                          obs.inject_trace_context())
     finally:
         await redis.close()
     with SessionLocal() as db:
@@ -601,6 +608,7 @@ def decide(job_id: str, action: str, actor: str) -> dict:
             raise WorkflowError("action ต้องเป็น promote หรือ reject")
         db.commit()
         cand = j.candidate_version
+    obs.inc("tool_vision.model.changes", action=action)
     _audit("VISION_MODEL_" + ("PROMOTED" if action == "promote" else "REJECTED"), actor, "tool-vision",
            f"{job_id}: {cand}")
     return dict(job_id=job_id, status="PROMOTED" if action == "promote" else "REJECTED", version=cand)
@@ -650,6 +658,7 @@ def activate_version(version: str, actor: str) -> dict:
                    activated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z")
     if previous and previous != version:
         tr.update_meta(previous, status="previous")
+    obs.inc("tool_vision.model.changes", action="activate")
     _audit("VISION_MODEL_ACTIVATED", actor, "tool-vision", f"ใช้ {version} แทน {previous}")
     return registry.info()
 

@@ -1,34 +1,36 @@
 """
-Observability Module — OpenTelemetry Tracing, Metrics, and Logging Setup
+Observability — OpenTelemetry (trace + metric + log) → OTel Collector → Tempo / Prometheus / Loki → Grafana
 
-Central configuration for exporting telemetry to OpenTelemetry Collector,
-which routes:
-- Distributed Traces -> Tempo
-- Metrics -> Prometheus
-- Logs -> Loki
-- Visualized in Grafana
+เปิดใช้เมื่อมี OTEL_EXPORTER_OTLP_ENDPOINT (ตั้งใน compose.observability.yml) — ถ้าไม่ตั้ง ทุกฟังก์ชันในไฟล์นี้เป็น no-op
+ระบบหลักจึงรันได้เหมือนเดิมโดยไม่ต้องมีชุด observability
+
+สิ่งที่ส่งออก
+- trace: ทุก HTTP request (FastAPI) + SQLAlchemy + Redis + span ของงานหลัก (ถอดดอก → ถ่ายภาพ/วัด VB, retrain ข้าม ARQ)
+- log: logger ของ Python ตั้งแต่ระดับ INFO พร้อม trace_id (ดูใน Loki แล้วกดไป trace ได้)
+- metric: ของ HTTP (FastAPI instrumentation) + ของระบบนี้ตาม METRICS ด้านล่าง + gauge ที่ลงทะเบียนด้วย register_gauge()
+  ชื่อใน Prometheus = "ai_ecosystem_" + ชื่อ (จุด → _) + หน่วย (เช่น _seconds) + _total สำหรับตัวนับ
 """
 
+from __future__ import annotations
+
+import contextlib
+import itertools
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Iterable
 
 try:
     from opentelemetry import _logs, metrics, trace
-    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
-        OTLPLogExporter as GRPCLogExporter,
-    )
-    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-        OTLPMetricExporter as GRPCMetricExporter,
-    )
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-        OTLPSpanExporter as GRPCSpanExporter,
-    )
+    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
     from opentelemetry.instrumentation.logging import LoggingInstrumentor
     from opentelemetry.instrumentation.redis import RedisInstrumentor
     from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+    from opentelemetry.instrumentation.utils import suppress_instrumentation
+    from opentelemetry.metrics import CallbackOptions, Observation
     from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
     from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
     from opentelemetry.sdk.metrics import MeterProvider
@@ -41,160 +43,172 @@ try:
 except ImportError:
     _HAS_OTEL = False
 
+log = logging.getLogger("observability")
+
+# ── metric ของระบบนี้: ชื่อ → (ชนิด, หน่วย, คำอธิบาย, ขอบ bucket ของ histogram / ค่า label ที่ตั้งตัวนับเป็น 0 ไว้ก่อน) ──
+# ตัวนับของเหตุการณ์ที่เกิดไม่บ่อย (ถอดดอก, ตรวจใบมีด, retrain) ต้องมี series ค่า 0 ตั้งแต่เริ่ม
+# ไม่เช่นนั้น increase() ของ Prometheus จะไม่นับครั้งแรก (series เริ่มที่ 1)
+_SEC = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+_M = ["M1", "M2", "M3"]
+METRICS: dict[str, tuple[str, str, str, Any]] = {
+    # Time series — RUL ดอกกัด (GRU)
+    "tool_rul.inference.duration": ("histogram", "s", "เวลาพยากรณ์ RUL ต่อ 1 รัน (สร้างหน้าต่างอินพุต + GRU)", _SEC),
+    "tool_rul.predictions": ("counter", "", "จำนวนการพยากรณ์ RUL แยกตามคำแนะนำ",
+                             dict(machine=_M, recommendation=["OK", "WATCH", "PLAN_REPLACEMENT", "REPLACE_NOW"])),
+    "tool_rul.tool_removals": ("counter", "", "จำนวนดอกที่ถูกถอด (ผู้ควบคุมถอด / ข้อมูลหมด)",
+                               dict(machine=_M, reason=["REPLACED_BY_OPERATOR", "DATASET_END"])),
+    # Vision — วัด VB จากภาพใบมีด
+    "tool_vision.inference.duration": ("histogram", "s", "เวลาวัด VB จากภาพ 4 ใบมีดของ 1 ดอก (CPU)", _SEC),
+    "tool_vision.inspections": ("counter", "", "จำนวนงานตรวจใบมีด แยกตามผล AI ระดับดอก",
+                                dict(machine=_M, verdict=["OK", "MONITOR", "REPLACE"])),
+    "tool_vision.blade_reviews": ("counter", "", "จำนวนใบมีดที่ผู้ตรวจยืนยัน แยกตามที่มา (AI / BENCH / MANUAL)",
+                                  dict(source=["AI", "BENCH", "MANUAL"])),
+    "tool_vision.ai_abs_error": ("histogram", "um", "|VB ที่ AI วัด − VB ที่วัดจริง| ของใบที่วัดจริง",
+                                 [5, 10, 15, 20, 30, 40, 60, 80, 120, 200]),
+    "tool_vision.model.changes": ("counter", "", "การเปลี่ยนแบบจำลองวัด VB (promote / reject / activate)",
+                                  dict(action=["promote", "reject", "activate"])),
+    "tool_vision.retrain.jobs": ("counter", "", "งาน retrain ที่ worker ทำเสร็จ แยกตามผล gate",
+                                 dict(outcome=["gate_passed", "gate_failed", "error"])),
+    "tool_vision.retrain.duration": ("histogram", "s", "เวลาที่ใช้ retrain 1 งาน (GPU)",
+                                     [30, 60, 120, 300, 600, 1200, 1800, 3600, 7200]),
+}
+
 _initialized = False
-_http_requests_counter = None
-_inference_jobs_counter = None
-_inference_duration_histogram = None
+_meter = None
+_tracer = None
+_instruments: dict[str, Any] = {}
 
 
-def setup_observability(
-    service_name: str | None = None,
-    otlp_endpoint: str | None = None,
-) -> None:
+def enabled() -> bool:
+    return _initialized
+
+
+def setup_observability(service_name: str | None = None, otlp_endpoint: str | None = None) -> None:
+    """เริ่ม TracerProvider / MeterProvider / LoggerProvider และ instrument Redis + SQLAlchemy + logging
+
+    ไม่ทำอะไรถ้าไม่มี endpoint (OTEL_EXPORTER_OTLP_ENDPOINT) หรือไม่ได้ติดตั้งแพ็กเกจ OpenTelemetry
     """
-    Initialize OpenTelemetry SDK (TracerProvider, MeterProvider, LoggerProvider)
-    and instrument standard libraries (Redis, SQLAlchemy, Logging).
-
-    Args:
-        service_name: Unique name for this component (e.g., ai-ecosystem-backend)
-        otlp_endpoint: OTLP gRPC endpoint (e.g., http://otel-collector:4317)
-    """
-    global _initialized, _http_requests_counter, _inference_jobs_counter, _inference_duration_histogram
-    if not _HAS_OTEL or _initialized:
+    global _initialized, _meter, _tracer
+    endpoint = otlp_endpoint or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if not _HAS_OTEL or _initialized or not endpoint:
         return
+    name = os.environ.get("OTEL_SERVICE_NAME") or service_name or "ai-ecosystem-backend"
+    resource = Resource.create({
+        "service.name": name,
+        "service.version": "1.0.0",
+        "deployment.environment": os.environ.get("ENVIRONMENT", "development"),
+    })
 
-    # Determine service name & endpoint
-    name = (
-        service_name
-        or os.environ.get("OTEL_SERVICE_NAME")
-        or "ai-ecosystem-backend"
-    )
-    endpoint = (
-        otlp_endpoint
-        or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-        or "http://localhost:4317"
-    )
-
-    resource = Resource.create(
-        {
-            "service.name": name,
-            "service.version": "1.0.0",
-            "deployment.environment": os.environ.get("ENVIRONMENT", "development"),
-        }
-    )
-
-    # ── 1. Distributed Tracing (Tempo) ──
-    span_exporter = GRPCSpanExporter(endpoint=endpoint, insecure=True)
+    # trace → Tempo
     tracer_provider = TracerProvider(resource=resource)
-    tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
+    tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True)))
     trace.set_tracer_provider(tracer_provider)
+    _tracer = trace.get_tracer("ai_ecosystem")
 
-    # ── 2. Metrics (Prometheus via OTel Collector) ──
-    metric_exporter = GRPCMetricExporter(endpoint=endpoint, insecure=True)
-    metric_reader = PeriodicExportingMetricReader(
-        metric_exporter,
-        export_interval_millis=5000,
-    )
-    meter_provider = MeterProvider(
-        resource=resource,
-        metric_readers=[metric_reader],
-    )
-    metrics.set_meter_provider(meter_provider)
+    # metric → Prometheus (collector เปิด :8889 ให้ Prometheus ดึง)
+    reader = PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint, insecure=True), export_interval_millis=10_000)
+    metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[reader]))
+    _meter = metrics.get_meter("ai_ecosystem", "1.0.0")
+    for key, (kind, unit, desc, extra) in METRICS.items():
+        if kind == "counter":
+            _instruments[key] = c = _meter.create_counter(key, unit=unit, description=desc)
+            for combo in itertools.product(*extra.values()):
+                c.add(0, dict(zip(extra.keys(), combo)))
+        else:
+            _instruments[key] = _meter.create_histogram(key, unit=unit, description=desc,
+                                                        explicit_bucket_boundaries_advisory=extra)
 
-    meter = metrics.get_meter("ai_ecosystem_meter", "1.0.0")
-    _http_requests_counter = meter.create_counter(
-        name="ai_ecosystem_http_requests_total",
-        description="Total number of HTTP requests processed",
-        unit="1",
-    )
-    _inference_jobs_counter = meter.create_counter(
-        name="ai_ecosystem_inference_jobs_total",
-        description="Total number of inference jobs executed",
-        unit="1",
-    )
-    _inference_duration_histogram = meter.create_histogram(
-        name="ai_ecosystem_inference_duration_seconds",
-        description="Duration of inference jobs in seconds",
-        unit="s",
-    )
-
-    # ── 3. Logs (Loki via OTel Collector) & Log Correlation ──
-    log_exporter = GRPCLogExporter(endpoint=endpoint, insecure=True)
+    # log → Loki: ใส่ trace_id/span_id ใน record แล้วส่งทาง OTLP (ไม่เพิ่ม handler บน console จึงไม่ซ้ำกับ log เดิม)
     logger_provider = LoggerProvider(resource=resource)
-    logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
+    logger_provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoint, insecure=True)))
     _logs.set_logger_provider(logger_provider)
+    LoggingInstrumentor().instrument(set_logging_format=False)
+    root = logging.getLogger()
+    root.addHandler(LoggingHandler(level=logging.INFO, logger_provider=logger_provider))
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
 
-    # Attach OTLP logging handler to root logger
-    otel_log_handler = LoggingHandler(
-        level=logging.INFO,
-        logger_provider=logger_provider,
-    )
-    root_logger = logging.getLogger()
-    root_logger.addHandler(otel_log_handler)
-
-    # Instrument python logging so formatted logs contain trace_id and span_id
-    LoggingInstrumentor().instrument(set_logging_format=True)
-
-    # ── 4. Auto-instrument Redis and SQLAlchemy ──
     try:
         RedisInstrumentor().instrument()
     except Exception as e:
-        logging.warning(f"Redis auto-instrumentation skipped/failed: {e}")
-
+        log.warning("Redis instrumentation skipped: %s", e)
     try:
         from core.database import engine
         SQLAlchemyInstrumentor().instrument(engine=engine)
     except Exception as e:
-        logging.warning(f"SQLAlchemy auto-instrumentation skipped/failed: {e}")
+        log.warning("SQLAlchemy instrumentation skipped: %s", e)
 
     _initialized = True
-    logging.info(
-        f"🔭 Observability initialized for '{name}' -> OTLP: {endpoint}"
-    )
+    log.info("observability on: service=%s → OTLP %s", name, endpoint)
 
 
 def instrument_fastapi(app: Any) -> None:
-    """Instrument a FastAPI application instance."""
-    if not _HAS_OTEL:
+    """HTTP trace + metric ของทุก endpoint (ไม่นับ health check และสตรีม SSE ที่เปิดค้างไว้)"""
+    if not _initialized:
         return
     try:
-        FastAPIInstrumentor.instrument_app(app)
-        logging.info("✅ FastAPI application instrumented with OpenTelemetry")
+        FastAPIInstrumentor.instrument_app(app, excluded_urls="health,/stream")
     except Exception as e:
-        logging.warning(f"⚠️ FastAPI instrumentation failed: {e}")
+        log.warning("FastAPI instrumentation failed: %s", e)
 
 
-def inject_trace_context(carrier: dict | None = None) -> dict:
-    """
-    Inject current active trace context into a dict carrier for W3C trace propagation.
-    Useful for propagating trace context across ARQ / Redis queues.
-    """
-    if carrier is None:
-        carrier = {}
-    TraceContextTextMapPropagator().inject(carrier)
+# ── metric ──
+def inc(name: str, value: float = 1, **attrs) -> None:
+    """เพิ่มตัวนับใน METRICS (no-op ถ้าไม่ได้เปิด)"""
+    inst = _instruments.get(name)
+    if inst is not None:
+        inst.add(value, {k: str(v) for k, v in attrs.items()})
+
+
+def observe(name: str, value: float, **attrs) -> None:
+    """บันทึกค่าลง histogram ใน METRICS (no-op ถ้าไม่ได้เปิด)"""
+    inst = _instruments.get(name)
+    if inst is not None:
+        inst.record(float(value), {k: str(v) for k, v in attrs.items()})
+
+
+@contextlib.contextmanager
+def timed(name: str, **attrs):
+    """จับเวลาบล็อกโค้ดลง histogram ชื่อ name (วินาที)"""
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        observe(name, time.perf_counter() - t0, **attrs)
+
+
+def register_gauge(name: str, description: str, unit: str,
+                   read: Callable[[], Iterable[tuple[float, dict]]]) -> None:
+    """gauge ที่อ่านค่าปัจจุบันทุกครั้งที่ส่งออก — read() คืน [(ค่า, {label: ค่า}), ...]"""
+    if _meter is None:
+        return
+
+    def callback(_: CallbackOptions):
+        try:
+            with suppress_instrumentation():        # query ที่อ่านค่า gauge ทุก 10 วินาทีไม่ต้องเป็น trace
+                return [Observation(float(v), {k: str(x) for k, x in a.items()}) for v, a in read() if v is not None]
+        except Exception as e:                      # อ่านค่าไม่ได้ (เช่น DB หลุด) → ข้ามรอบนี้ ไม่ให้ exporter ล้ม
+            log.debug("gauge %s skipped: %s", name, e)
+            return []
+
+    _meter.create_observable_gauge(name, callbacks=[callback], unit=unit, description=description)
+
+
+# ── trace ──
+@contextlib.contextmanager
+def span(name: str, parent: dict | None = None, **attrs):
+    """span ของงานหลัก — parent = carrier จาก inject_trace_context() (เช่น ส่งข้ามคิว ARQ)"""
+    if _tracer is None:
+        yield None
+        return
+    ctx = TraceContextTextMapPropagator().extract(parent) if parent else None
+    with _tracer.start_as_current_span(name, context=ctx, attributes={k: str(v) for k, v in attrs.items()}) as s:
+        yield s
+
+
+def inject_trace_context() -> dict:
+    """trace context ปัจจุบัน (W3C traceparent) สำหรับส่งไปกับงานในคิว — {} ถ้าไม่ได้เปิด"""
+    carrier: dict = {}
+    if _initialized:
+        TraceContextTextMapPropagator().inject(carrier)
     return carrier
-
-
-def extract_trace_context(carrier: dict | None):
-    """
-    Extract trace context from a dict carrier (W3C traceparent/tracestate).
-    Returns an OpenTelemetry Context that can be used as parent context.
-    """
-    if not carrier:
-        return None
-    return TraceContextTextMapPropagator().extract(carrier)
-
-
-def record_inference_job(model_name: str, status: str, duration: float) -> None:
-    """Record metrics for an executed inference job."""
-    global _inference_jobs_counter, _inference_duration_histogram
-    if _inference_jobs_counter:
-        _inference_jobs_counter.add(
-            1,
-            {"model_name": model_name, "status": status},
-        )
-    if _inference_duration_histogram:
-        _inference_duration_histogram.record(
-            duration,
-            {"model_name": model_name, "status": status},
-        )

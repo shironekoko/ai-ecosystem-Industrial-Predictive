@@ -4,6 +4,8 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timezone
 
+from core import observability as obs
+
 from . import training as tr
 from .vb_rules import with_uncertainty
 
@@ -51,10 +53,11 @@ class VisionRegistry:
             raise RuntimeError(f"แบบจำลองวัด VB ยังไม่พร้อม: {self.error}")
         from . import vb_model as vm
 
-        tensors = [vm.load_resized(im, self._size) for im in images]
-        with self._lock:
-            vb = vm.predict(self.model, tensors, device="cpu")
-            interval = self.meta["interval"]
+        with obs.timed("tool_vision.inference.duration"):
+            tensors = [vm.load_resized(im, self._size) for im in images]
+            with self._lock:
+                vb = vm.predict(self.model, tensors, device="cpu")
+                interval = self.meta["interval"]
         return [with_uncertainty(float(v), interval) for v in vb]
 
     def info(self) -> dict:

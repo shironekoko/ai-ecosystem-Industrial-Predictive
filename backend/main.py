@@ -20,7 +20,7 @@ from core.database import Base, engine
 from core.minio_client import ensure_bucket
 from core.observability import setup_observability, instrument_fastapi
 
-# ── Initialize OpenTelemetry Observability (Traces, Metrics, Logs) ──
+# ── OpenTelemetry (trace / metric / log) — เปิดเมื่อมี OTEL_EXPORTER_OTLP_ENDPOINT (compose.observability.yml) ──
 setup_observability(service_name="ai-ecosystem-backend")
 
 
@@ -138,6 +138,10 @@ async def lifespan(app: FastAPI):
         rescore_legacy_pending()        # รายการรอตรวจที่สร้างโดยแบบจำลองจำแนกคลาสรุ่นเก่า → วัด VB ใหม่
 
     asyncio.get_running_loop().run_in_executor(None, _load_vision)
+
+    # ── Observability: gauge สถานะระบบ/แบบจำลอง/สตรีม (ทำงานเมื่อเปิด compose.observability.yml เท่านั้น) ──
+    from app.features.health.telemetry import register_gauges
+    register_gauges()
 
     yield
 

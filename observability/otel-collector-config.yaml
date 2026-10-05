@@ -25,29 +25,27 @@ exporters:
     endpoint: "0.0.0.0:8889"
     namespace: "ai_ecosystem"
     send_timestamps: true
+    metric_expiration: 1m      # series ที่เลิกส่ง (เช่น เวอร์ชันโมเดลเก่า) หายจาก Prometheus ภายใน 1 นาที
 
   otlphttp/loki:
     endpoint: "http://loki:3100/otlp"
     tls:
       insecure: true
 
-  debug:
-    verbosity: normal
-
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlp/tempo, debug]
+      exporters: [otlp/tempo]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [prometheus, debug]
+      exporters: [prometheus]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlphttp/loki, debug]
+      exporters: [otlphttp/loki]
   telemetry:
     logs:
       level: info

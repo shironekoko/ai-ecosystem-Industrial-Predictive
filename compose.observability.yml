@@ -1,3 +1,6 @@
+# ชุดติดตามระบบ (ทางเลือก) — ใช้ซ้อนกับ compose.yml:
+#   docker compose -f compose.yml -f compose.observability.yml up -d
+# Grafana http://localhost:3001 (dashboard "AI Ecosystem — CNC Tool Life") · Prometheus :9090 · Loki :3100 · Tempo :3200
 services:
   # -------------------------
   # OpenTelemetry Collector
@@ -114,20 +117,12 @@ services:
         max-file: "3"
 
   # -------------------------
-  # Extend Backend Services with OTel Config
+  # เปิด OpenTelemetry ใน backend + trainer-worker (ไม่ตั้ง endpoint = ปิด, ระบบหลักรันได้ตามปกติ)
   # -------------------------
   backend:
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=ai-ecosystem-backend
-    depends_on:
-      otel-collector:
-        condition: service_started
-
-  inference-worker:
-    environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-      - OTEL_SERVICE_NAME=ai-ecosystem-inference-worker
     depends_on:
       otel-collector:
         condition: service_started

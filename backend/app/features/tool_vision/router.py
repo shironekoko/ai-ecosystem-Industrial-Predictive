@@ -132,6 +132,38 @@ async def model():
     return registry.info()
 
 
+@router.get("/vb-report")
+async def vb_report():
+    """สรุปผลการประเมินแบบจำลองทำนายค่าการสึกหรอหน้ามีด (Vb Continuous Regression) บน Held-Out Tool #10"""
+    from pathlib import Path
+    import json
+    import pandas as pd
+
+    repo_root = Path(__file__).resolve().parents[3]
+    models_dir = repo_root / "models_nontime" / "tool_vb_regression"
+    metrics_path = models_dir / "metrics_summary.json"
+    pred_path = models_dir / "predictions_tool10.csv"
+
+    if not metrics_path.exists():
+        raise HTTPException(404, "ยังไม่มีผลการประเมิน Vb Regression (กรุณารัน scripts/train_vb_regression.py)")
+
+    with open(metrics_path, "r", encoding="utf-8") as f:
+        metrics = json.load(f)
+
+    preds_preview = []
+    if pred_path.exists():
+        df_pred = pd.read_csv(pred_path)
+        preds_preview = df_pred.to_dict(orient="records")
+
+    return {
+        "status": "success",
+        "model_type": "continuous_vb_regression",
+        "target_unit": "µm",
+        "metrics": metrics,
+        "sample_predictions": preds_preview
+    }
+
+
 @router.get("/model/versions")
 async def model_versions():
     try:

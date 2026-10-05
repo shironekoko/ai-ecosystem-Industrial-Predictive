@@ -58,6 +58,7 @@ redis_data/
 # Testing and Sandbox
 .pytest_cache/
 sandbox/
+backend/sandbox/
 
 # OS and IDE
 .DS_Store

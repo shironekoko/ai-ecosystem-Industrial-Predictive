@@ -95,15 +95,18 @@ def trigger_alarm(
     db = SessionLocal()
     try:
         # Prevent spamming duplicate unread alarms for the same machine and incident
+        # (แยกตามบริการต้นทาง: แจ้งเตือน RUL กับงานตรวจใบมีดของดอกเดียวกันต้องไม่ทับกัน)
         existing = db.query(Alarm).filter(
             Alarm.machine_id == machine_id,
             Alarm.tool_ref == tool_ref,
+            Alarm.source_service == source_service,
             Alarm.is_read == False,
         ).first()
         if existing:
             existing.title = title
             existing.message = message
             existing.severity = severity.upper()
+            existing.action_url = action_url
             existing.created_at = datetime.utcnow()
             db.commit()
             db.refresh(existing)

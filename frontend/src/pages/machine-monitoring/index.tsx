@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Area,
   CartesianGrid,
@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { AlertOctagon, Pause, Play, RotateCcw, Wrench } from 'lucide-react';
+import { AlertOctagon, Pause, Play, RotateCcw, ScanEye, Wrench } from 'lucide-react';
 import { PageHeader } from '../../components/common';
 import {
   Card,
@@ -31,7 +31,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useFleet, useMachineHistory, useWaveform } from '../../hooks/useToolLife';
 import { api } from '../../services/api';
-import type { MachineSnapshot, RunRecord } from '../../types';
+import type { MachineSnapshot, RunRecord, VisionInspection } from '../../types';
 
 const LAYER_MIN = 164 / 60;
 
@@ -103,25 +103,83 @@ const Controls: React.FC<{ m: MachineSnapshot; speeds: number[] }> = ({ m, speed
 
 const HoldBanner: React.FC<{ m: MachineSnapshot }> = ({ m }) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const actor = user?.name || 'operator';
   const p = m.prediction;
+  const [busy, setBusy] = useState(false);
+  const remove = async () => {
+    setBusy(true);
+    try {
+      const snap = await api.acknowledge(m.machine, 'replace', actor);
+      // ถอดดอกแล้ว → ระบบถ่ายภาพใบมีด 4 ใบ + AI วิเคราะห์ → ไปยืนยันผลต่อที่ Tool Inspection
+      navigate(snap.inspection ? `/tool-vision?tab=review&inspection=${snap.inspection.id}` : '/tool-vision');
+    } catch (e: any) {
+      alert(e.message || String(e));
+      setBusy(false);
+    }
+  };
   return (
     <div className="p-4 rounded-xl border-2 border-red-300 bg-red-50 flex flex-col md:flex-row md:items-center gap-4">
       <AlertOctagon className="w-8 h-8 text-red-600 shrink-0" />
       <div className="flex-1">
-        <p className="font-bold text-red-800">Interlock: ระบบแนะนำให้เปลี่ยนดอก {m.tool_id} บน {m.machine_id}</p>
+        <p className="font-bold text-red-800">Interlock: ดอก {m.tool_id} บน {m.machine_id} หมดอายุ — ระบบแนะนำให้เปลี่ยนดอก</p>
         <p className="text-sm text-red-700">
-          RUL ≈ {fmt(p?.rul_min)} นาที (P10 {fmt(p?.rul_lo)}) — เครื่องหยุดป้อน (feed hold) รอการตัดสินใจของผู้ควบคุม การตัดสินใจทุกครั้งถูกบันทึกใน Audit Trail
+          RUL ≈ {fmt(p?.rul_min)} นาที (P10 {fmt(p?.rul_lo)}) — เครื่องหยุดป้อน (feed hold) รอการตัดสินใจของผู้ควบคุม · ถอดดอกแล้วระบบจะถ่ายภาพใบมีด 4 ใบให้ AI
+          ตรวจต่อที่ Tool Inspection · การตัดสินใจทุกครั้งถูกบันทึกใน Audit Trail
         </p>
       </div>
       <div className="flex gap-2">
-        <button onClick={() => api.acknowledge(m.machine, 'replace', actor)} className="btn-danger">
-          <Wrench className="w-3.5 h-3.5" /> ถอดดอก / เปลี่ยนดอก
+        <button disabled={busy} onClick={remove} className="btn-danger">
+          <Wrench className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} /> {busy ? 'กำลังถอดดอกและถ่ายภาพใบมีด…' : 'ถอดดอก → ตรวจใบมีด'}
         </button>
-        <button onClick={() => api.acknowledge(m.machine, 'continue', actor)} className="btn-secondary">
+        <button disabled={busy} onClick={() => api.acknowledge(m.machine, 'continue', actor)} className="btn-secondary">
           ตัดต่อ (override)
         </button>
       </div>
+    </div>
+  );
+};
+
+/** สถานะงานตรวจใบมีดของดอกที่เพิ่งถอด (ขั้นต่อไปที่ Tool Inspection) */
+const RemovedBanner: React.FC<{ m: MachineSnapshot }> = ({ m }) => {
+  const [ins, setIns] = useState<VisionInspection | null>(null);
+  const id = m.inspection?.id;
+  useEffect(() => {
+    if (!id) {
+      setIns(null);
+      return;
+    }
+    const load = () => api.getInspection(id).then(setIns).catch(() => {});
+    load();
+    const t = setInterval(load, 10000);
+    return () => clearInterval(t);
+  }, [id]);
+  const open = ins?.blades?.filter((b) => b.replace_status === 'REQUIRED').map((b) => `B${b.blade}`) ?? [];
+  const done = ins?.blades?.filter((b) => b.replace_status === 'REPLACED').map((b) => `B${b.blade}`) ?? [];
+  return (
+    <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-sm text-indigo-800 flex flex-col md:flex-row md:items-center gap-3">
+      <div className="flex-1 space-y-0.5">
+        <p>
+          ดอก {m.tool_id} ถูกถอดแล้ว ({m.completed?.reason === 'REPLACED_BY_OPERATOR' ? `ผู้ควบคุม${m.completed?.by ? ` ${m.completed.by}` : ''} ถอดดอก` : 'สิ้นสุดข้อมูลการทดลอง'} ที่เวลาตัด{' '}
+          {fmt(m.completed?.t_min)} นาที) — ผลเทียบกับ VB ที่วัดจริงอยู่ในหน้า Reports
+        </p>
+        <p className="text-xs flex items-center gap-1.5">
+          <ScanEye className="w-3.5 h-3.5" />
+          {!m.inspection
+            ? 'กำลังถ่ายภาพใบมีด 4 ใบให้ AI ตรวจ…'
+            : !ins || ins.status === 'PENDING_REVIEW'
+            ? `ตรวจใบมีด ${m.inspection.id}: AI ประเมินแล้ว — รอผู้ตรวจยืนยันที่ Tool Inspection`
+            : open.length
+            ? `ตรวจใบมีดแล้ว: วิศวกรต้องเปลี่ยน ${open.join(', ')} ก่อนติดตั้งดอกกลับเข้าเครื่อง`
+            : `ตรวจใบมีดแล้ว${done.length ? ` และเปลี่ยน ${done.join(', ')} แล้ว` : ''} — ติดตั้งดอกกลับเข้าเครื่องได้`}
+        </p>
+      </div>
+      <Link
+        to={m.inspection ? (ins?.status === 'VERIFIED' && open.length ? '/tool-vision?tab=replace' : `/tool-vision?tab=review&inspection=${m.inspection.id}`) : '/tool-vision'}
+        className="btn-primary shrink-0"
+      >
+        <ScanEye className="w-3.5 h-3.5" /> {ins?.status === 'VERIFIED' && open.length ? 'ใบสั่งเปลี่ยนใบมีด' : 'ไปที่ Tool Inspection'}
+      </Link>
     </div>
   );
 };
@@ -316,12 +374,7 @@ export const MachineMonitoringPage: React.FC = () => {
       ) : (
         <>
           {m.state === 'HOLD' && <HoldBanner m={m} />}
-          {m.state === 'COMPLETED' && (
-            <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-sm text-indigo-800">
-              ดอก {m.tool_id} ถูกถอดแล้ว ({m.completed?.reason === 'REPLACED_BY_OPERATOR' ? 'ผู้ควบคุมเปลี่ยนดอก' : 'สิ้นสุดข้อมูลการทดลอง'} ที่เวลาตัด {fmt(m.completed?.t_min)} นาที) —
-              ผลเทียบกับ VB ที่วัดจริงอยู่ในหน้า Reports
-            </div>
-          )}
+          {m.state === 'COMPLETED' && <RemovedBanner m={m} />}
 
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             <div className="col-span-2 p-4 bg-white rounded-xl border border-gray-200 shadow-sm">

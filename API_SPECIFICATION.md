@@ -34,7 +34,10 @@ Swagger (ข้อมูลล่าสุดเสมอ): `http://localhost:80
       "model_version": "tool-rul-gru-1.0.0", "at_run": 121
     },
     "baseline_runs": null, "flagged_runs": 0, "input_z_max": 1.39,
-    "started_at": "...", "completed": null, "model_ready": true,
+    "started_at": "...", "completed": null,          // หลังถอดดอก: {"reason", "at", "t_min", "by"}
+    "cycle_id": "M1-T3-261004164440",              // 1 รอบการใช้งานดอก (ติดตั้ง → ถอด)
+    "inspection": null,                            // หลังถอดดอก: {"id": "INS-…", "ai_verdict", "status"} (งานตรวจใบมีด)
+    "model_ready": true,
     "events": [{"at": "...", "level": "INFO", "message": "...", "machine": 1}]
   }]
 }
@@ -58,7 +61,7 @@ Swagger (ข้อมูลล่าสุดเสมอ): `http://localhost:80
 | POST | `/tool-life/machines/{m}/start` | – | เริ่ม (ถ้า COMPLETED = ติดตั้งดอกเดิมใหม่ เริ่มจากรันแรก) |
 | POST | `/tool-life/machines/{m}/pause` · `/resume` · `/reset` | – | หยุดชั่วคราว / ตัดต่อ / รีเซ็ต |
 | POST | `/tool-life/machines/{m}/speed` | `{"speed": 1}` | ความเร็วเล่นซ้ำ (1, 2, 5, 10, 20) |
-| POST | `/tool-life/machines/{m}/acknowledge` | `{"action": "replace" \| "continue", "actor": "ชื่อ"}` | ตอบสนอง REPLACE_NOW: ถอดดอก (จบ + ประเมินผล) หรือตัดต่อ (override) — บันทึก Audit |
+| POST | `/tool-life/machines/{m}/acknowledge` | `{"action": "replace" \| "continue", "actor": "ชื่อ"}` | ตอบสนอง REPLACE_NOW: ถอดดอก (จบ + ประเมินผล + **ถ่ายภาพใบมีด 4 ใบให้ AI ตรวจ** — response มี `inspection.id`) หรือตัดต่อ (override) — บันทึก Audit |
 
 ### แบบจำลอง
 | Method | Path | ผล |
@@ -90,18 +93,38 @@ Swagger (ข้อมูลล่าสุดเสมอ): `http://localhost:80
 
 ---
 
-## 2. Reports (`/reports`)
+## 2. Tool Vision (`/tool-vision`) — ตรวจใบมีด 4 ใบของดอกที่ถอด (ต่อจาก Machine Monitoring)
+
+ขั้นตอน: RUL แจ้ง REPLACE_NOW → `POST /tool-life/machines/{m}/acknowledge {"action": "replace"}` → ระบบสร้างรายการตรวจอัตโนมัติ
+(ภาพ 4 ใบมีดตอนถอดดอก → AI, `trigger = RUL_EOL`, ผูกกับ `cycle_id` ของสตรีม + alarm INFO) → `review` (ผู้ตรวจยืนยัน/แก้ครบ 4 ใบ)
+→ ใบที่ label สุดท้ายเป็น `dulled` = ใบสั่งเปลี่ยนใบมีด (`REQUIRED` → `REPLACED`) + alarm WARNING · label ที่คนยืนยันเข้า pool → `training/start` → candidate → `promote`
+
+เครื่องเดียวกัน ดอกเดียวกัน: M1/M2/M3 = ข้อมูลเซนเซอร์ LUH T3/T6/T9 + ภาพใบมีด Nonastreda ดอก 8/9/10 (รอบสุดท้าย = ภาพตอนถอดดอก) · ตรวจ 1 ครั้งต่อ `cycle_id`
+รายการตรวจแบบเดิมที่ไม่ผูกกับรอบการใช้งานดอกมีสถานะ `ARCHIVED` (ไม่แสดงในคิว/ใบสั่งงาน)
+
+| Method | Path | Body / ผล |
+|---|---|---|
+| GET | `/tool-vision/stations` | ต่อเครื่อง: `tool_id`, `rul` (state, rul_min, rul_lo, recommendation, …จาก Machine Monitoring), `cycle_id`, `cycle_inspection` (ผลตรวจของดอกที่เพิ่งถอด), `can_capture`, `pending_review`, `open_replacements` |
+| POST | `/tool-vision/stations/{m}/capture` | `{"actor"}` — ถ่ายซ้ำด้วยมือเมื่อการถ่ายอัตโนมัติไม่สำเร็จ ได้เฉพาะดอกที่ถอดแล้ว (`409` ถ้าดอกยังอยู่บนเครื่อง; เรียกซ้ำได้ผลเดิม) |
+| GET | `/tool-vision/inspections?status=PENDING_REVIEW\|VERIFIED\|ARCHIVED&machine=` · `/inspections/{id}` · `/inspections/{id}/blades/{b}/image` | รายการ / รายละเอียด (`rul_context` = เวลาตัดตอนถอด, RUL/P10–P90, คำแนะนำ, ผู้ถอด, `images_trained_in`; `blades[]`: `pred_label`, `confidence`, `probs`, `metrology` (flank_wear/gaps/overhang µm)) / ภาพ (MinIO bucket `inspections`) |
+| POST | `/tool-vision/inspections/{id}/review` | `{"actor", "blades": [{"blade": 1, "label": "sharp"}, …4 ใบ], "note"}` → `review` = CONFIRMED (AI ถูก) / CORRECTED (คนแก้) |
+| GET / POST | `/tool-vision/replacements` · `/replacements/{blade_id}/done` · `/replacements/export/csv` | ใบสั่งเปลี่ยนใบมีด `open` / `done` (มี `tool_ref`, `removed_t_min`, `rul_recommendation`, `removed_by`) · `summary` = 1 ใบสั่งงานต่อดอกที่ถอด |
+| GET | `/tool-vision/stats` | `agreement_pct`, `corrected`, `confusion_human_vs_ai` |
+| GET / POST | `/tool-vision/model` · `/model/versions` · `/model/reload` | แบบจำลองจาก MinIO `models/tool-vision/<version>/{model.pt, meta.json}` |
+| GET / POST | `/tool-vision/training/pool` · `/training/start` · `/training/jobs` · `/training/jobs/{id}/promote` · `/training/jobs/{id}/reject` | retrain ใน trainer-worker (ARQ, GPU) · ภาพเดียวกัน (ดอกเดิมถูกเล่นซ้ำ) นับครั้งเดียวและไม่เข้า pool อีกเมื่อฝึกแล้ว · gate: macro-F1 บน validation ไม่ลด > 0.02 และ accuracy บนข้อมูลล่าสุดที่คนยืนยันไม่ลดลง |
+
+## 3. Reports (`/reports`)
 | Method | Path | ผล |
 |---|---|---|
 | GET | `/reports/tool-life-summary` | `completedTools`, `replacedByOperator`, `lateReplacements`, `meanAbsRulErrorMin`, `meanRulErrorLast20Min`, `meanLifeUsedAtReplacePct`, `meanPlanLeadMin`, `meanCoverageP10P90Pct`, `evaluations[]` |
 | GET | `/reports/export/csv` | CSV รายดอก |
 
-## 3. Alarms / Audit
+## 4. Alarms / Audit
 | Method | Path | ผล |
 |---|---|---|
 | GET | `/alarms?severity=&is_read=` | แจ้งเตือน (source `ToolLife_RUL`: WATCH → INFO, PLAN_REPLACEMENT → WARNING, REPLACE_NOW → CRITICAL) |
 | PATCH | `/alarms/{id}/read` · POST `/alarms/mark-all-read` · DELETE `/alarms/{id}` | จัดการแจ้งเตือน |
 | GET | `/audit-logs?eventType=&search=&page=&limit=` | `TOOL_REPLACED`, `TOOL_LIFE_OVERRIDE`, … |
 
-## 4. ระบบพื้นฐาน
+## 5. ระบบพื้นฐาน
 `/auth/*` (login, signup, refresh, logout, me) · `/users/*` · `/profile/*` · `/storage/*` (MinIO) · `/labeling/*` (Label Studio) · `/workers/*` (ARQ) · `/health`, `/health/components`

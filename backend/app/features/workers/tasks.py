@@ -2,7 +2,8 @@
 Workers Tasks — ARQ task functions สำหรับ Industrial PdM Background Retraining Jobs
 
 งานที่รองรับ:
-- train_yolo_model: Retrain โมเดลภาพ (YOLOv8-cls) — ส่วนของทีมแบบจำลองภาพ
+- retrain_tool_vision: retrain แบบจำลองภาพใบมีดจาก label ที่ผู้ตรวจยืนยันในระบบตรวจ (app/features/tool_vision)
+- train_yolo_model: Retrain โมเดลภาพ (YOLOv8-cls) แบบเดิมของทีมแบบจำลองภาพ
 
 แบบจำลองอนุกรมเวลาของระบบ (RUL ดอกกัด) ฝึกด้วย timeseries_docs/tool_rul_forecast/experiments_rul.py
 แล้วอัปโหลดขึ้น MinIO ด้วย backend/scripts/publish_tool_rul_model.py (ไม่ได้ฝึกผ่าน worker นี้)
@@ -24,6 +25,7 @@ from typing import Any
 from core.redis_client import get_arq_redis_settings
 from core.config import settings
 from core.minio_client import ensure_bucket, upload_file
+from app.features.tool_vision.worker_tasks import retrain_tool_vision
 
 
 def get_nonastreda_dataset_dir() -> Path:
@@ -194,7 +196,7 @@ class WorkerSettings:
     """
     ARQ Worker Settings สำหรับ Retraining ทั้ง Time Series และ Non-Time Series
     """
-    functions = [train_yolo_model]
+    functions = [train_yolo_model, retrain_tool_vision]
     redis_settings = get_arq_redis_settings()
     on_startup = startup
     on_shutdown = shutdown

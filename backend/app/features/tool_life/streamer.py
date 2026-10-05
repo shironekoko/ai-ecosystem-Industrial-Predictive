@@ -8,6 +8,9 @@
 - จบรัน: สกัดฟีเจอร์จากสัญญาณความละเอียดเต็ม (โค้ดเดียวกับตอนฝึก) → แบบจำลองจาก MinIO → RUL / สถานะ / คำแนะนำ
 
 ไม่มีการส่ง VB, ชื่อไฟล์ หรือ RUL จริงออกไประหว่างสตรีม — ค่าจริงเปิดเผยเฉพาะในผลประเมินหลังถอดดอก
+
+เมื่อดอกถูกถอด (ผู้ควบคุมกดถอดดอกตอน REPLACE_NOW หรือข้อมูลการทดลองหมด) StreamManager เรียก listener ที่ลงทะเบียนไว้
+(main.py ลงทะเบียนงานตรวจใบมีดด้วยภาพ) พร้อม removal_context() = สิ่งที่แบบจำลอง RUL บอก ณ ตอนถอด
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ import os
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -69,6 +73,8 @@ class MachineStream:
     # ------------------------------------------------------------------ state
     def _reset_state(self):
         self.state = "IDLE"
+        self.cycle_id: str | None = None              # 1 รอบการใช้งานดอก (ติดตั้ง → ถอด) — ใช้เชื่อมกับงานตรวจใบมีด
+        self.inspection: dict | None = None           # ผลตรวจใบมีดของรอบนี้ (จาก listener)
         self.idx = 0
         self.features = FeatureState(self.machine)
         self.tracker = EOLTracker()
@@ -110,7 +116,7 @@ class MachineStream:
                 wall_s_per_cut_min=round(self._wall_per_cut_min(), 2)),
             baseline_runs=last.get("baseline_runs"), flagged_runs=self.features.n_flagged,
             input_z_max=last.get("input_z_max"), started_at=self.started_at, completed=self.completed,
-            model_ready=registry.ready, events=self.events[-8:],
+            cycle_id=self.cycle_id, inspection=self.inspection, model_ready=registry.ready, events=self.events[-8:],
         )
         if history:
             out["history"] = self.history
@@ -130,6 +136,7 @@ class MachineStream:
             self._reset_state()
         if self.task is None or self.task.done():
             self.started_at = _now().isoformat()
+            self.cycle_id = self.cycle_id or f"M{self.machine}-T{self.tool}-{_now():%y%m%d%H%M%S}"
             self.task = asyncio.create_task(self._loop(), name=f"tool-life-M{self.machine}")
             self._event("INFO", f"เริ่มสตรีมดอก T{self.tool} บนเครื่อง M{self.machine} (ความเร็ว {self.speed:g}×)")
         self._running.set()
@@ -170,7 +177,12 @@ class MachineStream:
         elif action == "replace":
             self._audit("TOOL_REPLACED", actor, f"ถอดดอก T{self.tool} ออกจากเครื่อง M{self.machine}")
             await self._cancel()
-            self._complete("REPLACED_BY_OPERATOR")
+            task = self._complete("REPLACED_BY_OPERATOR", actor)
+            if task is not None:                       # รอให้ภาพใบมีดถูกถ่าย/วิเคราะห์ เพื่อให้หน้าเว็บพาไปตรวจต่อได้ทันที
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=60)
+                except Exception:
+                    pass
         else:
             raise ValueError("action ต้องเป็น continue หรือ replace")
 
@@ -332,11 +344,11 @@ class MachineStream:
             log.warning("audit not stored: %s", e)
 
     # ------------------------------------------------------------------ evaluation (หลังถอดดอกเท่านั้น)
-    def _complete(self, reason: str):
+    def _complete(self, reason: str, actor: str | None = None) -> asyncio.Task | None:
         t_end = (self.history[-1]["t_min"] if self.history else 0.0)
         self.state = "COMPLETED"
         self._running.clear()
-        self.completed = dict(reason=reason, at=_now().isoformat(), t_min=t_end)
+        self.completed = dict(reason=reason, at=_now().isoformat(), t_min=t_end, by=actor or "system")
         try:
             self.evaluation = self._evaluate(t_end, reason)
             self.manager.store_evaluation(self.evaluation)
@@ -346,6 +358,24 @@ class MachineStream:
         self._event("INFO", f"จบการใช้งานดอก T{self.tool} ({'ผู้ควบคุมถอดดอก' if reason == 'REPLACED_BY_OPERATOR' else 'สิ้นสุดข้อมูลการทดลอง'})"
                             " — ดอกถูกวัด VB แล้ว เปิดดูผลประเมินได้ที่หน้า Reports")
         self.manager.publish_snapshot()
+        return self.manager.tool_removed(self)
+
+    def removal_context(self) -> dict:
+        """สิ่งที่ Machine Monitoring รู้ ณ ตอนถอดดอก — ผลของแบบจำลอง RUL เท่านั้น (ไม่มี VB จริง)"""
+        pr = [h for h in self.history if h.get("rul") is not None]
+        last = pr[-1] if pr else {}
+
+        def first(names):
+            return next((h["t_min"] for h in pr if h["recommendation"] in names), None)
+
+        c = self.completed or {}
+        return dict(machine=self.machine, machine_id=MACHINE_INFO[self.machine]["name"], tool=self.tool,
+                    tool_id=f"T{self.tool}", cycle_id=self.cycle_id, started_at=self.started_at,
+                    removed_at=c.get("at"), reason=c.get("reason"), removed_by=c.get("by"), t_min=_r(c.get("t_min")),
+                    rul_min=_r(last.get("rul")), rul_lo=_r(last.get("rul_lo")), rul_hi=_r(last.get("rul_hi")),
+                    wear_state=last.get("state"), recommendation=last.get("recommendation"),
+                    first_plan_min=_r(first({"PLAN_REPLACEMENT", "REPLACE_NOW"})), first_replace_now_min=_r(first({"REPLACE_NOW"})),
+                    model_version=last.get("model_version"))
 
     def _evaluate(self, t_end: float, reason: str) -> dict:
         gt = ds.ground_truth(self.tool)
@@ -391,6 +421,7 @@ class StreamManager:
         self.eval_path = Path(os.environ.get("TOOL_LIFE_STATE_DIR", Path(__file__).resolve().parents[3] / "logs")) / "tool_life_evaluations.jsonl"
         self.error: str | None = None
         self._bg: list[asyncio.Task] = []
+        self.removal_listeners: list[Callable[[dict], dict | None]] = []   # เรียกใน thread เมื่อถอดดอก
 
     def _assignments(self) -> dict[int, int]:
         """เครื่อง → ดอกที่สตรีม (ค่าเริ่มต้น = ดอกที่สงวนไว้ใน metadata ของแบบจำลอง; สำรอง M1:T3, M2:T6, M3:T9)"""
@@ -432,6 +463,26 @@ class StreamManager:
                     self.publish(dict(type="event", at=_now().isoformat(), level="INFO", machine=None,
                                       message=f"โหลดแบบจำลอง {registry.meta.get('version')} จาก MinIO สำเร็จ"))
                     self.publish_snapshot()
+
+    # ------------------------------------------------------------------ ถอดดอก → งานถัดไป (ตรวจใบมีด)
+    def tool_removed(self, s: MachineStream) -> asyncio.Task | None:
+        if not self.removal_listeners:
+            return None
+        return asyncio.create_task(self._notify_removed(s, s.removal_context()))
+
+    async def _notify_removed(self, s: MachineStream, ctx: dict):
+        for fn in self.removal_listeners:
+            try:
+                res = await asyncio.to_thread(fn, ctx)
+            except Exception as e:
+                log.exception("tool-removed listener failed")
+                s._event("WARNING", f"ส่งดอก {ctx['tool_id']} ไปตรวจใบมีดไม่สำเร็จ: {e} — สั่งถ่ายภาพได้ที่หน้า Tool Inspection")
+                continue
+            if res and s.cycle_id == ctx["cycle_id"]:
+                s.inspection = res
+                s._event("INFO", f"ถ่ายภาพใบมีด 4 ใบของดอก {ctx['tool_id']} แล้ว ({res['id']}: AI = {res['ai_verdict']})"
+                                 " — รอผู้ตรวจยืนยันที่หน้า Tool Inspection")
+        self.publish_snapshot()
 
     # ------------------------------------------------------------------ pub/sub
     def subscribe(self, waveform_machine: int | None) -> asyncio.Queue:

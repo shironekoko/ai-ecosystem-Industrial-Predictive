@@ -12,7 +12,7 @@ const routeLabels: Record<string, string> = {
   dashboard: 'Dashboard',
   login: 'Authentication',
   'machine-monitoring': 'Machine Monitoring',
-  'tool-vision': 'Tool Image Wear',
+  'tool-vision': 'Tool Inspection',
   'model-registry': 'Model Registry',
   'audit-log': 'Audit Trail',
   notifications: 'Notifications',

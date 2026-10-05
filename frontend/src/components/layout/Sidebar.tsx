@@ -77,7 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <SectionLabel>CNC Operations</SectionLabel>
         <NavItem to="/dashboard" icon={LayoutDashboard} label="Tool Life Dashboard" />
         <NavItem to="/machine-monitoring" icon={Activity} label="Machine Monitoring" />
-        <NavItem to="/tool-vision" icon={ScanEye} label="Tool Image Wear (soon)" />
+        <NavItem to="/tool-vision" icon={ScanEye} label="Tool Inspection (Vision)" />
 
         <SectionLabel>MLOps & Governance</SectionLabel>
         <NavItem to="/notifications" icon={Bell} label="Alarm & Alerts" badge={unreadAlertCount} />

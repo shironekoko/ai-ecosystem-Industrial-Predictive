@@ -4,7 +4,16 @@
  * แบบจำลองถูกโหลดจาก MinIO โดย backend และข้อมูลไหลจากชุดข้อมูลจริง (LUH) ตามเวลาจริง
  */
 import type {
+  BladeLabel,
   FleetSnapshot,
+  Replacements,
+  TrainingJob,
+  TrainingPool,
+  VisionInspection,
+  VisionModelInfo,
+  VisionStation,
+  VisionStats,
+  VisionVersion,
   MachineSnapshot,
   ModelInfo,
   ModelVersion,
@@ -145,6 +154,87 @@ export class ApiService {
 
   public exportCsvUrl() {
     return `${API_BASE_URL}/reports/export/csv`;
+  }
+
+  // ───────────────────────── Tool vision (ตรวจใบมีดด้วยภาพ) ─────────────────────────
+  public getVisionStations() {
+    return request<VisionStation[]>('/tool-vision/stations');
+  }
+
+  /** สำรองเมื่อถ่ายภาพอัตโนมัติตอนถอดดอกไม่สำเร็จ — ได้เฉพาะดอกที่ถอดแล้ว */
+  public captureInspection(machine: number, actor: string) {
+    return request<VisionInspection>(`/tool-vision/stations/${machine}/capture`, {
+      method: 'POST',
+      body: JSON.stringify({ actor }),
+    });
+  }
+
+  public getInspections(status?: string, machine?: number, limit = 100) {
+    const q = new URLSearchParams();
+    if (status) q.set('status', status);
+    if (machine) q.set('machine', String(machine));
+    q.set('limit', String(limit));
+    return request<VisionInspection[]>(`/tool-vision/inspections?${q.toString()}`);
+  }
+
+  public getInspection(id: string) {
+    return request<VisionInspection>(`/tool-vision/inspections/${id}`);
+  }
+
+  public reviewInspection(id: string, actor: string, blades: { blade: number; label: BladeLabel }[], note?: string) {
+    return request<VisionInspection>(`/tool-vision/inspections/${id}/review`, {
+      method: 'POST',
+      body: JSON.stringify({ actor, blades, note: note || null }),
+    });
+  }
+
+  public getReplacements() {
+    return request<Replacements>('/tool-vision/replacements');
+  }
+
+  public markBladeReplaced(bladeId: string, actor: string) {
+    return request<{ blade_id: string; status: string }>(`/tool-vision/replacements/${bladeId}/done`, {
+      method: 'POST',
+      body: JSON.stringify({ actor }),
+    });
+  }
+
+  public replacementsCsvUrl() {
+    return `${API_BASE_URL}/tool-vision/replacements/export/csv`;
+  }
+
+  public getVisionStats() {
+    return request<VisionStats>('/tool-vision/stats');
+  }
+
+  public getVisionModel() {
+    return request<VisionModelInfo>('/tool-vision/model');
+  }
+
+  public getVisionVersions() {
+    return request<VisionVersion[]>('/tool-vision/model/versions');
+  }
+
+  public getTrainingPool() {
+    return request<TrainingPool>('/tool-vision/training/pool');
+  }
+
+  public getTrainingJobs() {
+    return request<TrainingJob[]>('/tool-vision/training/jobs');
+  }
+
+  public startRetrain(actor: string) {
+    return request<{ job_id: string; n_labels: number }>('/tool-vision/training/start', {
+      method: 'POST',
+      body: JSON.stringify({ actor }),
+    });
+  }
+
+  public decideTrainingJob(jobId: string, action: 'promote' | 'reject', actor: string) {
+    return request<{ job_id: string; status: string; version: string }>(`/tool-vision/training/jobs/${jobId}/${action}`, {
+      method: 'POST',
+      body: JSON.stringify({ actor }),
+    });
   }
 
   /**

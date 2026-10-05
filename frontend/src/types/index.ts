@@ -58,7 +58,9 @@ export interface MachineSnapshot {
   flagged_runs: number;
   input_z_max: number | null;
   started_at: string | null;
-  completed: { reason: string; at: string; t_min: number } | null;
+  completed: { reason: string; at: string; t_min: number; by?: string } | null;
+  cycle_id: string | null; // 1 รอบการใช้งานดอก (ติดตั้ง → ถอด) — เชื่อมกับงานตรวจใบมีด
+  inspection: { id: string; ai_verdict: ToolVerdict; status: string } | null;
   model_ready: boolean;
   events: StreamEvent[];
   history?: RunRecord[];
@@ -204,4 +206,189 @@ export interface AlertNotification {
   isRead: boolean;
   toolRef?: string;
   actionUrl?: string;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tool vision — ตรวจใบมีด 4 ใบ/เครื่องด้วยภาพ
+// ─────────────────────────────────────────────────────────────
+export type BladeLabel = 'sharp' | 'used' | 'dulled';
+export type ToolVerdict = 'OK' | 'MONITOR' | 'REPLACE';
+
+export interface VisionBlade {
+  id: string;
+  blade: number;
+  pred_label: BladeLabel;
+  confidence: number;
+  probs: Record<BladeLabel, number>;
+  metrology: { flank_wear_um: number; gaps_um: number; overhang_um: number } | null;
+  review: 'PENDING' | 'CONFIRMED' | 'CORRECTED';
+  final_label: BladeLabel | null;
+  replace_status: 'NONE' | 'REQUIRED' | 'REPLACED';
+  replaced_by: string | null;
+  replaced_at: string | null;
+  trained_in_version: string | null;
+  image_url: string;
+}
+
+/** สิ่งที่ Machine Monitoring (แบบจำลอง RUL) บอก ณ ตอนถอดดอก — ไม่มี VB จริง */
+export interface RulContext {
+  machine: number;
+  machine_id: string;
+  tool: number;
+  tool_id: string;
+  cycle_id: string;
+  started_at: string | null;
+  removed_at: string;
+  reason: 'REPLACED_BY_OPERATOR' | 'DATASET_END';
+  removed_by: string;
+  t_min: number | null;
+  rul_min: number | null;
+  rul_lo: number | null;
+  rul_hi: number | null;
+  wear_state: WearState | null;
+  recommendation: Recommendation | null;
+  first_plan_min: number | null;
+  first_replace_now_min: number | null;
+  model_version: string | null;
+  images_trained_in: string[] | null; // ภาพชุดนี้เคยใช้ retrain แล้ว (ดอกเดิมถูกเล่นซ้ำ)
+}
+
+export interface VisionInspection {
+  id: string;
+  machine: number;
+  machine_id: string;
+  seq: number;
+  source: 'BENCH_DATASET';
+  tool_ref: string | null;
+  image_tool: string | null;
+  cycle_id: string | null;
+  rul_context: RulContext | null;
+  trigger: string;
+  captured_by: string;
+  captured_at: string;
+  model_version: string;
+  ai_verdict: ToolVerdict;
+  status: 'PENDING_REVIEW' | 'VERIFIED' | 'ARCHIVED';
+  final_verdict: ToolVerdict | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  note: string | null;
+  blades?: VisionBlade[];
+  low_confidence?: boolean;
+}
+
+export interface VisionStation {
+  machine: number;
+  machine_id: string;
+  tool_id: string | null;
+  image_tool: string;
+  rul: {
+    state: StreamState | null;
+    t_min: number | null;
+    rul_min: number | null;
+    rul_lo: number | null;
+    recommendation: Recommendation | null;
+    wear_state: WearState | null;
+    life_used_pct: number | null;
+    completed: MachineSnapshot['completed'];
+  } | null;
+  cycle_id: string | null;
+  cycle_inspection: VisionInspection | null; // ผลตรวจของดอกที่เพิ่งถอดในรอบนี้
+  can_capture: boolean;
+  pending_review: number;
+  open_replacements: number;
+  last: VisionInspection | null;
+}
+
+export interface ReplacementItem {
+  blade_id: string;
+  inspection_id: string;
+  machine: number;
+  machine_id: string;
+  blade: number;
+  tool_ref: string | null;
+  removed_t_min: number | null;
+  removed_by: string | null;
+  rul_recommendation: Recommendation | null;
+  captured_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  ai_label: BladeLabel;
+  final_label: BladeLabel;
+  ai_correct: boolean;
+  flank_wear_um: number | null;
+  status: 'REQUIRED' | 'REPLACED';
+  replaced_by: string | null;
+  replaced_at: string | null;
+  image_url: string;
+}
+
+export interface Replacements {
+  open: ReplacementItem[];
+  done: ReplacementItem[];
+  summary: { inspection_id: string; machine_id: string; tool_ref: string | null; removed_t_min: number | null; reviewed_by: string | null; blades: string[] }[];
+}
+
+export interface VisionStats {
+  inspections: number;
+  pending_review: number;
+  reviewed_blades: number;
+  agreement_pct: number | null;
+  corrected: number;
+  confusion_human_vs_ai: Record<BladeLabel, Record<BladeLabel, number>>;
+}
+
+export interface TrainingPool {
+  n_labels: number;
+  n_corrected: number;
+  n_confirmed: number;
+  suggest_retrain: boolean;
+  threshold: number;
+  job_running: boolean;
+}
+
+export interface EvalBrief {
+  n: number;
+  accuracy?: number;
+  macro_f1?: number;
+}
+
+export interface TrainingJob {
+  id: string;
+  status: 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED' | 'PROMOTED' | 'REJECTED';
+  requested_by: string;
+  requested_at: string;
+  finished_at: string | null;
+  base_version: string;
+  candidate_version: string | null;
+  n_labels: number;
+  n_corrected: number;
+  result: {
+    candidate_version: string;
+    gate: { passed: boolean; no_regression_on_val: boolean; not_worse_on_recent: boolean; rule: string };
+    metrics: { val: EvalBrief; base_val: EvalBrief; recent: EvalBrief; base_recent: EvalBrief };
+    n_human_train: number;
+    n_recent_eval: number;
+  } | null;
+  error: string | null;
+}
+
+export interface VisionModelInfo {
+  status: 'READY' | 'UNAVAILABLE' | 'NOT_LOADED';
+  error: string | null;
+  loaded_at: string | null;
+  version: string | null;
+  sha256: string | null;
+  meta: any;
+}
+
+export interface VisionVersion {
+  version: string;
+  active: boolean;
+  status: string;
+  created_utc: string;
+  base_version: string | null;
+  n_human_labels: number | null;
+  metrics: any;
+  gate: any;
 }

@@ -25,7 +25,7 @@ import {
 } from '../../components/toollife/ui';
 import { useFleet, useMachineHistory } from '../../hooks/useToolLife';
 import { api } from '../../services/api';
-import type { MachineSnapshot, StreamEvent, ToolLifeSummary } from '../../types';
+import type { MachineSnapshot, StreamEvent, ToolLifeSummary, VisionStation } from '../../types';
 
 const LAYER_MIN = 164 / 60;
 
@@ -207,11 +207,13 @@ export const DashboardPage: React.FC = () => {
   const { fleet, conn, events, error } = useFleet();
   const [summary, setSummary] = useState<ToolLifeSummary | null>(null);
   const [unread, setUnread] = useState<number>(0);
+  const [vision, setVision] = useState<VisionStation[] | null>(null);
 
   useEffect(() => {
     const load = () => {
       api.getToolLifeSummary().then(setSummary).catch(() => setSummary(null));
       api.getAlarms('ALL', false).then((a: any[]) => setUnread(Array.isArray(a) ? a.length : 0));
+      api.getVisionStations().then(setVision).catch(() => setVision(null));
     };
     load();
     const t = setInterval(load, 15000);
@@ -355,32 +357,73 @@ export const DashboardPage: React.FC = () => {
             )}
           </Card>
         </div>
-        <Card title="ดอกที่ถอดแล้ว (ประเมินเทียบ VB จริง)" right={<Link to="/reports" className="text-xs text-indigo-600 font-semibold">ดูรายงาน →</Link>}>
-          {!summary || summary.completedTools === 0 ? (
-            <p className="text-xs text-gray-400 leading-relaxed">
-              ยังไม่มีดอกที่ถอดออก — ค่า VB จริงจะเปิดเผยหลังดอกถูกถอดและวัดเท่านั้น (ระหว่างใช้งานหน้าเว็บไม่แสดงค่าจริง)
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 gap-3 text-center">
-              <div className="p-2 rounded-lg bg-gray-50">
-                <p className="text-[11px] text-gray-500">ดอกที่ประเมินแล้ว</p>
-                <p className="text-lg font-bold">{summary.completedTools}</p>
+        <div className="space-y-4">
+          <Card title="ดอกที่ถอดแล้ว (ประเมินเทียบ VB จริง)" right={<Link to="/reports" className="text-xs text-indigo-600 font-semibold">ดูรายงาน →</Link>}>
+            {!summary || summary.completedTools === 0 ? (
+              <p className="text-xs text-gray-400 leading-relaxed">
+                ยังไม่มีดอกที่ถอดออก — ค่า VB จริงจะเปิดเผยหลังดอกถูกถอดและวัดเท่านั้น (ระหว่างใช้งานหน้าเว็บไม่แสดงค่าจริง)
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 text-center">
+                <div className="p-2 rounded-lg bg-gray-50">
+                  <p className="text-[11px] text-gray-500">ดอกที่ประเมินแล้ว</p>
+                  <p className="text-lg font-bold">{summary.completedTools}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-gray-50">
+                  <p className="text-[11px] text-gray-500">เปลี่ยนช้าเกินเกณฑ์</p>
+                  <p className={`text-lg font-bold ${summary.lateReplacements ? 'text-red-600' : 'text-emerald-600'}`}>{summary.lateReplacements}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-gray-50">
+                  <p className="text-[11px] text-gray-500">MAE ของ RUL</p>
+                  <p className="text-lg font-bold">{fmt(summary.meanAbsRulErrorMin, 2)} นาที</p>
+                </div>
+                <div className="p-2 rounded-lg bg-gray-50">
+                  <p className="text-[11px] text-gray-500">ใช้อายุดอกได้</p>
+                  <p className="text-lg font-bold">{fmt(summary.meanLifeUsedAtReplacePct, 0)}%</p>
+                </div>
               </div>
-              <div className="p-2 rounded-lg bg-gray-50">
-                <p className="text-[11px] text-gray-500">เปลี่ยนช้าเกินเกณฑ์</p>
-                <p className={`text-lg font-bold ${summary.lateReplacements ? 'text-red-600' : 'text-emerald-600'}`}>{summary.lateReplacements}</p>
-              </div>
-              <div className="p-2 rounded-lg bg-gray-50">
-                <p className="text-[11px] text-gray-500">MAE ของ RUL</p>
-                <p className="text-lg font-bold">{fmt(summary.meanAbsRulErrorMin, 2)} นาที</p>
-              </div>
-              <div className="p-2 rounded-lg bg-gray-50">
-                <p className="text-[11px] text-gray-500">ใช้อายุดอกได้</p>
-                <p className="text-lg font-bold">{fmt(summary.meanLifeUsedAtReplacePct, 0)}%</p>
-              </div>
-            </div>
-          )}
-        </Card>
+            )}
+          </Card>
+          <Card title="ตรวจใบมีดของดอกที่ถอด (4 ใบ/ดอก)" right={<Link to="/tool-vision" className="text-xs text-indigo-600 font-semibold">เปิดหน้าตรวจ →</Link>}>
+            {!vision ? (
+              <p className="text-xs text-gray-400">เชื่อมต่อบริการตรวจภาพไม่ได้</p>
+            ) : (
+              <ul className="space-y-2 text-xs">
+                {vision.map((v) => (
+                  <li key={v.machine} className="flex items-center justify-between">
+                    <span className="font-semibold text-gray-700">
+                      {v.machine_id}{' '}
+                      <span className="font-normal text-gray-400">
+                        · ดอก {v.tool_id ?? '—'} ·{' '}
+                        {v.cycle_inspection
+                          ? v.cycle_inspection.status === 'VERIFIED'
+                            ? 'ตรวจแล้ว'
+                            : 'ถอดแล้ว รอตรวจ'
+                          : v.rul?.state === 'COMPLETED'
+                          ? 'ถอดแล้ว'
+                          : 'อยู่บนเครื่อง'}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      {v.pending_review > 0 && (
+                        <Link to="/tool-vision?tab=review" className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
+                          รอยืนยัน {v.pending_review}
+                        </Link>
+                      )}
+                      {v.open_replacements > 0 ? (
+                        <Link to="/tool-vision?tab=replace" className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-semibold">
+                          เปลี่ยนใบมีด {v.open_replacements}
+                        </Link>
+                      ) : (
+                        <span className="text-emerald-600">ใบมีดปกติ</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
       </div>
     </div>
   );

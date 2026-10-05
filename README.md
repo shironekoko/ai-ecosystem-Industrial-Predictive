@@ -13,7 +13,8 @@
 3. **แบบจำลองเก็บใน MinIO** — backend ดึง `models/tool-rul/<version>/` ตรวจ sha256 และรันเวกเตอร์ทดสอบตัวเองก่อนใช้งาน ไม่มีแบบจำลองสำรอง/ค่าปลอม
 4. **Interlock + Alarms + Audit** — เมื่อระบบสั่ง REPLACE_NOW เครื่องหยุดป้อนรอผู้ควบคุม (เปลี่ยนดอก / ตัดต่อ) ทุกการตัดสินใจบันทึกใน Audit Trail
 5. **ไม่สปอยข้อมูล** — ระหว่างใช้งานไม่มีการส่ง VB, RUL จริง หรือชื่อไฟล์ (ซึ่งมี VB ฝังอยู่) ไปหน้าเว็บ ค่าจริงเปิดเผยใน Reports หลังถอดดอกเท่านั้น
-6. **Tool Image Wear (จองหน้าไว้)** — แบบจำลองประเมินการสึกจากภาพใบมีดจะพัฒนาโดยทีมอีกคน
+6. **Tool Inspection (Vision) ต่อจาก Machine Monitoring** — เมื่อแบบจำลอง RUL แจ้งดอกหมดอายุ (REPLACE_NOW) ผู้ควบคุมกด **“ถอดดอก → ตรวจใบมีด”** → ระบบถ่ายภาพ 4 ใบมีดของดอกนั้นทันที (ภาพตอนถอดดอกเท่านั้น) → YOLOv8n-cls (จาก MinIO) ชี้ว่าใบไหน sharp/used/dulled → **ผู้ตรวจยืนยันหรือแก้ label** → ใบที่ทื่อกลายเป็น **ใบสั่งเปลี่ยนใบมีดให้วิศวกร** (พร้อมเวลาตัดและคำแนะนำของ RUL ตอนถอด, alarm, CSV) → label ที่คนยืนยันเข้า pool → **retrain บน GPU worker** → ผ่าน gate แล้วผู้ดูแลกด promote
+   - เครื่องเดียวกัน ดอกเดียวกัน: M1/M2/M3 = ข้อมูลเซนเซอร์ LUH **T3/T6/T9** คู่กับภาพใบมีด Nonastreda **ดอก 8/9/10** (ไม่เคยใช้ฝึกทั้งคู่) · 1 รอบการใช้งานดอก (`cycle_id`) = ตรวจ 1 ครั้ง
 
 ---
 
@@ -29,6 +30,7 @@ ai-ecosystem-Industrial-Predictive/
 │   │   │   ├── luh_dataset.py#   อ่าน .h5 (ไม่อ่าน label VB ระหว่างสตรีม)
 │   │   │   ├── streamer.py   #   เล่นข้อมูลตามเวลาจริง, interlock, alarms, ประเมินผลหลังถอดดอก
 │   │   │   └── router.py     #   /api/v1/tool-life/*
+│   │   ├── tool_vision/      # ★ ตรวจใบมีดของดอกที่ถอด (ต่อจาก tool_life): ภาพตอนถอดดอก → AI → review → ใบสั่งเปลี่ยนใบมีด → retrain/promote
 │   │   ├── reports/          # สรุปผลเทียบค่าจริงของดอกที่ถอดแล้ว + CSV
 │   │   ├── alarms/ audit/ auth/ users/ profile/ storage/ labeling/ workers/ health/
 │   ├── scripts/publish_tool_rul_model.py   # อัปโหลดแบบจำลองขึ้น MinIO แล้วตั้งเป็น latest
@@ -48,6 +50,9 @@ ai-ecosystem-Industrial-Predictive/
 | | `GET /tool-life/model` · `GET /tool-life/model/versions` · `POST /tool-life/model/reload` | แบบจำลองที่โหลดจาก MinIO และทุกเวอร์ชันใน bucket |
 | | `POST /tool-life/predict` · `GET /tool-life/evaluations` | พยากรณ์จากฟีเจอร์รายรันที่ส่งมาเอง (stateless) · ผลประเมินหลังถอดดอก |
 | | `WS /tool-life/stream?waveform={m}` | `snapshot` / `run` / `event` / `frame` (สัญญาณดิบทุก 0.1 s ของเครื่องที่เลือก) |
+| **Tool Vision** | `GET /tool-vision/stations` · `GET /tool-vision/inspections` · `POST /tool-vision/inspections/{id}/review` · `POST /tool-vision/stations/{m}/capture` | รายการตรวจถูกสร้างอัตโนมัติเมื่อถอดดอก (`acknowledge replace`) → AI → ผู้ตรวจยืนยัน/แก้ · `capture` = ถ่ายซ้ำด้วยมือ (เฉพาะดอกที่ถอดแล้ว) |
+| | `GET /tool-vision/replacements` · `POST /tool-vision/replacements/{blade}/done` · `GET /tool-vision/replacements/export/csv` | งานเปลี่ยนใบมีดรายเครื่อง |
+| | `GET /tool-vision/stats` · `GET /tool-vision/model` · `GET /tool-vision/training/pool` · `POST /tool-vision/training/start` · `GET /tool-vision/training/jobs` · `POST /tool-vision/training/jobs/{id}/{promote\|reject}` | AI เทียบคน, retrain (ARQ + GPU), gate, promote |
 | **Reports** | `GET /reports/tool-life-summary` · `GET /reports/export/csv` | เทียบสิ่งที่ระบบบอกระหว่างใช้งานกับ VB ที่วัดจริงหลังถอดดอก |
 | **Alarms** | `GET /alarms` · `PATCH /alarms/{id}/read` · `POST /alarms/mark-all-read` · `DELETE /alarms/{id}` | แจ้งเตือนจากผลพยากรณ์จริง |
 | **Audit** | `GET /audit-logs` | การตัดสินใจของผู้ควบคุม (override / ถอดดอก) |
@@ -71,7 +76,13 @@ docker compose restart backend                          # (หรือกด "�
 - ชุดข้อมูล: วาง LUH milling dataset ไว้ที่ `dataset/Multivariate time series data of milling processes with varying tool wear and machine tools/…/filelist.csv` (หรือกำหนด `LUH_DATASET_DIR`)
 - ตัวแปรสภาพแวดล้อม: `TOOL_LIFE_AUTOSTART` (เริ่มสตรีมอัตโนมัติ), `TOOL_LIFE_HOLD_ON_REPLACE` (interlock), `TOOL_LIFE_STREAMS` (เช่น `1:3,2:6,3:9`)
 
-### ฝึกแบบจำลองใหม่
+### แบบจำลองภาพใบมีด (ครั้งแรก)
+```bash
+docker exec trainer-worker sh -c "cd /tmp && /app/.venv/bin/python /app/scripts/train_tool_vision.py"   # ฝึกดอก 1–6, val ดอก 7, สงวนดอก 8–10 → MinIO
+```
+ครั้งต่อไปใช้ปุ่ม **เริ่ม retrain** ในหน้า Tool Inspection (ใช้ label ที่ผู้ตรวจยืนยัน)
+
+### ฝึกแบบจำลอง RUL ใหม่
 ```bash
 cd timeseries_docs/tool_rul_forecast
 python extract_run_features.py "<โฟลเดอร์ที่มี filelist.csv>" run_features.csv 12

@@ -9,6 +9,7 @@ ReDoc: http://localhost:8000/redoc
 OpenAPI JSON: http://localhost:8000/openapi.json
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -51,6 +52,10 @@ tags_metadata = [
         "description": "จัดการ Background Jobs ผ่าน ARQ + Redis — สร้าง job, ดูสถานะ, ข้อมูล Redis",
     },
     {
+        "name": "Tool Vision (blade inspection)",
+        "description": "ตรวจใบมีด 4 ใบ/เครื่องจากภาพ (YOLOv8n-cls จาก MinIO) → ผู้ตรวจยืนยัน/แก้ label → งานเปลี่ยนใบมีด → retrain",
+    },
+    {
         "name": "Tool Life (RUL)",
         "description": "แบบจำลองอนุกรมเวลา (GRU) พยากรณ์อายุใช้งานที่เหลือของดอกกัด — โหลดจาก MinIO, "
                        "สตรีมข้อมูลจริงของชุดข้อมูล LUH (ดอกที่ไม่ได้ใช้ฝึก) ตามเวลาจริง",
@@ -71,9 +76,12 @@ async def lifespan(app: FastAPI):
     import app.features.auth.models  # noqa: F401
     import app.features.audit.models  # noqa: F401
     import app.features.alarms.models  # noqa: F401
+    import app.features.tool_vision.models  # noqa: F401
 
     try:
         Base.metadata.create_all(bind=engine)
+        from app.features.tool_vision.models import ensure_schema as ensure_vision_schema
+        ensure_vision_schema(engine)
         print("[OK] Database tables created")
 
         # Seed default accounts
@@ -128,7 +136,13 @@ async def lifespan(app: FastAPI):
 
     # ── Tool-life streaming: โหลดแบบจำลองจาก MinIO + เริ่มสตรีมดอกที่สงวนไว้ (ไม่ได้ใช้ฝึก) ตามเวลาจริง ──
     from app.features.tool_life.streamer import manager as tool_life_manager
+    from app.features.tool_vision.service import on_tool_removed
+    tool_life_manager.removal_listeners.append(on_tool_removed)   # ถอดดอกตอนหมดอายุ → ถ่ายภาพใบมีด → รอผู้ตรวจ
     await tool_life_manager.start()
+
+    # ── Tool vision: โหลดแบบจำลองภาพใบมีดจาก MinIO (ไม่บล็อกการเริ่มระบบ) ──
+    from app.features.tool_vision.registry import registry as vision_registry
+    asyncio.get_running_loop().run_in_executor(None, vision_registry.load)
 
     yield
 
@@ -207,6 +221,7 @@ from app.features.storage.router import router as storage_router
 from app.features.labeling.router import router as labeling_router
 from app.features.workers.router import router as workers_router
 from app.features.tool_life.router import router as tool_life_router
+from app.features.tool_vision.router import router as tool_vision_router
 from app.features.alarms.router import router as alarms_router
 from app.features.audit.router import router as audit_router
 from app.features.reports.router import router as reports_router
@@ -220,6 +235,7 @@ app.include_router(storage_router)
 app.include_router(labeling_router)
 app.include_router(workers_router)
 app.include_router(tool_life_router)
+app.include_router(tool_vision_router)
 app.include_router(alarms_router)
 app.include_router(audit_router)
 app.include_router(reports_router)
@@ -234,6 +250,7 @@ api_v1.include_router(storage_router)
 api_v1.include_router(labeling_router)
 api_v1.include_router(workers_router)
 api_v1.include_router(tool_life_router)
+api_v1.include_router(tool_vision_router)
 api_v1.include_router(alarms_router)
 api_v1.include_router(audit_router)
 api_v1.include_router(reports_router)

@@ -8,7 +8,7 @@ from core.minio_client import get_minio_client
 
 REQUIRED_BUCKETS: List[str] = [
     "profile-images",     # User avatars and profiles
-    "datasets",           # Industrial datasets (Nonastreda, parquet, force data)
+    "datasets",           # Industrial datasets
     "models",             # Versioned ML model checkpoints & weights
     "mlflow-artifacts",   # MLflow experiment tracking artifacts
     "qc-verified",        # Human-verified optical blade photos for Active Learning

@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>WTN-A12 Mini Project Progress-3 — CNC Tool Life AI Ecosystem</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 11mm 12mm 11mm 12mm; }
+  :root { --ink:#16181d; --ink2:#4a4f59; --muted:#7b808a; --line:#d9dce2; --acc:#2a5bd7; --acc2:#0f8a6b; --warn:#c2410c; --bg:#f4f6fa; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:#fff; color:var(--ink); }
+  body { font-family: "Sarabun", "Leelawadee UI", "Tahoma", sans-serif; font-size: 9.6pt; line-height: 1.38; }
+  h1 { font-size: 15.5pt; margin: 0; line-height: 1.2; }
+  h2 { font-size: 11.6pt; margin: 9px 0 4px; padding-bottom: 2px; border-bottom: 1.6px solid var(--acc); color: var(--acc); }
+  h3 { font-size: 10pt; margin: 7px 0 3px; color: var(--ink); }
+  p { margin: 2px 0 4px; }
+  ul, ol { margin: 2px 0 4px; padding-left: 16px; }
+  li { margin: 1px 0; }
+  .meta { display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 1px solid var(--line); padding-bottom: 5px; margin-bottom: 5px; }
+  .meta .sub { color: var(--ink2); font-size: 9.6pt; margin-top: 2px; }
+  .meta .right { text-align:right; font-size: 8.6pt; color: var(--ink2); line-height: 1.35; white-space: nowrap; padding-left: 10px; }
+  .blank { display:inline-block; min-width: 150px; border-bottom: 1px dotted var(--muted); }
+  table { width:100%; border-collapse: collapse; font-size: 8.5pt; margin: 3px 0 5px; }
+  th, td { border: 1px solid var(--line); padding: 2.4px 4px; vertical-align: top; text-align:left; }
+  th { background: var(--bg); font-weight: 600; }
+  td.n, th.n { text-align:right; white-space:nowrap; }
+  .best { font-weight: 700; color: var(--acc2); }
+  .bad { color: var(--warn); }
+  .fig { margin: 2px 0 2px; }
+  .cap { font-size: 8.3pt; color: var(--ink2); margin: 1px 0 4px; }
+  .cols { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .box { background: var(--bg); border-left: 3px solid var(--acc); padding: 4px 7px; margin: 4px 0; font-size: 9pt; }
+  .tag { display:inline-block; font-size:7.6pt; padding:0 4px; border-radius:3px; background:#e6edfb; color:var(--acc); font-weight:600; }
+  .tag.plan { background:#fdeee3; color: var(--warn); }
+  code { font-family: Consolas, monospace; font-size: 8.2pt; background:#f1f2f5; padding:0 2px; border-radius:2px; }
+  .pb { break-before: page; }
+  h2, h3 { break-after: avoid; }
+  table, .fig, .box, .cols, img { break-inside: avoid; }
+  img { max-width: 100%; }
+  svg text { font-family: "Sarabun", "Leelawadee UI", "Tahoma", sans-serif; }
+</style>
+</head>
+<body>
+
+<div class="meta">
+  <div>
+    <h1>CNC Tool Life AI Ecosystem — Mini Project Progress 3</h1>
+    <div class="sub">ระบบพยากรณ์อายุใช้งานที่เหลือของดอกกัดจากสัญญาณเครื่องจักร (Time-series) ร่วมกับการประเมินสภาพคมตัดจากภาพ (Vision)</div>
+  </div>
+  <div class="right">
+    WTN-A12 · 241-353 AI Ecosystem<br>
+    กลุ่ม: <span class="blank">&nbsp;</span><br>
+    สมาชิก: <span class="blank">&nbsp;</span><br>
+    4 ตุลาคม 2569
+  </div>
+</div>
+
+<h2>1. Dataflow and Ecosystem Design</h2>
+<p><b>โจทย์:</b> ดอกกัด CNC สึกหรอสะสมจนต้องเปลี่ยน ถ้าเปลี่ยนเร็วเกินไปจะทิ้งอายุดอกและหยุดเครื่องบ่อย ถ้าเปลี่ยนช้าเกินไป ผิวงานจะเสียหรือดอกแตก ระบบจึงต้องบอก <b>“อายุใช้งานที่เหลือ (RUL)”</b> ระหว่างผลิต โดยใช้ข้อมูลที่เครื่องบันทึกเองเท่านั้น ไม่ต้องหยุดเครื่องวัดรอยสึก VB <b>ระบบนิเวศประกอบด้วย AI 2 ตัว:</b> (1) <b>Time-series RUL service</b> พยากรณ์จากสัญญาณแรง/แรงบิดทุกแนวตัดแบบเวลาจริง (2) <b>Vision service</b> จำแนกสภาพคมตัดจากภาพหน้าคมมีด (SHARP/USED/DULLED) ใช้ยืนยันเมื่อหยุดเครื่องหรือถอดดอก และเป็นแหล่ง label ของการ retrain ในอนาคต</p>
+
+<div class="fig">
+<svg viewBox="0 0 900 478" width="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a4f59"/></marker>
+    <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2a5bd7"/></marker>
+    <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0f8a6b"/></marker>
+    <marker id="aro" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker>
+  </defs>
+  <style>
+    .lane{font-size:12.5px;font-weight:700;fill:#2a5bd7}
+    .bx{stroke-width:1.2}
+    .ts{fill:#eef3fd;stroke:#2a5bd7}
+    .vi{fill:#ecf7f3;stroke:#0f8a6b}
+    .st{fill:#f6f6f8;stroke:#7b808a}
+    .pl{fill:#fff7f1;stroke:#c2410c;stroke-dasharray:5 3}
+    .t{font-size:12.5px;font-weight:700;fill:#16181d}
+    .s{font-size:11px;fill:#4a4f59}
+    .ab{stroke:#2a5bd7;stroke-width:1.6;fill:none;marker-end:url(#arb)}
+    .ag{stroke:#0f8a6b;stroke-width:1.5;fill:none;marker-end:url(#arg)}
+    .a{stroke:#4a4f59;stroke-width:1.3;fill:none;marker-end:url(#ar)}
+    .ao{stroke:#c2410c;stroke-width:1.4;fill:none;stroke-dasharray:5 3;marker-end:url(#aro)}
+    .al{font-size:10.5px;fill:#4a4f59}
+  </style>
+  <text class="lane" x="10" y="16">① แหล่งข้อมูล (Edge)</text>
+  <text class="lane" x="232" y="16">② รับข้อมูล / Streaming</text>
+  <text class="lane" x="462" y="16">③ AI Services</text>
+  <text class="lane" x="712" y="16">④ แอปพลิเคชัน &amp; ผู้ใช้</text>
+
+  <!-- แถว A: time-series (ทำงานแล้ว) -->
+  <rect class="bx ts" rx="7" x="10" y="26" width="185" height="62"/>
+  <text class="t" x="20" y="45">CNC Controller (500 Hz)</text>
+  <text class="s" x="20" y="61">แรงบิด spindle · แรงมอเตอร์แกน X/Y</text>
+  <text class="s" x="20" y="76">ตำแหน่งดอก · เวลาตัดสะสม</text>
+  <rect class="bx ts" rx="7" x="10" y="96" width="185" height="50"/>
+  <text class="t" x="20" y="115">Dynamometer (25 kHz)</text>
+  <text class="s" x="20" y="132">แรงตัด Fx · Fy · Fz</text>
+  <rect class="bx ts" rx="7" x="232" y="26" width="200" height="120"/>
+  <text class="t" x="242" y="45">Stream Gateway (FastAPI)</text>
+  <text class="s" x="242" y="62">อ่าน .h5 จริงของดอก T3/T6/T9</text>
+  <text class="s" x="242" y="77">(ไม่เคยใช้ฝึก) เล่นตามเวลาจริง</text>
+  <text class="s" x="242" y="92">4.41 s/แนวตัด · เฟรม 10 Hz → WS</text>
+  <text class="s" x="242" y="107">จบแนว → ค่าเฉลี่ยช่วงตัดเสถียร</text>
+  <text class="s" x="242" y="122">7 สัญญาณ + เวลาตัด + ตำแหน่ง</text>
+  <text class="s" x="242" y="137">ไม่ส่ง VB/ชื่อไฟล์ (กันสปอย)</text>
+  <rect class="bx ts" rx="7" x="462" y="26" width="220" height="120"/>
+  <text class="t" x="472" y="45">Time-series RUL Service</text>
+  <text class="s" x="472" y="62">1) Causal outlier filter (Hampel)</text>
+  <text class="s" x="472" y="77">2) ฟีเจอร์เทียบค่าตั้งต้นของดอก</text>
+  <text class="s" x="472" y="92">3) GRU ensemble (29 แนว × 12)</text>
+  <text class="s" x="472" y="107">4) Physics: T_EOL คงที่ (median)</text>
+  <text class="s" x="472" y="122">5) RUL + P10–P90 + สถานะ</text>
+  <text class="s" x="472" y="137">6) นโยบาย OK→PLAN→REPLACE</text>
+  <rect class="bx ts" rx="7" x="712" y="26" width="180" height="120"/>
+  <text class="t" x="722" y="45">React Web (WebSocket)</text>
+  <text class="s" x="722" y="62">Tool Life Dashboard</text>
+  <text class="s" x="722" y="77">Machine Monitoring</text>
+  <text class="s" x="722" y="92">Model Registry · Reports</text>
+  <text class="s" x="722" y="107">Alarm · Interlock · Audit</text>
+  <text class="s" x="722" y="128" font-weight="700">Operator / Engineer / Admin</text>
+  <path class="ab" d="M195,57 L230,57"/><path class="ab" d="M195,121 L230,121"/>
+  <path class="ab" d="M432,86 L460,86"/>
+  <path class="ab" d="M682,86 L710,86"/>
+
+  <!-- แถว C: ที่เก็บข้อมูลและโมเดล -->
+  <text class="lane" x="10" y="205">⑤ Data &amp; Model</text>
+  <text class="lane" x="10" y="221">Stores</text>
+  <rect class="bx st" rx="7" x="232" y="182" width="200" height="66"/>
+  <text class="t" x="242" y="200">MinIO (S3) = Model registry</text>
+  <text class="s" x="242" y="216">models/tool-rul/&lt;ver&gt; (npz+json)</text>
+  <text class="s" x="242" y="230">models/yolov8_tool_wear · images</text>
+  <text class="s" x="242" y="243">datasets (label หลังถอดดอก)</text>
+  <rect class="bx st" rx="7" x="462" y="182" width="105" height="66"/>
+  <text class="t" x="471" y="200">PostgreSQL</text>
+  <text class="s" x="471" y="216">users · alarms</text>
+  <text class="s" x="471" y="230">audit · ผลประเมิน</text>
+  <rect class="bx st" rx="7" x="577" y="182" width="105" height="66"/>
+  <text class="t" x="586" y="200">Redis + ARQ</text>
+  <text class="s" x="586" y="216">job queue</text>
+  <text class="s" x="586" y="230">worker status</text>
+  <rect class="bx st" rx="7" x="712" y="182" width="180" height="66"/>
+  <text class="t" x="722" y="200">MLflow</text>
+  <text class="s" x="722" y="216">experiment tracking</text>
+  <text class="s" x="722" y="230">metrics · params · artifacts</text>
+  <path class="ab" d="M405,182 C405,164 485,166 485,148"/>
+  <text class="al" x="242" y="168">โหลดโมเดล (sha256 + self-test)</text>
+  <path class="a" d="M530,146 L530,180"/>
+  <text class="al" x="536" y="168">alarm · audit</text>
+
+  <!-- แถว B: vision -->
+  <rect class="bx vi" rx="7" x="10" y="272" width="185" height="56"/>
+  <text class="t" x="20" y="292">Optical bench / กล้อง</text>
+  <text class="s" x="20" y="308">ภาพหน้าคมมีด (flank) 4 คม</text>
+  <text class="s" x="20" y="321">+ VB ที่วัดหลังถอดดอก</text>
+  <rect class="bx vi" rx="7" x="232" y="272" width="200" height="56"/>
+  <text class="t" x="242" y="292">Image Ingest API</text>
+  <text class="s" x="242" y="308">อัปโหลดภาพ → MinIO</text>
+  <text class="s" x="242" y="321">ส่งงานเข้าคิว (ARQ)</text>
+  <rect class="bx vi" rx="7" x="462" y="272" width="220" height="56"/>
+  <text class="t" x="472" y="292">Vision Worker <tspan font-size="10" fill="#c2410c">(กำลังรวมระบบ)</tspan></text>
+  <text class="s" x="472" y="308">YOLOv8n-cls 224×224 · 3 MB</text>
+  <text class="s" x="472" y="321">→ SHARP / USED / DULLED</text>
+  <rect class="bx vi" rx="7" x="712" y="272" width="180" height="56"/>
+  <text class="t" x="722" y="292">Tool Image Wear page</text>
+  <text class="s" x="722" y="308">ผลจากภาพ + การยืนยัน</text>
+  <text class="s" x="722" y="321">ของวิศวกร (HITL)</text>
+  <path class="ag" d="M195,300 L230,300"/><path class="ag" d="M432,300 L460,300"/><path class="ag" d="M682,300 L710,300"/>
+  <path class="ag" d="M332,272 L332,250"/>
+  <path class="ag" d="M630,272 L630,250"/>
+
+  <!-- แถว D: MLOps -->
+  <text class="lane" x="10" y="358">⑥ MLOps / Retrain loop</text>
+  <rect class="bx st" rx="7" x="10" y="366" width="185" height="58"/>
+  <text class="t" x="20" y="385">Offline training</text>
+  <text class="s" x="20" y="401">experiments_rul.py (GPU)</text>
+  <text class="s" x="20" y="415">nested selection + LOTO</text>
+  <rect class="bx pl" rx="7" x="232" y="366" width="200" height="58"/>
+  <text class="t" x="242" y="385">ถอดดอก → วัด VB / ยืนยันภาพ</text>
+  <text class="s" x="242" y="401">human-in-the-loop → label ใหม่</text>
+  <text class="s" x="242" y="415">เก็บเข้า MinIO datasets</text>
+  <rect class="bx pl" rx="7" x="462" y="366" width="220" height="58"/>
+  <text class="t" x="472" y="385">Retrain Worker (ARQ, GPU)</text>
+  <text class="s" x="472" y="401">ฝึกใหม่ → ประเมิน LOTO (gate)</text>
+  <text class="s" x="472" y="415">ไม่แย่กว่าเดิม + %late = 0</text>
+  <rect class="bx pl" rx="7" x="712" y="366" width="180" height="58"/>
+  <text class="t" x="722" y="385">Publish &amp; Reload</text>
+  <text class="s" x="722" y="401">version ใหม่ → MinIO + MLflow</text>
+  <text class="s" x="722" y="415">shadow mode → latest.json</text>
+  <path class="ab" d="M195,380 L213,380 L213,215 L230,215"/>
+  <text class="al" x="20" y="440">↑ publish_tool_rul_model.py</text>
+  <path class="ao" d="M780,330 L780,346 L340,346 L340,364"/>
+  <text class="al" x="452" y="342">ผลหลังถอดดอก (Reports) / ภาพที่ยืนยันแล้ว → label</text>
+  <path class="ao" d="M432,395 L460,395"/><path class="ao" d="M682,395 L710,395"/>
+  <path class="ao" d="M892,390 L898,390 L898,215 L894,215"/>
+  <text class="al" x="232" y="466" font-weight="700">เส้นทึบ = ทำงานแล้ว (น้ำเงิน: time-series · เขียว: vision) · เส้นประสีส้ม = แผนระยะถัดไป (retrain)</text>
+</svg>
+</div>
+<div class="cap">รูปที่ 1 Ecosystem: Time-series RUL service ทำงานแบบเวลาจริง (แถวบน) · ที่เก็บข้อมูลและโมเดล (MinIO เป็น model registry) · Vision service อยู่ระหว่างรวมระบบ · วงจร MLOps/retrain (แถวล่าง, แผน)</div>
+
+<h3>1.1 Dataflow ของเส้นทางออนไลน์ (Time-series RUL)</h3>
+<table>
+  <tr><th style="width:3%">#</th><th style="width:17%">ขั้นตอน</th><th style="width:43%">ข้อมูล / การประมวลผล</th><th style="width:18%">ความถี่ / ขนาด</th><th style="width:19%">Component → ปลายทาง</th></tr>
+  <tr><td>1</td><td>รับสัญญาณ</td><td>Fx, Fy, Fz (dynamometer) + แรงบิด spindle, แรง/แรงบิดมอเตอร์แกน X/Y, ตำแหน่ง (controller) ของ 1 แนวตัด</td><td>25 kHz + 500 Hz · ≈4.4 s/แนว</td><td>Stream Gateway (.h5 จริง)</td></tr>
+  <tr><td>2</td><td>สัญญาณสด</td><td>ย่อเป็น 500 Hz, ≤ 50 จุด/สัญญาณ/เฟรม ส่งเฉพาะเครื่องที่ผู้ใช้เปิดดู</td><td>10 เฟรม/วินาที</td><td>WebSocket → Machine Monitoring</td></tr>
+  <tr><td>3</td><td>ฟีเจอร์รายแนว</td><td>ค่าเฉลี่ยในช่วงตัดเสถียร (y 5–90 mm) 7 ค่า → <b>causal Hampel filter</b> (ดูอดีตเท่านั้น) → % เปลี่ยนจากค่าตั้งต้นของดอก (29 แนวแรกหลัง break-in) + เวลาตัดสะสม + เครื่อง + ตำแหน่งแนวตัด</td><td>1 เวกเตอร์ 12 ค่า/แนว</td><td>runtime (โค้ดเดียวกับตอนฝึก)</td></tr>
+  <tr><td>4</td><td>พยากรณ์</td><td>หน้าต่าง 29 แนวล่าสุด (= 1 ชั้นงาน = 1 คาบฤดูกาล) → GRU ensemble 5 ตัว → เวลาถึง VB 103 / 140 µm → ข้อจำกัดฟิสิกส์ T<sub>EOL</sub> คงที่ → RUL, P10–P90, สถานะ, คำแนะนำ</td><td>~1.6 ms/แนว (numpy)</td><td>WebSocket + REST → Dashboard</td></tr>
+  <tr><td>5</td><td>การตัดสินใจ</td><td>คำแนะนำยกระดับ → alarm (INFO/WARNING/CRITICAL); REPLACE_NOW → <b>interlock หยุดป้อน</b> รอผู้ควบคุม “ถอดดอก/ตัดต่อ” → บันทึก audit</td><td>ตามเหตุการณ์</td><td>PostgreSQL (alarms, audit)</td></tr>
+  <tr><td>6</td><td>หลังถอดดอก</td><td>เปิดเผย VB จริง (วัดหลังถอดดอก) → เทียบสิ่งที่ระบบบอกระหว่างใช้งาน: MAE, เวลาที่สั่งเปลี่ยนเทียบหมดอายุจริง → label สำหรับ retrain</td><td>1 ครั้ง/ดอก</td><td>Reports, JSONL → (แผน) MinIO datasets</td></tr>
+  <tr><td>7</td><td>วงจรชีวิตโมเดล</td><td>ฝึกออฟไลน์ → npz (น้ำหนัก + เวกเตอร์ทดสอบตัวเอง) + json (อินพุต, เกณฑ์, ดอกฝึก/ดอกสงวน, ช่วงความเชื่อมั่น, sha256) → MinIO → backend ตรวจ sha256 + self-test ก่อนใช้</td><td>114 KB/เวอร์ชัน</td><td>MinIO <code>models/tool-rul/</code></td></tr>
+</table>
+
+<h3>1.2 หลักการออกแบบ</h3>
+<div class="cols">
+<ul>
+  <li><b>อินพุตที่โรงงานมีจริง:</b> ไม่ใช้ VB เป็นอินพุต (ต้องถอดดอกไปส่องกล้อง) VB ใช้เป็น label ตอนฝึกเท่านั้น</li>
+  <li><b>Causal ทั้งเส้นทาง + โค้ดเดียวกัน:</b> ตัวกรอง outlier, ฟีเจอร์ และข้อจำกัดฟิสิกส์ใช้เฉพาะข้อมูลอดีต ไฟล์ <code>runtime.py</code> ใน backend ตรงกับที่ใช้สร้างชุดฝึก (มี test บังคับ)</li>
+  <li><b>ไม่สปอยข้อมูล:</b> ดอกที่สตรีมไม่เคยใช้ฝึก ไม่ส่ง VB, RUL จริง หรือชื่อไฟล์ไปหน้าเว็บจนกว่าจะถอดดอก</li>
+</ul>
+<ul>
+  <li><b>Model registry บน MinIO:</b> แยกเวอร์ชัน มี <code>latest.json</code> สลับ/ย้อนเวอร์ชันได้ ไม่มีโมเดลสำรองหรือค่าสมมุติ ถ้าโหลดไม่ได้จะแจ้งว่าไม่พร้อม</li>
+  <li><b>Human-in-the-loop:</b> AI เป็นผู้แนะนำ คนตัดสินใจ (interlock + audit) และ vision ใช้ยืนยันสภาพคมตัด</li>
+  <li><b>Modular:</b> backend แบ่งตาม feature ใน docker compose (FastAPI, React, MinIO, PostgreSQL, Redis/ARQ, MLflow) จึงเพิ่ม vision/retrain worker ได้โดยไม่กระทบ service เดิม</li>
+</ul>
+</div>
+
+<h2>2. Experiment Design</h2>
+<h3>2.1 คำถามการทดลองและสมมติฐาน</h3>
+<table>
+  <tr><th style="width:5%">#</th><th style="width:52%">สมมติฐาน</th><th>การทดลองที่ใช้ตอบ</th></tr>
+  <tr><td>H1</td><td>แบบจำลองอนุกรมเวลาที่ <b>พยากรณ์ RUL โดยตรง</b> แม่นกว่าการพยากรณ์ VB ก่อนแล้วหาจุดตัดเกณฑ์ และไม่แย่กว่าอายุเฉลี่ยของเครื่อง</td><td>LOTO: GRU direct-RUL vs StateSpace vs Fleet reference</td></tr>
+  <tr><td>H2</td><td>ข้อจำกัดฟิสิกส์ “เวลาหมดอายุของดอกคงที่” ลดความคลาดและการพยากรณ์อายุเกินจริง</td><td>Ablation: เปิด/ปิด EOLTracker</td></tr>
+  <tr><td>H3</td><td>เซนเซอร์ให้ข้อมูลเพิ่มจากเวลาตัด + เครื่อง เมื่อควบคุม overfitting ได้</td><td>Ablation อินพุต + nested selection ของ noise augmentation</td></tr>
+  <tr><td>H4</td><td>Vision แยกสภาพคมตัดของดอกที่ไม่เคยเห็นได้ ≥ 80% (top-1)</td><td>YOLOv8n-cls, held-out Tool 10</td></tr>
+  <tr><td>H5</td><td>ระบบสตรีมจริงให้ผลเหมือนการประเมินออฟไลน์ (ไม่มี train/serve skew)</td><td>Parity test + เล่น T3/T6/T9 ผ่านระบบจริงตามเวลาจริง</td></tr>
+</table>
+
+<h3>2.2 ชุดข้อมูลและการแบ่งข้อมูล (กัน data leakage)</h3>
+<table>
+  <tr><th style="width:15%">งาน</th><th style="width:37%">ชุดข้อมูล / label</th><th>การแบ่ง</th></tr>
+  <tr><td>Time-series RUL</td><td>LUH milling (Denkena et al., 2023): 9 ดอก × 3 เครื่อง, 6,418 แนวตัด, run-to-failure · label = เวลาที่ VB ข้าม 140 µm (หมดอายุ) และ 103 µm (เริ่มสึกเร่ง จาก SETAR) · VB ตามนิยาม ISO 8688-2</td><td>(1) <b>ตามดอก:</b> ฝึก production T1,T2,T4,T5,T7,T8 · <b>สงวน T3,T6,T9</b> ไว้สตรีม (2) <b>Leave-one-tool-out</b> 9 รอบ (3) <b>80:20 ตามเวลา</b>ภายในดอก (20% ท้าย = ช่วงตัดสินใจ: 4,750 / 1,184 แนว) (4) Leave-one-machine-out = เครื่องใหม่</td></tr>
+  <tr><td>Vision</td><td>Nonastreda <code>tool/</code>: ภาพกล้องจุลทรรศน์หน้าคมมีด 3 คลาส (sharp / used / dulled)</td><td>ฝึก 456 ภาพ (ดอก 1–9) · ทดสอบ 56 ภาพของ <b>Tool 10</b> ที่ไม่เคยเห็น (ไม่สุ่มแบ่งภาพ เพื่อกันการจำตำหนิเฉพาะดอก)</td></tr>
+</table>
+
+<div class="fig"><svg viewBox="0 0 900 162" width="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="pb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2a5bd7"/></marker>
+    <marker id="pg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0f8a6b"/></marker>
+    <marker id="po" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker>
+  </defs>
+  <style>
+    .pt{fill:#eef3fd;stroke:#2a5bd7;stroke-width:1.2}
+    .ph{fill:#fff7f1;stroke:#c2410c;stroke-width:1.2}
+    .pv{fill:#ecf7f3;stroke:#0f8a6b;stroke-width:1.2}
+    .h{font-size:11.5px;font-weight:700;fill:#16181d}
+    .d{font-size:10.5px;fill:#4a4f59}
+    .ab{stroke:#2a5bd7;stroke-width:1.5;fill:none;marker-end:url(#pb)}
+    .ag{stroke:#0f8a6b;stroke-width:1.5;fill:none;marker-end:url(#pg)}
+    .ao{stroke:#c2410c;stroke-width:1.5;fill:none;marker-end:url(#po)}
+    .lb{font-size:10.5px;font-weight:700;fill:#2a5bd7}
+  </style>
+  <!-- แถว 1: เลือกแบบจำลอง + ฝึก production -->
+  <rect class="pt" rx="6" x="5" y="18" width="140" height="38"/>
+  <text class="h" x="13" y="33">ข้อมูล LUH</text><text class="d" x="13" y="49">9 ดอก × 3 เครื่อง · 6,418 แนว</text>
+  <rect class="pt" rx="6" x="165" y="18" width="150" height="38"/>
+  <text class="h" x="173" y="33">ดอกฝึก 6 ดอก</text><text class="d" x="173" y="49">T1, T2, T4, T5, T7, T8</text>
+  <rect class="pt" rx="6" x="335" y="18" width="170" height="38"/>
+  <text class="h" x="343" y="33">Nested LOTO (เฉพาะ 6 ดอก)</text><text class="d" x="343" y="49">เลือกรูปแบบ GRU → direct+noise</text>
+  <rect class="pt" rx="6" x="525" y="18" width="180" height="38"/>
+  <text class="h" x="533" y="33">ฝึก production (5 seeds)</text><text class="d" x="533" y="49">export npz/json → MinIO</text>
+  <rect class="pt" rx="6" x="725" y="18" width="170" height="38"/>
+  <text class="h" x="733" y="33">Backend โหลดโมเดล</text><text class="d" x="733" y="49">ตรวจ sha256 + self-test</text>
+  <path class="ab" d="M145,37 L163,37"/><path class="ab" d="M315,37 L333,37"/><path class="ab" d="M505,37 L523,37"/><path class="ab" d="M705,37 L723,37"/>
+  <!-- แถว 2: เปรียบเทียบ + ทดสอบกับดอกที่สงวนไว้ -->
+  <rect class="pt" rx="6" x="5" y="70" width="140" height="38"/>
+  <text class="h" x="13" y="85">LOTO 9 รอบ + 80:20</text><text class="d" x="13" y="101">เทียบ 3 โมเดล + ablation</text>
+  <rect class="ph" rx="6" x="165" y="70" width="150" height="38"/>
+  <text class="h" x="173" y="85">ดอกสงวน T3, T6, T9</text><text class="d" x="173" y="101">ไม่ใช้ฝึก/เลือก/ปรับเทียบ</text>
+  <rect class="ph" rx="6" x="335" y="70" width="370" height="38"/>
+  <text class="h" x="343" y="85">สตรีม .h5 ตามเวลาจริงผ่านระบบ → พยากรณ์ทุกแนวตัด</text><text class="d" x="343" y="101">หน้าเว็บไม่เห็น VB / RUL จริง · interlock เมื่อ REPLACE_NOW</text>
+  <rect class="ph" rx="6" x="725" y="70" width="170" height="38"/>
+  <text class="h" x="733" y="85">ถอดดอก → เปิดเผย VB</text><text class="d" x="733" y="101">ประเมินผล (Reports)</text>
+  <path class="ab" d="M75,56 L75,68"/>
+  <path class="ao" d="M120,56 L180,68"/>
+  <path class="ao" d="M315,89 L333,89"/><path class="ao" d="M705,89 L723,89"/>
+  <path class="ab" d="M760,56 L690,68"/>
+  <!-- แถว 3: vision -->
+  <rect class="pv" rx="6" x="5" y="122" width="140" height="36"/>
+  <text class="h" x="13" y="137">Nonastreda tool/</text><text class="d" x="13" y="152">ภาพหน้าคมมีด 3 คลาส</text>
+  <rect class="pv" rx="6" x="165" y="122" width="150" height="36"/>
+  <text class="h" x="173" y="137">ฝึก 456 ภาพ (ดอก 1–9)</text><text class="d" x="173" y="152">augmentation · AdamW</text>
+  <rect class="pv" rx="6" x="335" y="122" width="170" height="36"/>
+  <text class="h" x="343" y="137">YOLOv8n-cls (transfer)</text><text class="d" x="343" y="152">20 epochs · AMP · MLflow</text>
+  <rect class="pv" rx="6" x="525" y="122" width="180" height="36"/>
+  <text class="h" x="533" y="137">ทดสอบ Tool 10 (56 ภาพ)</text><text class="d" x="533" y="152">ดอกที่ไม่เคยเห็น</text>
+  <rect class="pv" rx="6" x="725" y="122" width="170" height="36"/>
+  <text class="h" x="733" y="137">Top-1 · F1 รายคลาส</text><text class="d" x="733" y="152">latency · confusion matrix</text>
+  <path class="ag" d="M145,140 L163,140"/><path class="ag" d="M315,140 L333,140"/><path class="ag" d="M505,140 L523,140"/><path class="ag" d="M705,140 L723,140"/>
+  <text class="lb" x="5" y="11">Time-series RUL</text>
+  <text class="lb" x="5" y="119" fill="#0f8a6b" style="fill:#0f8a6b">Vision</text>
+</svg></div>
+<div class="cap">รูปที่ 2 โปรโตคอลการทดลอง: เลือกโครงสร้างจากดอกฝึกเท่านั้น (nested) → เทียบแบบจำลองด้วย leave-one-tool-out → ทดสอบโมเดลจริงกับดอกที่สงวนไว้ผ่านระบบสตรีม · vision ใช้ดอกที่ไม่เคยเห็นเป็นชุดทดสอบเช่นกัน</div>
+
+<h3>2.3 แบบจำลอง ตัวแปร และการควบคุมการทดลอง</h3>
+<ul>
+  <li><b>Time-series (3 แบบ):</b> <i>Fleet reference</i> = อายุเฉลี่ยของเครื่อง − เวลาตัด (baseline) · <i>StateSpace</i> = VB แฝง + Gamma increments + particle filter 4,000 อนุภาค → เวลาข้ามเกณฑ์ (ทางอ้อม) · <i>GRU direct-RUL</i> = GRU 1 ชั้น hidden 32 อ่านหน้าต่าง 29 แนว × 12 ฟีเจอร์ → softplus 2 หัว, loss L1, Adam 30 epochs, ensemble 3 ตัว (production 5 ตัว)</li>
+  <li><b>ตัวแปรต้นที่ทดสอบ:</b> รูปแบบ GRU 4 แบบ (direct / +noise σ=1 / ปรับแก้อายุอ้างอิง / ทั้งคู่) เลือกแบบ <b>nested LOTO บนดอกฝึก 6 ดอกเท่านั้น</b> · ablation อินพุต (เวลา+เครื่อง / เซนเซอร์+เวลา / ครบ) · ข้อจำกัดฟิสิกส์เปิด/ปิด · การจัดการ outlier (causal / STL / ไม่จัดการ)</li>
+  <li><b>ควบคุม:</b> seed คงที่, normalization และช่วงความเชื่อมั่นคำนวณจากดอกฝึกเท่านั้น, เงื่อนไขการตัดเดียวกันทุกดอก</li>
+  <li><b>Vision:</b> YOLOv8n-cls (transfer learning จาก ImageNet) 224×224, augmentation (flip, หมุน ±10°, scale ±10%, HSV), AdamW + weight decay 5e-4, cosine LR + warmup 2 epochs, AMP, 20 epochs, บันทึกผลใน MLflow</li>
+</ul>
+
+<h3>2.4 ตัวชี้วัด</h3>
+<p><b>RUL (นาทีของเวลาตัด):</b> MAE / RMSE / Bias ทั้งอายุและช่วง 20% ท้าย · <b>%late</b> = สัดส่วนแนวที่พยากรณ์อายุเกินจริง &gt; 1 ชั้นงาน (2.73 นาที) ซึ่งเป็นความเสี่ยงหลัก · accuracy / macro-F1 ของสถานะ · <b>decision replay</b> (เวลาที่สั่ง REPLACE_NOW เทียบหมดอายุจริง, % อายุดอกที่ใช้, เวลาที่แจ้งวางแผนล่วงหน้า) · ความครอบคลุมของ P10–P90 · Wilcoxon รายดอก
+<b>Vision:</b> top-1, macro-F1, precision/recall รายคลาส, latency · <b>ระบบ:</b> ความคลาดของจังหวะสตรีม (วินาที/แนว), parity ระหว่าง backend กับออฟไลน์, pytest</p>
+
+<h3>2.5 ผลการทดลองถึงปัจจุบัน</h3>
+<div class="cols">
+<div>
+<table>
+  <tr><th>RUL, leave-one-tool-out</th><th class="n">MAE ทั้งอายุ</th><th class="n">MAE 20% ท้าย</th><th class="n">%late</th></tr>
+  <tr><td>Fleet reference</td><td class="n">1.16</td><td class="n best">0.90</td><td class="n">0</td></tr>
+  <tr><td>StateSpace (ทางอ้อม)</td><td class="n">1.58</td><td class="n">1.75</td><td class="n bad">13.3</td></tr>
+  <tr><td><b>GRU direct-RUL</b></td><td class="n best">1.11</td><td class="n">0.91</td><td class="n best">0</td></tr>
+  <tr><td>· ไม่มีข้อจำกัดฟิสิกส์</td><td class="n">1.28</td><td class="n">1.28</td><td class="n">0</td></tr>
+  <tr><td>· ไม่มีเซนเซอร์</td><td class="n">1.31</td><td class="n">0.94</td><td class="n">0</td></tr>
+  <tr><td>· ไม่ใช้ noise (nested, 6 ดอก)</td><td class="n">2.04</td><td class="n">1.74</td><td class="n bad">5.5</td></tr>
+</table>
+</div>
+<div>
+<table>
+  <tr><th>ดอกที่สงวนไว้ (ไม่เคยใช้ฝึก)</th><th class="n">T3</th><th class="n">T6</th><th class="n">T9</th></tr>
+  <tr><td>MAE ของ RUL (นาที)</td><td class="n">2.29</td><td class="n">1.63</td><td class="n">0.55</td></tr>
+  <tr><td>REPLACE_NOW (นาที)</td><td class="n">50.9</td><td class="n">77.9</td><td class="n">49.6</td></tr>
+  <tr><td>หมดอายุจริง (นาที)</td><td class="n">57.9</td><td class="n">84.0</td><td class="n">53.5</td></tr>
+  <tr><td>ใช้อายุดอก</td><td class="n">88%</td><td class="n">93%</td><td class="n">93%</td></tr>
+</table>
+<table>
+  <tr><th>Vision (Tool 10, 56 ภาพ)</th><th class="n">ผล</th></tr>
+  <tr><td>Top-1 / macro-F1</td><td class="n">83.9% / 80.4%</td></tr>
+  <tr><td>SHARP recall · DULLED precision</td><td class="n">100% · 100%</td></tr>
+  <tr><td>Latency (GPU / รวม I/O)</td><td class="n">3.9 / 38 ms</td></tr>
+</table>
+</div>
+</div>
+<div class="fig"><img src="fig_heldout_stream.png" alt="held-out RUL"></div>
+<div class="cap">รูปที่ 3 RUL ที่ระบบรายงานระหว่างสตรีมดอกที่ไม่เคยใช้ฝึก (เส้นน้ำเงิน + ช่วง P10–P90) เทียบ RUL จริงที่เปิดเผยหลังถอดดอก (เส้นดำ) และเวลาที่สั่ง REPLACE_NOW (เส้นแดง)</div>
+<div class="box"><b>ข้อสรุป:</b> H1 ✓ (direct-RUL แม่นกว่าทางอ้อมชัดเจนและไม่เคยพยากรณ์เกินจริง แต่ชนะ baseline เพียงเล็กน้อย Wilcoxon p = 0.50 เพราะเงื่อนไขการตัดคงที่ อายุดอกในเครื่องเดียวกันต่างกันแค่ 0.7–3%) · H2 ✓ · H3 ✓ (เมื่อใช้ noise augmentation) · H4 ✓ (ผิดพลาดเฉพาะรอยต่อ USED/DULLED) · H5 ✓ (สตรีมจริง 4.41 s/แนว ตรงความยาวไฟล์ ผลรายแนวเท่ากับออฟไลน์ และเวลา REPLACE_NOW ของ T3/T6/T9 บนระบบจริงตรงกับตาราง pytest 5/5) · <b>ข้อจำกัด:</b> เครื่องใหม่ที่ไม่มีประวัติคลาด 11–24 นาที และข้อมูลมีเพียง 9 ดอก</div>
+
+<h3>2.6 การทดลองระยะถัดไป</h3>
+<ol>
+  <li><b>รวม Vision เข้าระบบ:</b> ย้ายโมเดล YOLOv8 ขึ้น MinIO/registry แบบเดียวกับ RUL, ต่อ vision worker กับหน้า Tool Image Wear และวัด end-to-end latency/accuracy บนภาพที่อัปโหลดจริง</li>
+  <li><b>Retrain pipeline</b> <span class="tag plan">แผน</span>: trigger เมื่อมีดอกที่ถอดแล้ว ≥ N ดอก (label จาก VB หรือภาพที่วิศวกรยืนยัน) → ARQ GPU worker ฝึกใหม่ → <b>gate</b> = LOTO MAE ไม่แย่กว่าเวอร์ชันเดิม และ %late = 0 → shadow mode คู่กับเวอร์ชันเดิม → publish (MinIO + MLflow) → สลับ <code>latest.json</code></li>
+  <li><b>ทดสอบความทนทาน:</b> เครื่องใหม่ (few-shot calibration), drift ของสัญญาณ และเกณฑ์นโยบาย P10 ที่ต่างกัน (ต้นทุนดอก vs ความเสี่ยงงานเสีย)</li>
+</ol>
+
+</body>
+</html>

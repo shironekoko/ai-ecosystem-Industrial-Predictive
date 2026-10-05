@@ -412,7 +412,7 @@ export const DashboardPage: React.FC = () => {
                       )}
                       {v.open_replacements > 0 ? (
                         <Link to="/tool-vision?tab=replace" className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-semibold">
-                          เปลี่ยนใบมีด {v.open_replacements}
+                          ใบสั่งงาน {v.open_replacements}
                         </Link>
                       ) : (
                         <span className="text-emerald-600">ใบมีดปกติ</span>

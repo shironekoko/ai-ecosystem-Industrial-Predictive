@@ -8,7 +8,8 @@
 | `reports/` | สรุปผลเทียบค่าจริงของดอกที่ถอดแล้ว + CSV |
 | `alarms/` · `audit/` | แจ้งเตือนจากผลพยากรณ์ · บันทึกการตัดสินใจของผู้ควบคุม (Postgres) |
 | `auth/` · `users/` · `profile/` | JWT, RBAC, โปรไฟล์ |
-| `storage/` · `labeling/` · `workers/` · `health/` | MinIO, Label Studio, ARQ jobs, สถานะระบบ |
+| `tool_vision/` | ★ วัด VB ของใบมีดจากภาพ (ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงานระดับดอก → retrain |
+| `workers/` · `health/` | ARQ worker ของ trainer-worker (retrain บน GPU) · สถานะ DB/Redis/MinIO |
 
 ข้อมูลเข้า → พยากรณ์ (ทุกแนวตัด): `luh_dataset.read_run` (h5 จริง) → `luh_dataset.run_features` → `runtime.FeatureState` (ตัวกรอง outlier แบบ causal + ค่าตั้งต้นของดอก) → `runtime.GRUEnsemble.predict` (แบบจำลองจาก MinIO) → `runtime.EOLTracker` → ช่วง P10–P90 → สถานะ/คำแนะนำ → WebSocket + alarm
 

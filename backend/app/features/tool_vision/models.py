@@ -2,8 +2,8 @@
 
 inspection 1 ครั้ง = ถ่ายภาพ 4 ใบมีดของดอกที่ถอดจากเครื่อง 1 เครื่อง เมื่อ Machine Monitoring แจ้งหมดอายุ
   (1 รอบการใช้งานดอก = cycle_id เดียวกับสตรีมของ Machine Monitoring = ตรวจ 1 ครั้ง)
-  → AI จำแนกแต่ละใบ → ผู้ตรวจยืนยัน/แก้ label → ใบที่ทื่อ (dulled) กลายเป็นงานเปลี่ยนใบมีด
-  → label ที่คนยืนยันแล้วเข้า pool สำหรับ retrain
+  → AI วัด VB (µm) ของแต่ละใบ → ผู้ตรวจยอมรับค่า AI หรือวัดจริง → ใบที่ VB ≥ 140 µm ต้องเปลี่ยน, 103–140 µm ควรเปลี่ยน
+  → ค่าที่วัดจริงเข้า pool สำหรับ retrain
 """
 from datetime import datetime
 
@@ -27,7 +27,8 @@ class VisionInspection(Base):
     captured_by = Column(String(150), nullable=False)
     captured_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     model_version = Column(String(80), nullable=False)
-    ai_verdict = Column(String(12), nullable=False)            # OK | MONITOR | REPLACE
+    ai_verdict = Column(String(12), nullable=False)            # OK | MONITOR | REPLACE (จาก VB เฉลี่ย 4 ใบ)
+    ai_summary = Column(Text, nullable=True)                   # JSON ระดับดอกจากค่า AI: mean_vb, P10–P90, ใบที่สึกมากสุด
     status = Column(String(20), nullable=False, default="PENDING_REVIEW")   # PENDING_REVIEW | VERIFIED | ARCHIVED
     final_verdict = Column(String(12), nullable=True)
     reviewed_by = Column(String(150), nullable=True)
@@ -43,13 +44,18 @@ class VisionBlade(Base):
     blade = Column(Integer, nullable=False)
     image_key = Column(String(255), nullable=False)            # object ใน MinIO bucket inspections
     image_ref = Column(String(40), nullable=True)              # รหัสภาพในชุดข้อมูล (ภายใน)
-    pred_label = Column(String(10), nullable=False)
-    confidence = Column(Float, nullable=False)
-    probs = Column(Text, nullable=False)                       # JSON {sharp, used, dulled}
-    metrology = Column(Text, nullable=True)                    # JSON ค่าที่ optical bench วัดได้ (µm)
-    review = Column(String(12), nullable=False, default="PENDING")   # PENDING | CONFIRMED | CORRECTED
-    final_label = Column(String(10), nullable=True)
-    replace_status = Column(String(12), nullable=False, default="NONE")  # NONE | REQUIRED | REPLACED
+    pred_vb = Column(Float, nullable=True)                     # VB ที่ AI วัด (µm) + ช่วง P10–P90
+    vb_lo = Column(Float, nullable=True)
+    vb_hi = Column(Float, nullable=True)
+    pred_label = Column(String(10), nullable=False)            # โซนจากค่า AI: normal | accel | eol
+    confidence = Column(Float, nullable=False)                 # ความน่าจะเป็นของโซนนั้น
+    probs = Column(Text, nullable=False)                       # JSON {normal, accel, eol}
+    metrology = Column(Text, nullable=True)                    # JSON ค่าที่ optical bench วัดได้ (เปิดเผยเมื่อสั่งวัดเท่านั้น)
+    review = Column(String(12), nullable=False, default="PENDING")   # PENDING | CONFIRMED (ยอมรับค่า AI) | MEASURED
+    final_vb = Column(Float, nullable=True)                    # VB สุดท้ายที่ใช้ตัดสิน
+    vb_source = Column(String(10), nullable=True)              # AI | BENCH | MANUAL
+    final_label = Column(String(10), nullable=True)            # โซนจาก final_vb
+    replace_status = Column(String(12), nullable=False, default="NONE")  # ใบสั่งงานระดับดอก: NONE | REQUIRED | ADVISED | REPLACED
     replaced_by = Column(String(150), nullable=True)
     replaced_at = Column(DateTime, nullable=True)
     trained_in_version = Column(String(80), nullable=True)     # ถูกใช้ฝึกในเวอร์ชันไหนแล้ว
@@ -67,7 +73,7 @@ class VisionTrainingJob(Base):
     base_version = Column(String(80), nullable=False)
     candidate_version = Column(String(80), nullable=True)
     n_labels = Column(Integer, nullable=False, default=0)
-    n_corrected = Column(Integer, nullable=False, default=0)
+    n_corrected = Column(Integer, nullable=False, default=0)       # จำนวนใบที่ AI คลาดจากค่าวัดจริง > 15 µm
     label_blade_ids = Column(Text, nullable=False, default="[]")   # JSON list ของ VisionBlade.id ที่ส่งไปฝึก
     result = Column(Text, nullable=True)                       # JSON metrics + gate
     error = Column(Text, nullable=True)
@@ -78,6 +84,10 @@ def ensure_schema(engine):
     with engine.begin() as c:
         c.execute(text("ALTER TABLE vision_inspections ADD COLUMN IF NOT EXISTS cycle_id VARCHAR(64)"))
         c.execute(text("ALTER TABLE vision_inspections ADD COLUMN IF NOT EXISTS rul_context TEXT"))
+        c.execute(text("ALTER TABLE vision_inspections ADD COLUMN IF NOT EXISTS ai_summary TEXT"))
+        for col in ("pred_vb", "vb_lo", "vb_hi", "final_vb"):
+            c.execute(text(f"ALTER TABLE vision_blades ADD COLUMN IF NOT EXISTS {col} DOUBLE PRECISION"))
+        c.execute(text("ALTER TABLE vision_blades ADD COLUMN IF NOT EXISTS vb_source VARCHAR(10)"))
         c.execute(text("CREATE INDEX IF NOT EXISTS ix_vision_inspections_cycle_id ON vision_inspections (cycle_id)"))
         # รายการตรวจแบบเดิม (ถ่ายทีละรอบด้วยมือ ไม่ผูกกับรอบการใช้งานดอกของ Machine Monitoring) → เก็บเข้าคลัง ไม่ลบ
         c.execute(text("UPDATE vision_inspections SET status = 'ARCHIVED' WHERE cycle_id IS NULL AND status <> 'ARCHIVED'"))

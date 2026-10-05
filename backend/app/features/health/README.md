@@ -4,7 +4,6 @@
 
 ## หน้าที่หลัก
 1. ให้บริการ API สำหรับตรวจสอบว่า Backend ทำงานอยู่หรือไม่
-2. ให้บริการ API สำหรับตรวจสอบสถานะการเชื่อมต่อกับ Service ภายนอกต่างๆ (Database, Redis, MinIO, Label Studio)
 
 ## Endpoints
 
@@ -48,14 +47,7 @@
       "status": "connected",
       "latency_ms": 12.5,
       "details": null
-    },
-    {
-      "name": "Label Studio",
-      "status": "disconnected",
-      "latency_ms": 25.0,
-      "details": {
-        "error": "Connection timeout"
-      }
+    }
     }
   ]
 }
@@ -67,5 +59,4 @@
 - **Database (SQLite / PostgreSQL)**: ทำการรันคำสั่ง `SELECT 1` ผ่าน SQLAlchemy engine
 - **Redis**: ตรวจสอบ TCP Reachability ไปยัง Redis host:port
 - **MinIO**: ตรวจสอบ TCP Reachability และทดสอบเรียก `list_buckets()` พร้อม timeout ป้องกัน thread ค้าง
-- **Label Studio**: ตรวจสอบ TCP Reachability และเรียก `get_projects()` เมื่อพบ SDK
 - ทุก Service จะมีการจับเวลาเพื่อวัด `latency_ms` อย่างแม่นยำ

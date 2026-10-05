@@ -4,7 +4,8 @@
  * แบบจำลองถูกโหลดจาก MinIO โดย backend และข้อมูลไหลจากชุดข้อมูลจริง (LUH) ตามเวลาจริง
  */
 import type {
-  BladeLabel,
+  BenchMeasurement,
+  VbSource,
   FleetSnapshot,
   Replacements,
   TrainingJob,
@@ -181,7 +182,15 @@ export class ApiService {
     return request<VisionInspection>(`/tool-vision/inspections/${id}`);
   }
 
-  public reviewInspection(id: string, actor: string, blades: { blade: number; label: BladeLabel }[], note?: string) {
+  /** วัดใบมีดบน optical bench — เปิดเผยค่าวัดจริงของใบนั้น */
+  public measureBlade(id: string, blade: number, actor: string) {
+    return request<BenchMeasurement & { blade: number }>(`/tool-vision/inspections/${id}/blades/${blade}/measure`, {
+      method: 'POST',
+      body: JSON.stringify({ actor }),
+    });
+  }
+
+  public reviewInspection(id: string, actor: string, blades: { blade: number; source: VbSource; vb_um?: number | null }[], note?: string) {
     return request<VisionInspection>(`/tool-vision/inspections/${id}/review`, {
       method: 'POST',
       body: JSON.stringify({ actor, blades, note: note || null }),
@@ -192,8 +201,9 @@ export class ApiService {
     return request<Replacements>('/tool-vision/replacements');
   }
 
-  public markBladeReplaced(bladeId: string, actor: string) {
-    return request<{ blade_id: string; status: string }>(`/tool-vision/replacements/${bladeId}/done`, {
+  /** ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก) */
+  public markToolServiced(inspectionId: string, actor: string) {
+    return request<{ inspection_id: string; status: string }>(`/tool-vision/replacements/${inspectionId}/done`, {
       method: 'POST',
       body: JSON.stringify({ actor }),
     });
@@ -209,6 +219,19 @@ export class ApiService {
 
   public getVisionModel() {
     return request<VisionModelInfo>('/tool-vision/model');
+  }
+
+  /** โหลดเวอร์ชันตาม latest.json ใน MinIO ใหม่ */
+  public reloadVisionModel() {
+    return request<VisionModelInfo>('/tool-vision/model/reload', { method: 'POST' });
+  }
+
+  /** ใช้เวอร์ชันที่เลือกเป็นตัวหลัก (ย้อนเวอร์ชันได้) */
+  public activateVisionVersion(version: string, actor: string) {
+    return request<VisionModelInfo>('/tool-vision/model/activate', {
+      method: 'POST',
+      body: JSON.stringify({ version, actor }),
+    });
   }
 
   public getVisionVersions() {

@@ -15,10 +15,9 @@ Feature Module คือการแบ่งโครงสร้างขอ�
 - **`health/`** - Health Check & Concurrent Component Diagnostics
 - **`auth/`** - Authentication & Session Management (JWT Access & Refresh Token)
 - **`profile/`** - User Profile & Avatar Management (MinIO Storage)
-- **`storage/`** - MinIO Object Storage Integration
-- **`labeling/`** - Label Studio Integration
+- **`tool_vision/`** - วัดรอยสึก VB ของใบมีดจากภาพ (ต่อจาก tool_life) + ผู้ตรวจยืนยัน/วัดจริง + ใบสั่งงานระดับดอก + retrain
 - **`users/`** - User Directory & Role-Based Access Control
-- **`workers/`** - ARQ Background Jobs & Redis Monitoring
+- **`workers/`** - ARQ worker (`tasks.WorkerSettings`) ที่ trainer-worker รัน: งาน retrain ของ tool_vision
 
 ## โครงสร้างมาตรฐานของแต่ละฟีเจอร์
 แต่ละโฟลเดอร์ฟีเจอร์จะมีไฟล์หลักๆ ดังนี้:

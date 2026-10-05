@@ -1,5 +1,5 @@
-"""Tool Vision API — ตรวจใบมีด 4 ใบของดอกที่ถอดจากเครื่องเมื่อ Machine Monitoring แจ้งหมดอายุ
-+ การยืนยันของผู้ตรวจ + ใบสั่งเปลี่ยนใบมีดให้วิศวกร + retrain
+"""Tool Vision API — วัดรอยสึก VB (µm) ของใบมีด 4 ใบของดอกที่ถอดจากเครื่องเมื่อ Machine Monitoring แจ้งหมดอายุ
++ การยืนยัน/วัดจริงของผู้ตรวจ + ใบสั่งเปลี่ยนใบมีดให้วิศวกร + retrain
 
 ปกติรายการตรวจถูกสร้างอัตโนมัติเมื่อผู้ควบคุมกดถอดดอกที่ Machine Monitoring (listener ใน main.py)
 - GET  /tool-vision/stations                         สถานีตรวจของแต่ละเครื่อง (+ สถานะ RUL ของดอกบนเครื่อง)
@@ -7,10 +7,11 @@
 - GET  /tool-vision/inspections?status=&machine=     รายการตรวจ
 - GET  /tool-vision/inspections/{id}                 รายละเอียด 4 ใบ
 - GET  /tool-vision/inspections/{id}/blades/{b}/image  ภาพจาก MinIO
-- POST /tool-vision/inspections/{id}/review          ผู้ตรวจยืนยัน/แก้ label ครบ 4 ใบ
-- GET  /tool-vision/replacements · /replacements/export/csv · POST /replacements/{blade_id}/done
+- POST /tool-vision/inspections/{id}/blades/{b}/measure  วัดใบมีดบน optical bench (เปิดเผยค่าวัดของใบนั้น)
+- POST /tool-vision/inspections/{id}/review          ผู้ตรวจสรุปค่า VB ครบ 4 ใบ (AI / BENCH / MANUAL)
+- GET  /tool-vision/replacements · /replacements/export/csv · POST /replacements/{ins_id}/done   ใบสั่งงานระดับดอก
 - GET  /tool-vision/stats                            AI เทียบผลที่คนยืนยัน
-- GET  /tool-vision/model · /model/versions · POST /model/reload
+- GET  /tool-vision/model · /model/versions (มี history การฝึก) · POST /model/reload · POST /model/activate
 - GET  /tool-vision/training/pool · /training/jobs · POST /training/start · POST /training/jobs/{id}/{promote|reject}
 """
 from __future__ import annotations
@@ -89,7 +90,8 @@ async def blade_image(ins_id: str, blade: int):
 
 class BladeDecision(BaseModel):
     blade: int = Field(..., ge=1, le=4)
-    label: str = Field(..., description="sharp | used | dulled (label ที่ถูกต้อง)")
+    source: str = Field("AI", description="AI = ยอมรับค่าที่ AI วัด · BENCH = ค่าจาก optical bench · MANUAL = ค่าที่วัดเอง")
+    vb_um: float | None = Field(None, description="VB (µm) — ใช้เมื่อ source = MANUAL")
 
 
 class ReviewBody(Actor):
@@ -97,9 +99,14 @@ class ReviewBody(Actor):
     note: str | None = None
 
 
+@router.post("/inspections/{ins_id}/blades/{blade}/measure")
+async def measure(ins_id: str, blade: int, body: Actor):
+    return await asyncio.to_thread(_run, svc.measure, ins_id, blade, body.actor)
+
+
 @router.post("/inspections/{ins_id}/review")
 async def review(ins_id: str, body: ReviewBody):
-    decisions = {d.blade: d.label.lower() for d in body.blades}
+    decisions = {d.blade: dict(source=d.source.upper(), vb_um=d.vb_um) for d in body.blades}
     return await asyncio.to_thread(_run, svc.review, ins_id, decisions, body.actor, body.note)
 
 
@@ -115,9 +122,10 @@ async def replacements_csv():
                     headers={"Content-Disposition": "attachment; filename=blade_replacements.csv"})
 
 
-@router.post("/replacements/{blade_id}/done")
-async def replaced(blade_id: str, body: Actor):
-    return await asyncio.to_thread(_run, svc.mark_replaced, blade_id, body.actor)
+@router.post("/replacements/{ins_id}/done")
+async def replaced(ins_id: str, body: Actor):
+    """ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก)"""
+    return await asyncio.to_thread(_run, svc.mark_replaced, ins_id, body.actor)
 
 
 @router.get("/stats")
@@ -140,11 +148,22 @@ async def model_versions():
         raise HTTPException(503, f"เชื่อมต่อ MinIO ไม่ได้: {e}")
 
 
+class ActivateBody(Actor):
+    version: str
+
+
+@router.post("/model/activate")
+async def model_activate(body: ActivateBody):
+    """ใช้เวอร์ชันที่เลือกเป็นตัวหลัก (ย้อนเวอร์ชันได้) — ตรวจ sha256 + self-test ก่อนสลับ"""
+    return await asyncio.to_thread(_run, svc.activate_version, body.version, body.actor)
+
+
 @router.post("/model/reload")
 async def model_reload():
     await asyncio.to_thread(registry.load)
     if not registry.ready:
         raise HTTPException(503, registry.error)
+    await asyncio.to_thread(svc.rescore_legacy_pending)
     return registry.info()
 
 

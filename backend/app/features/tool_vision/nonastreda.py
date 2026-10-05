@@ -9,7 +9,8 @@
   ดอก 8, 9, 10 = ไม่เคยใช้ฝึก → เป็น "ดอกที่ติดอยู่บนเครื่อง" M1, M2, M3 ในระบบตรวจ
                  (ดอกเดียวกับที่ Machine Monitoring สตรีมข้อมูลเซนเซอร์ LUH T3/T6/T9 ของเครื่องนั้น)
 
-ระบบตรวจใช้เฉพาะภาพรอบสุดท้ายของดอก (ตอนดอกหมดอายุและถูกถอดออกจากเครื่อง) — ดู eol_run()
+ระบบตรวจใช้เฉพาะภาพช่วงท้ายอายุของดอก (ตอนถูกถอดออกจากเครื่อง) — เลือกรอบที่ VB เฉลี่ย 4 ใบใกล้กับ VB จริง
+ของดอกในข้อมูลเซนเซอร์ตอนถอด เพื่อให้ภาพกับข้อมูลเซนเซอร์เป็นดอกที่สึกเท่ากัน — ดู eol_run_for()
 """
 from __future__ import annotations
 
@@ -86,8 +87,41 @@ def eol_run(tool: int) -> int:
     return runs_for_tool(tool)[-1]
 
 
+EOL_MIN_MEAN_UM = 103.0      # "ช่วงท้ายอายุ" = รอบที่ VB เฉลี่ย 4 ใบเข้าช่วงสึกเร่งแล้ว
+
+
+def run_mean_vb(tool: int) -> dict[int, float]:
+    """VB เฉลี่ย 4 ใบของทุกรอบ (ค่าที่ optical bench วัด) — ใช้เลือกภาพภายในระบบเท่านั้น"""
+    m = _metrology()
+    out = {}
+    for r in runs_for_tool(tool):
+        v = [m[f"T{tool}R{r}B{b}"]["flank_wear_um"] for b in BLADES if f"T{tool}R{r}B{b}" in m]
+        if len(v) == len(BLADES):
+            out[r] = sum(v) / len(v)
+    return out
+
+
+def eol_run_for(tool: int, physical_vb_um: float | None) -> int:
+    """รอบช่วงท้ายอายุที่ VB เฉลี่ย 4 ใบใกล้กับ VB จริงของดอกตอนถอดที่สุด (ไม่มีค่า → รอบสุดท้าย)"""
+    means = run_mean_vb(tool)
+    late = {r: v for r, v in means.items() if v >= EOL_MIN_MEAN_UM} or {eol_run(tool): means.get(eol_run(tool), 0.0)}
+    if physical_vb_um is None:
+        return max(late)
+    return min(late, key=lambda r: (abs(late[r] - physical_vb_um), -r))
+
+
 def metrology(image_ref: str) -> dict | None:
     return _metrology().get(image_ref)
+
+
+def vb_samples(tools) -> pd.DataFrame:
+    """id, tool, run, blade, image_label, vb_um (flank wear จาก optical bench), path — ใช้ฝึก/ประเมินแบบจำลองวัด VB เท่านั้น"""
+    reg = pd.read_csv(dataset_dir() / "labels_reg.csv")[["id", "flank_wear"]].rename(columns={"flank_wear": "vb_um"})
+    df = _labels()[["id", "tool", "run", "blade", "image_label"]].merge(reg, on="id")
+    df = df[df.tool.isin(list(tools))].copy()
+    df["path"] = [str(image_path(i)) for i in df["id"]]
+    df = df[[Path(p).exists() for p in df["path"]]]
+    return df.sort_values(["tool", "run", "blade"]).reset_index(drop=True)
 
 
 def labeled_samples(tools) -> list[tuple[Path, str]]:

@@ -361,7 +361,11 @@ class MachineStream:
         return self.manager.tool_removed(self)
 
     def removal_context(self) -> dict:
-        """สิ่งที่ Machine Monitoring รู้ ณ ตอนถอดดอก — ผลของแบบจำลอง RUL เท่านั้น (ไม่มี VB จริง)"""
+        """สิ่งที่ Machine Monitoring รู้ ณ ตอนถอดดอก — ผลของแบบจำลอง RUL (ไม่มี VB จริงในส่วนที่แสดงผล)
+
+        `_physical_vb_um` = VB เฉลี่ย 4 คมของดอกจริงตอนถอด (ground truth หลังถอด เหมือนที่ Reports ใช้)
+        ใช้ภายในเท่านั้นเพื่อเลือกภาพใบมีดที่สึกเท่ากับดอกจริง — คีย์ที่ขึ้นต้นด้วย _ ถูกตัดทิ้งก่อนบันทึก/แสดงผล
+        """
         pr = [h for h in self.history if h.get("rul") is not None]
         last = pr[-1] if pr else {}
 
@@ -375,7 +379,8 @@ class MachineStream:
                     rul_min=_r(last.get("rul")), rul_lo=_r(last.get("rul_lo")), rul_hi=_r(last.get("rul_hi")),
                     wear_state=last.get("state"), recommendation=last.get("recommendation"),
                     first_plan_min=_r(first({"PLAN_REPLACEMENT", "REPLACE_NOW"})), first_replace_now_min=_r(first({"REPLACE_NOW"})),
-                    model_version=last.get("model_version"))
+                    model_version=last.get("model_version"),
+                    _physical_vb_um=(self.evaluation or {}).get("vb_at_removal_um"))
 
     def _evaluate(self, t_end: float, reason: str) -> dict:
         gt = ds.ground_truth(self.tool)

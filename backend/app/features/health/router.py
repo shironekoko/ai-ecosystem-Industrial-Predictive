@@ -27,7 +27,7 @@ async def get_health():
     "/components",
     response_model=HealthResponse,
     summary="ตรวจสอบสถานะระบบและส่วนประกอบต่างๆ",
-    description="ตรวจสอบสถานะการเชื่อมต่อของบริการต่างๆ เช่น Database, Redis, MinIO, Label Studio"
+    description="ตรวจสอบสถานะการเชื่อมต่อของบริการต่างๆ เช่น Database, Redis, MinIO"
 )
 async def get_components_health():
     """

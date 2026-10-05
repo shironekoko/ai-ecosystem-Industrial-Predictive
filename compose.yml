@@ -39,31 +39,7 @@ services:
     volumes:
       - postgresql-data:/var/lib/postgresql/data
       - ./logs:/logs
-      - ./dev/init-mlflow-db.sql:/docker-entrypoint-initdb.d/init-mlflow-db.sql:ro
     command: postgres -c logging_collector=on -c log_directory=/logs -c log_filename=postgres.log
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  label-studio:
-    image: heartexlabs/label-studio:latest
-    container_name: label-studio
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - POSTGRES_HOST=db
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=myuser
-      - POSTGRES_PASSWORD=mypassword
-      - POSTGRES_DB=mydatabase
-      - LOG_DIR=/logs
-    volumes:
-      - ./logs:/logs
     logging:
       driver: json-file
       options:
@@ -94,63 +70,6 @@ services:
         max-file: "3"
 
 # -------------------------
-# ส่วนของ MLflow Tracking Server
-# -------------------------
-  mlflow:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.mlflow
-    container_name: mlflow
-    restart: unless-stopped
-    ports:
-      - "5001:5000"
-    environment:
-      - MLFLOW_BACKEND_STORE_URI=postgresql://myuser:mypassword@db:5432/mlflow
-      - MLFLOW_DEFAULT_ARTIFACT_ROOT=s3://mlflow-artifacts
-      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-    command: >
-      mlflow server
-        --backend-store-uri postgresql://myuser:mypassword@db:5432/mlflow
-        --default-artifact-root s3://mlflow-artifacts
-        --host 0.0.0.0
-        --port 5000
-    depends_on:
-      db:
-        condition: service_started
-      minio:
-        condition: service_started
-    volumes:
-      - ./logs:/logs
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # -------------------------
-  # สร้าง Bucket สำหรับ MLflow Artifacts ใน MinIO (รันครั้งเดียว)
-  # -------------------------
-  minio-init:
-    image: amazon/aws-cli:latest
-    container_name: minio-init
-    depends_on:
-      minio:
-        condition: service_started
-    environment:
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-      - AWS_DEFAULT_REGION=us-east-1
-    entrypoint: >
-      /bin/sh -c "
-      sleep 5;
-      aws --endpoint-url http://minio:9000 s3 mb s3://mlflow-artifacts || true;
-      echo '✅ Bucket mlflow-artifacts ready';
-      "
-    restart: "no"
-
-# -------------------------
 # ส่วนของ Backend API (FastAPI)
 # -------------------------
   backend:
@@ -166,7 +85,6 @@ services:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://myuser:mypassword@db:5432/mydatabase
       - MINIO_ENDPOINT=minio:9000
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
       # ── Tool life (RUL) streaming: แบบจำลองดึงจาก MinIO bucket models/tool-rul/, ข้อมูลจาก ./dataset (LUH) ──
       - TOOL_LIFE_AUTOSTART=true          # เริ่มสตรีมดอกที่สงวนไว้ (T3/T6/T9) ตามเวลาจริงเมื่อ backend เริ่ม
       - TOOL_LIFE_HOLD_ON_REPLACE=true    # interlock: หยุดป้อนเมื่อระบบสั่ง REPLACE_NOW รอผู้ควบคุมยืนยัน
@@ -201,16 +119,10 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - MINIO_ENDPOINT=minio:9000
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
-      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
     depends_on:
       redis:
         condition: service_healthy
       minio:
-        condition: service_started
-      mlflow:
         condition: service_started
     volumes:
       - ./backend:/app
@@ -225,6 +137,28 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -------------------------
+  # TensorBoard — กราฟการฝึก: retrain ใน trainer-worker (logs/tensorboard) + การทดลองเลือกแบบจำลอง (nontime_docs)
+  # -------------------------
+  tensorboard:
+    image: python:3.12-slim
+    container_name: tensorboard
+    restart: unless-stopped
+    command: >
+      sh -c "pip install -q --no-cache-dir 'tensorboard>=2.17' 'setuptools<81' &&
+             mkdir -p /logs/tensorboard/tool-vision &&
+             tensorboard --logdir_spec retrain:/logs/tensorboard/tool-vision,experiments:/experiments --bind_all --port 6006"
+    ports:
+      - "6006:6006"
+    volumes:
+      - ./logs:/logs
+      - ./nontime_docs/tool_vb_vision/runs:/experiments:ro
     logging:
       driver: json-file
       options:

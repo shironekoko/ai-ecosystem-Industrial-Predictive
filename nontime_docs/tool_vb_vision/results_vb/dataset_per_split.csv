@@ -1,0 +1,4 @@
+split,images,tools,vb_mean,vb_std,pct_accel,pct_eol
+test (tools 8-10),160,3,77.5,35.0,24.4,5.0
+train (tools 1-6),296,6,96.3,50.5,43.2,15.2
+val (tool 7),56,1,72.7,33.0,23.2,3.6

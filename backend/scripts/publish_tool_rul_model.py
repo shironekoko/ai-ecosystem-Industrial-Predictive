@@ -2,7 +2,7 @@
 
 ต้นทาง = ผลของ ``timeseries_docs/tool_rul_forecast/experiments_rul.py``::
 
-    models/tool_rul_model.npz, models/tool_rul_model.json, results_rul/{loto_metrics,lomo_metrics,nested_selection}.csv
+    models/tool_rul_model.npz, models/tool_rul_model.json, results_rul/loto_metrics.csv
 
 ใช้งาน (MinIO ต้องรันอยู่ เช่น ``docker compose up -d minio``)::
 
@@ -10,7 +10,7 @@
     uv run python scripts/publish_tool_rul_model.py                     # อัปโหลด + ตั้งเป็น latest
     uv run python scripts/publish_tool_rul_model.py --no-activate       # อัปโหลดอย่างเดียว
 
-evaluation.json มีเฉพาะค่าเฉลี่ยรวมของ leave-one-tool-out — ไม่มีอายุจริงรายดอก (กันสปอยดอกที่สงวนไว้สตรีม)
+evaluation.json มีเฉพาะค่าเฉลี่ยรวมของ leave-one-tool-out ของ GRU direct-RUL ที่ใช้งาน — ไม่มีอายุจริงรายดอก (กันสปอยดอกที่สงวนไว้สตรีม)
 """
 from __future__ import annotations
 
@@ -31,24 +31,21 @@ DEFAULT_SRC = Path(__file__).resolve().parents[2] / "timeseries_docs" / "tool_ru
 PREFIX = "tool-rul"
 
 
+DEPLOYED_MODEL = "GRU[full]"      # GRU direct-RUL (เซนเซอร์ + เวลา + เครื่อง) — ตัวเดียวที่ใช้งาน
+
+
 def build_evaluation(src: Path, meta: dict) -> dict:
-    res = src / "results_rul"
-    loto = pd.read_csv(res / "loto_metrics.csv")
-    loto = loto[loto.output == "smooth"]
+    """เฉพาะแบบจำลองที่ใช้งาน (ตัวเปรียบเทียบอื่นอยู่ในรายงาน ไม่ส่งขึ้น registry)"""
+    loto = pd.read_csv(src / "results_rul" / "loto_metrics.csv")
+    loto = loto[(loto.output == "smooth") & (loto.model == DEPLOYED_MODEL)]
     cols = ["MAE_all", "MAE_test20", "Bias_test20", "Late_pct_test20"]
-    ev = dict(
+    return dict(
         protocol="leave-one-tool-out (9 ดอก) — ค่าเฉลี่ยของทุกดอก; หน่วย นาทีของเวลาตัด; test20 = 20% ท้ายของอนุกรมแต่ละดอก",
-        loto={m: {c: round(float(v), 3) for c, v in g[cols].mean().items()} for m, g in loto.groupby("model")},
+        model=DEPLOYED_MODEL,
+        deployed_variant=meta["architecture"].get("variant"),
+        n_tools=int(loto.tool.nunique()),
+        loto={c: round(float(v), 3) for c, v in loto[cols].mean().items()},
     )
-    if (res / "lomo_metrics.csv").exists():
-        lomo = pd.read_csv(res / "lomo_metrics.csv")
-        ev["lomo_new_machine"] = {m: {c: round(float(v), 3) for c, v in g[cols].mean().items()} for m, g in lomo.groupby("model")}
-    if (res / "nested_selection.csv").exists():
-        sel = pd.read_csv(res / "nested_selection.csv")
-        ev["nested_selection_train_tools"] = {m: {c: round(float(v), 3) for c, v in g[cols].mean().items()}
-                                              for m, g in sel.groupby("variant")}
-    ev["deployed_variant"] = meta["architecture"].get("variant")
-    return ev
 
 
 def main():

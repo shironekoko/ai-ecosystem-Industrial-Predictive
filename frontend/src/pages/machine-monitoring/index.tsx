@@ -154,8 +154,11 @@ const RemovedBanner: React.FC<{ m: MachineSnapshot }> = ({ m }) => {
     const t = setInterval(load, 10000);
     return () => clearInterval(t);
   }, [id]);
-  const open = ins?.blades?.filter((b) => b.replace_status === 'REQUIRED').map((b) => `B${b.blade}`) ?? [];
-  const done = ins?.blades?.filter((b) => b.replace_status === 'REPLACED').map((b) => `B${b.blade}`) ?? [];
+  // ใบสั่งงานระดับดอก (VB เฉลี่ย 4 ใบ — นิยามเดียวกับ RUL)
+  const required = !!ins?.blades?.some((b) => b.replace_status === 'REQUIRED');
+  const open = required || !!ins?.blades?.some((b) => b.replace_status === 'ADVISED');
+  const serviced = !!ins?.blades?.length && ins.blades.every((b) => b.replace_status === 'REPLACED');
+  const fs = ins?.final_summary;
   return (
     <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-sm text-indigo-800 flex flex-col md:flex-row md:items-center gap-3">
       <div className="flex-1 space-y-0.5">
@@ -166,19 +169,19 @@ const RemovedBanner: React.FC<{ m: MachineSnapshot }> = ({ m }) => {
         <p className="text-xs flex items-center gap-1.5">
           <ScanEye className="w-3.5 h-3.5" />
           {!m.inspection
-            ? 'กำลังถ่ายภาพใบมีด 4 ใบให้ AI ตรวจ…'
+            ? 'กำลังถ่ายภาพใบมีด 4 ใบให้ AI วัดรอยสึก VB…'
             : !ins || ins.status === 'PENDING_REVIEW'
-            ? `ตรวจใบมีด ${m.inspection.id}: AI ประเมินแล้ว — รอผู้ตรวจยืนยันที่ Tool Inspection`
-            : open.length
-            ? `ตรวจใบมีดแล้ว: วิศวกรต้องเปลี่ยน ${open.join(', ')} ก่อนติดตั้งดอกกลับเข้าเครื่อง`
-            : `ตรวจใบมีดแล้ว${done.length ? ` และเปลี่ยน ${done.join(', ')} แล้ว` : ''} — ติดตั้งดอกกลับเข้าเครื่องได้`}
+            ? `ตรวจใบมีด ${m.inspection.id}: AI วัด VB เฉลี่ย 4 ใบ ${ins?.ai_summary ? `${ins.ai_summary.mean_vb.toFixed(0)} µm` : '—'} — รอผู้ตรวจยืนยันที่ Tool Inspection`
+            : open
+            ? `ตรวจแล้ว: VB เฉลี่ย ${fs?.mean_vb != null ? `${fs.mean_vb.toFixed(0)} µm` : '—'} → ${required ? 'ต้องเปลี่ยน/ลับดอก' : 'ควรเปลี่ยนตามแผน'}${fs ? ` (คมที่สึกมากสุด B${fs.worst_blade} ${fs.worst_vb.toFixed(0)} µm)` : ''} ก่อนติดตั้งดอกกลับเข้าเครื่อง`
+            : `ตรวจแล้ว${fs ? ` (VB เฉลี่ย ${fs.mean_vb.toFixed(0)} µm)` : ''}${serviced ? ' และดำเนินการตามใบสั่งงานแล้ว' : ''} — ติดตั้งดอกกลับเข้าเครื่องได้`}
         </p>
       </div>
       <Link
-        to={m.inspection ? (ins?.status === 'VERIFIED' && open.length ? '/tool-vision?tab=replace' : `/tool-vision?tab=review&inspection=${m.inspection.id}`) : '/tool-vision'}
+        to={m.inspection ? (ins?.status === 'VERIFIED' && open ? '/tool-vision?tab=replace' : `/tool-vision?tab=review&inspection=${m.inspection.id}`) : '/tool-vision'}
         className="btn-primary shrink-0"
       >
-        <ScanEye className="w-3.5 h-3.5" /> {ins?.status === 'VERIFIED' && open.length ? 'ใบสั่งเปลี่ยนใบมีด' : 'ไปที่ Tool Inspection'}
+        <ScanEye className="w-3.5 h-3.5" /> {ins?.status === 'VERIFIED' && open ? 'ใบสั่งงาน' : 'ไปที่ Tool Inspection'}
       </Link>
     </div>
   );

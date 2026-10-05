@@ -1,22 +1,48 @@
 /**
- * Model Registry — แบบจำลอง RUL ที่ backend ดึงจาก MinIO (bucket "models", prefix "tool-rul/")
+ * Model Registry — แบบจำลองทั้งสองตัวของระบบที่ backend ดึงจาก MinIO (bucket "models")
+ *   - Time series: GRU direct-RUL (prefix "tool-rul/")
+ *   - Vision: ResNet-18 วัดรอยสึก VB จากภาพใบมีด (prefix "tool-vision/") + กราฟการเทรน + งาน retrain
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Database, RefreshCw, XCircle } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Activity, CheckCircle2, Database, ScanEye, RefreshCw, XCircle } from 'lucide-react';
 import { PageHeader } from '../../components/common';
 import { Card, fmt, fmtDateTime } from '../../components/toollife/ui';
 import { api } from '../../services/api';
 import type { ModelInfo, ModelVersion } from '../../types';
-
-const MODEL_LABEL: Record<string, string> = {
-  'GRU[full]': 'GRU direct-RUL (เซนเซอร์ + เวลา + เครื่อง) — ใช้งานจริง',
-  'GRU[time+machine]': 'GRU ไม่มีเซนเซอร์ (เวลา + เครื่อง)',
-  'GRU[sensors+time]': 'GRU ไม่ระบุเครื่อง (เซนเซอร์ + เวลา)',
-  StateSpace: 'StateSpace (พยากรณ์ VB แฝง → จุดตัดเกณฑ์)',
-  Fleet: 'Fleet reference (อายุเฉลี่ยของเครื่อง)',
-};
+import { VisionRegistry } from './VisionRegistry';
 
 export const ModelRegistryPage: React.FC = () => {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('model') === 'vision' ? 'vision' : 'rul';
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="Model Registry"
+        subtitle="แบบจำลองทั้งสองตัวของระบบ — เก็บทุกเวอร์ชันใน MinIO, backend ตรวจ sha256 + self-test ก่อนใช้งาน"
+      />
+      <div className="flex flex-wrap gap-1 p-1 bg-gray-100 rounded-lg w-fit">
+        {(
+          [
+            ['rul', 'Time series — RUL ดอกกัด (GRU)', Activity],
+            ['vision', 'Vision — วัดรอยสึก VB จากภาพ (ResNet-18)', ScanEye],
+          ] as const
+        ).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            onClick={() => setParams(id === 'rul' ? {} : { model: id })}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 ${tab === id ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-800'}`}
+          >
+            <Icon className="w-3.5 h-3.5" /> {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'rul' ? <RulRegistry /> : <VisionRegistry />}
+    </div>
+  );
+};
+
+const RulRegistry: React.FC = () => {
   const [info, setInfo] = useState<ModelInfo | null>(null);
   const [versions, setVersions] = useState<ModelVersion[] | null>(null);
   const [vErr, setVErr] = useState<string | null>(null);
@@ -52,15 +78,11 @@ export const ModelRegistryPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Model Registry"
-        subtitle="แบบจำลองอนุกรมเวลาตัวเดียวของระบบ — เก็บใน MinIO และ backend ตรวจ sha256 + self-test ก่อนใช้งาน"
-        actions={
-          <button onClick={() => reload()} disabled={busy} className="btn-primary">
-            <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} /> ดึงเวอร์ชันล่าสุดจาก MinIO
-          </button>
-        }
-      />
+      <div className="flex justify-end">
+        <button onClick={() => reload()} disabled={busy} className="btn-primary">
+          <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} /> ดึงเวอร์ชันล่าสุดจาก MinIO
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <Card
@@ -130,34 +152,18 @@ export const ModelRegistryPage: React.FC = () => {
         </Card>
       </div>
 
-      <Card title="ผลประเมินแบบ leave-one-tool-out (evaluation.json ใน MinIO — ค่าเฉลี่ยรวมทุกดอก, หน่วย นาทีของเวลาตัด)">
+      <Card title="ผลประเมิน GRU direct-RUL — leave-one-tool-out (evaluation.json ใน MinIO, หน่วย นาทีของเวลาตัด)">
         {!ev?.loto ? (
           <p className="text-sm text-gray-400">ไม่มีไฟล์ผลประเมิน</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-gray-500 border-b border-gray-100">
-                  <th className="py-2 pr-3">แบบจำลอง</th>
-                  <th className="py-2 px-3 text-right">MAE ทั้งอายุ</th>
-                  <th className="py-2 px-3 text-right">MAE 20% ท้าย</th>
-                  <th className="py-2 px-3 text-right">Bias 20% ท้าย</th>
-                  <th className="py-2 px-3 text-right">% พยากรณ์เกินจริง &gt; 1 ชั้น</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(ev.loto as Record<string, any>).map(([k, v]) => (
-                  <tr key={k} className={`border-b border-gray-50 ${k === 'GRU[full]' ? 'bg-indigo-50/50 font-semibold' : ''}`}>
-                    <td className="py-2 pr-3">{MODEL_LABEL[k] || k}</td>
-                    <td className="py-2 px-3 text-right tabular-nums">{fmt(v.MAE_all, 2)}</td>
-                    <td className="py-2 px-3 text-right tabular-nums">{fmt(v.MAE_test20, 2)}</td>
-                    <td className="py-2 px-3 text-right tabular-nums">{fmt(v.Bias_test20, 2)}</td>
-                    <td className="py-2 px-3 text-right tabular-nums">{fmt(v.Late_pct_test20, 1)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="text-[11px] text-gray-400 mt-2">{ev.protocol}</p>
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Stat label="MAE ทั้งอายุ" value={`${fmt(ev.loto.MAE_all, 2)} นาที`} />
+              <Stat label="MAE 20% ท้ายอายุ" value={`${fmt(ev.loto.MAE_test20, 2)} นาที`} />
+              <Stat label="Bias 20% ท้ายอายุ" value={`${fmt(ev.loto.Bias_test20, 2)} นาที`} hint="บวก = พยากรณ์เกินจริง" />
+              <Stat label="พยากรณ์เกินจริง > 1 ชั้นงาน" value={`${fmt(ev.loto.Late_pct_test20, 1)}%`} hint="ในช่วง 20% ท้าย" />
+            </div>
+            <p className="text-[11px] text-gray-400">{ev.protocol}</p>
           </div>
         )}
       </Card>
@@ -212,6 +218,14 @@ const Row: React.FC<{ k: string; v: React.ReactNode }> = ({ k, v }) => (
   <div className="flex justify-between gap-3">
     <span className="text-gray-500 shrink-0">{k}</span>
     <span className="text-gray-800 text-right">{v}</span>
+  </div>
+);
+
+const Stat: React.FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
+  <div className="rounded-lg border border-gray-100 bg-gray-50/60 p-3">
+    <p className="text-[11px] text-gray-500">{label}</p>
+    <p className="text-lg font-bold text-gray-900 tabular-nums">{value}</p>
+    {hint && <p className="text-[10px] text-gray-400">{hint}</p>}
   </div>
 );
 

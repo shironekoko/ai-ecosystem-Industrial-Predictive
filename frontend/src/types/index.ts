@@ -209,21 +209,29 @@ export interface AlertNotification {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Tool vision — ตรวจใบมีด 4 ใบ/เครื่องด้วยภาพ
+// Tool vision — วัดรอยสึก VB ของใบมีด 4 ใบ/ดอกจากภาพ
 // ─────────────────────────────────────────────────────────────
-export type BladeLabel = 'sharp' | 'used' | 'dulled';
+/** โซนตามเกณฑ์ VB (เดียวกับแบบจำลอง RUL): normal < 103 µm ≤ accel < 140 µm ≤ eol */
+export type VbZone = 'normal' | 'accel' | 'eol';
+export type VbSource = 'AI' | 'BENCH' | 'MANUAL';
 export type ToolVerdict = 'OK' | 'MONITOR' | 'REPLACE';
 
 export interface VisionBlade {
   id: string;
   blade: number;
-  pred_label: BladeLabel;
-  confidence: number;
-  probs: Record<BladeLabel, number>;
-  metrology: { flank_wear_um: number; gaps_um: number; overhang_um: number } | null;
-  review: 'PENDING' | 'CONFIRMED' | 'CORRECTED';
-  final_label: BladeLabel | null;
-  replace_status: 'NONE' | 'REQUIRED' | 'REPLACED';
+  pred_vb: number | null; // VB ที่ AI วัด (µm)
+  vb_lo: number | null; // ช่วง P10–P90
+  vb_hi: number | null;
+  zone: VbZone;
+  confidence: number; // ความน่าจะเป็นของโซนที่ทาย
+  probs: Record<VbZone, number>;
+  near_threshold: boolean; // ช่วง P10–P90 คร่อมเกณฑ์ 103/140 µm → ควรวัดยืนยัน
+  metrology: BenchMeasurement | null; // มีเฉพาะใบที่สั่งวัดบน optical bench แล้ว
+  review: 'PENDING' | 'CONFIRMED' | 'MEASURED';
+  final_vb: number | null;
+  vb_source: VbSource | null;
+  final_zone: VbZone | null;
+  replace_status: 'NONE' | 'REQUIRED' | 'ADVISED' | 'REPLACED';
   replaced_by: string | null;
   replaced_at: string | null;
   trained_in_version: string | null;
@@ -253,6 +261,27 @@ export interface RulContext {
   images_trained_in: string[] | null; // ภาพชุดนี้เคยใช้ retrain แล้ว (ดอกเดิมถูกเล่นซ้ำ)
 }
 
+/** ระดับดอก = VB เฉลี่ย 4 ใบ (นิยามเดียวกับ label ของ RUL) */
+export interface ToolSummary {
+  mean_vb: number;
+  mean_lo: number;
+  mean_hi: number;
+  zone: VbZone;
+  verdict: ToolVerdict;
+  probs?: Record<VbZone, number>;
+  worst_blade: number;
+  worst_vb: number;
+  over_limit: number[]; // ใบที่เกิน 140 µm เฉพาะใบ
+}
+
+export interface ToolFinalSummary {
+  mean_vb: number;
+  verdict: ToolVerdict;
+  worst_blade: number;
+  worst_vb: number;
+  over_limit: number[];
+}
+
 export interface VisionInspection {
   id: string;
   machine: number;
@@ -274,7 +303,9 @@ export interface VisionInspection {
   reviewed_at: string | null;
   note: string | null;
   blades?: VisionBlade[];
-  low_confidence?: boolean;
+  ai_summary?: ToolSummary | null; // ระดับดอกจากค่า AI (เฉลี่ย 4 ใบ + P10–P90)
+  final_summary?: ToolFinalSummary | null; // ระดับดอกจากค่าที่ผู้ตรวจยืนยัน/วัด
+  low_confidence?: boolean; // ช่วงของค่าเฉลี่ยระดับดอกคร่อมเกณฑ์
 }
 
 export interface VisionStation {
@@ -300,48 +331,55 @@ export interface VisionStation {
   last: VisionInspection | null;
 }
 
-export interface ReplacementItem {
-  blade_id: string;
+/** ใบสั่งงาน 1 ใบ = ดอก 1 ดอกที่ถอดมา */
+export interface WorkOrder {
   inspection_id: string;
   machine: number;
   machine_id: string;
-  blade: number;
   tool_ref: string | null;
+  priority: 'REQUIRED' | 'ADVISED';
+  status: 'REQUIRED' | 'ADVISED' | 'REPLACED';
+  mean_vb: number | null;
+  worst_blade: number | null;
+  over_limit: number[];
+  blades: { blade: number; final_vb: number | null; vb_source: VbSource | null; pred_vb: number | null; zone: VbZone | null; image_url: string }[];
   removed_t_min: number | null;
   removed_by: string | null;
   rul_recommendation: Recommendation | null;
   captured_at: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
-  ai_label: BladeLabel;
-  final_label: BladeLabel;
-  ai_correct: boolean;
-  flank_wear_um: number | null;
-  status: 'REQUIRED' | 'REPLACED';
   replaced_by: string | null;
   replaced_at: string | null;
-  image_url: string;
 }
 
 export interface Replacements {
-  open: ReplacementItem[];
-  done: ReplacementItem[];
-  summary: { inspection_id: string; machine_id: string; tool_ref: string | null; removed_t_min: number | null; reviewed_by: string | null; blades: string[] }[];
+  open: WorkOrder[];
+  done: WorkOrder[];
+}
+
+export interface BenchMeasurement {
+  flank_wear_um: number;
+  gaps_um: number;
+  overhang_um: number;
 }
 
 export interface VisionStats {
   inspections: number;
   pending_review: number;
   reviewed_blades: number;
-  agreement_pct: number | null;
-  corrected: number;
-  confusion_human_vs_ai: Record<BladeLabel, Record<BladeLabel, number>>;
+  measured_blades: number;
+  accepted_blades: number;
+  mae_um: number | null; // AI เทียบค่าที่วัดจริง
+  bias_um: number | null;
+  zone_agreement_pct: number | null;
+  confusion_measured_vs_ai: Record<VbZone, Record<VbZone, number>>;
 }
 
 export interface TrainingPool {
-  n_labels: number;
-  n_corrected: number;
-  n_confirmed: number;
+  n_labels: number; // ค่า VB ที่วัดจริงและยังไม่เคยใช้ฝึก
+  n_large_error: number;
+  large_error_um: number;
   suggest_retrain: boolean;
   threshold: number;
   job_running: boolean;
@@ -349,8 +387,18 @@ export interface TrainingPool {
 
 export interface EvalBrief {
   n: number;
-  accuracy?: number;
-  macro_f1?: number;
+  mae?: number;
+  rmse?: number;
+  zone_acc?: number;
+}
+
+/** 1 epoch ของการฝึก (loss เป็นหน่วย Huber บน VB/100, val_mae เป็น µm) */
+export interface TrainEpoch {
+  epoch: number;
+  train_loss: number;
+  val_loss?: number;
+  val_mae?: number;
+  lr?: number;
 }
 
 export interface TrainingJob {
@@ -362,15 +410,17 @@ export interface TrainingJob {
   base_version: string;
   candidate_version: string | null;
   n_labels: number;
-  n_corrected: number;
+  n_large_error: number;
   result: {
     candidate_version: string;
     gate: { passed: boolean; no_regression_on_val: boolean; not_worse_on_recent: boolean; rule: string };
     metrics: { val: EvalBrief; base_val: EvalBrief; recent: EvalBrief; base_recent: EvalBrief };
     n_human_train: number;
     n_recent_eval: number;
+    history?: TrainEpoch[];
   } | null;
   error: string | null;
+  progress?: { stage: 'training' | 'evaluating' | 'done'; epoch: number; epochs: number; history: TrainEpoch[] } | null;
 }
 
 export interface VisionModelInfo {
@@ -386,9 +436,14 @@ export interface VisionVersion {
   version: string;
   active: boolean;
   status: string;
+  task: string;
   created_utc: string;
   base_version: string | null;
   n_human_labels: number | null;
-  metrics: any;
+  val_mae: number | null;
+  test_mae: number | null;
   gate: any;
+  arch?: string | null;
+  epochs?: number | null;
+  history?: TrainEpoch[] | null;
 }

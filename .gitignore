@@ -43,7 +43,7 @@ dataset/*
 data/raw/
 data/processed/
 
-# MLflow and Storage
+# Training runs (TensorBoard) and legacy tracking dirs
 mlruns/
 backend/mlruns/
 backend/runs/

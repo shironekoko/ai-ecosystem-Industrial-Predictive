@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "AI Ecosystem API",
-    "description": "## AI Ecosystem — Backend API Server\n\nระบบ Backend สำหรับ AI Ecosystem ที่รวม Services ต่าง ๆ ไว้ในที่เดียว\n\n### 🔑 Authentication & Profile\n- **Sign-up / Login** → JWT token pair (access + refresh)\n- **Profile** — ดู/แก้ไขโปรไฟล์ + รูปโปรไฟล์ผ่าน MinIO\n\n### 📦 Object Storage (MinIO)\n- จัดการ Buckets & Objects — upload, download, presigned URLs\n\n### 🏷️ Data Labeling (Label Studio)\n- จัดการ Projects & Tasks สำหรับ data annotation\n\n### ⚙️ Background Jobs (ARQ + Redis)\n- Enqueue jobs, ตรวจสอบสถานะ, ข้อมูล Redis\n\n### 💚 Health Check\n- ตรวจสอบสถานะทุก component ในระบบ\n\n---\nUse the **Authorize** button above to enter your Bearer token for protected endpoints.",
+    "description": "## AI Ecosystem — Backend API Server\n\nระบบ Backend สำหรับ AI Ecosystem ที่รวม Services ต่าง ๆ ไว้ในที่เดียว\n\n### 🔑 Authentication & Profile\n- **Sign-up / Login** → JWT token pair (access + refresh)\n- **Profile** — ดู/แก้ไขโปรไฟล์ + รูปโปรไฟล์ผ่าน MinIO\n\n### ⏱️ Tool Life (RUL) — แบบจำลองอนุกรมเวลา GRU + สตรีมข้อมูลจริงตามเวลาจริง\n\n### 🔍 Tool Vision — วัดรอยสึก VB ของใบมีดจากภาพ + ผู้ตรวจยืนยัน + ใบสั่งงาน + retrain (ARQ + GPU worker)\n\n### 💚 Health Check\n- ตรวจสอบสถานะทุก component ในระบบ\n\n---\nUse the **Authorize** button above to enter your Bearer token for protected endpoints.",
     "contact": {
       "name": "AI Ecosystem Team"
     },
@@ -41,7 +41,7 @@
           "Health Check"
         ],
         "summary": "ตรวจสอบสถานะระบบและส่วนประกอบต่างๆ",
-        "description": "ตรวจสอบสถานะการเชื่อมต่อของบริการต่างๆ เช่น Database, Redis, MinIO, Label Studio",
+        "description": "ตรวจสอบสถานะการเชื่อมต่อของบริการต่างๆ เช่น Database, Redis, MinIO",
         "operationId": "get_components_health_health_components_get",
         "responses": {
           "200": {
@@ -197,7 +197,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__features__auth__schemas__MessageResponse"
+                  "$ref": "#/components/schemas/MessageResponse"
                 }
               }
             }
@@ -464,753 +464,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/storage/buckets": {
-      "get": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "รายการ Buckets ทั้งหมด",
-        "description": "ดึงรายการ Buckets ทั้งหมดในระบบ MinIO",
-        "operationId": "list_buckets_storage_buckets_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BucketListResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "สร้าง Bucket ใหม่",
-        "description": "สร้าง Bucket ใหม่ในระบบ MinIO",
-        "operationId": "create_bucket_storage_buckets_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateBucketRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/storage/buckets/{bucket_name}": {
-      "delete": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "ลบ Bucket",
-        "description": "ลบ Bucket ออกจากระบบ MinIO",
-        "operationId": "delete_bucket_storage_buckets__bucket_name__delete",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/storage/buckets/{bucket_name}/objects": {
-      "get": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "รายการ Objects ใน Bucket",
-        "description": "ดึงรายการ Objects ทั้งหมดใน Bucket ที่ระบุ",
-        "operationId": "list_objects_storage_buckets__bucket_name__objects_get",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          },
-          {
-            "name": "prefix",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "กรองรายการ Objects ด้วย Prefix",
-              "title": "Prefix"
-            },
-            "description": "กรองรายการ Objects ด้วย Prefix"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ObjectListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/storage/buckets/{bucket_name}/upload": {
-      "post": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "อัปโหลด Object",
-        "description": "อัปโหลดไฟล์ไปยัง Bucket ที่ระบุ",
-        "operationId": "upload_object_storage_buckets__bucket_name__upload_post",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_object_storage_buckets__bucket_name__upload_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/storage/buckets/{bucket_name}/objects/{object_name}/download": {
-      "get": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "ดาวน์โหลด Object",
-        "description": "ดาวน์โหลดไฟล์จาก Bucket ที่ระบุ",
-        "operationId": "download_object_storage_buckets__bucket_name__objects__object_name__download_get",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          },
-          {
-            "name": "object_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Object Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/storage/buckets/{bucket_name}/objects/{object_name}/presigned-url": {
-      "get": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "สร้าง Presigned URL",
-        "description": "สร้าง URL สำหรับดาวน์โหลดไฟล์แบบมีอายุจำกัด",
-        "operationId": "get_presigned_url_storage_buckets__bucket_name__objects__object_name__presigned_url_get",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          },
-          {
-            "name": "object_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Object Name"
-            }
-          },
-          {
-            "name": "expires_seconds",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "description": "อายุของ URL (วินาที)",
-              "default": 3600,
-              "title": "Expires Seconds"
-            },
-            "description": "อายุของ URL (วินาที)"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PresignedUrlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/storage/buckets/{bucket_name}/objects/{object_name}": {
-      "delete": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "ลบ Object",
-        "description": "ลบไฟล์ออกจาก Bucket ที่ระบุ",
-        "operationId": "delete_object_storage_buckets__bucket_name__objects__object_name__delete",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          },
-          {
-            "name": "object_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Object Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/labeling/projects": {
-      "get": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "ดึงรายการโปรเจกต์ทั้งหมด",
-        "description": "ดึงรายการโปรเจกต์ทั้งหมดที่มีอยู่ใน Label Studio",
-        "operationId": "get_projects_labeling_projects_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectListResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "สร้างโปรเจกต์ใหม่",
-        "description": "สร้างโปรเจกต์สำหรับ labeling ใหม่ โดยกำหนด title และ label_config",
-        "operationId": "create_project_labeling_projects_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProjectRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectDetailResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/labeling/projects/{project_id}": {
-      "get": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "ดึงข้อมูลโปรเจกต์",
-        "description": "ดึงรายละเอียดโปรเจกต์ตาม ID ที่ระบุ",
-        "operationId": "get_project_labeling_projects__project_id__get",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectDetailResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "ลบโปรเจกต์",
-        "description": "ลบโปรเจกต์ออกจาก Label Studio",
-        "operationId": "delete_project_labeling_projects__project_id__delete",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/app__features__labeling__schemas__MessageResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/labeling/projects/{project_id}/tasks": {
-      "get": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "ดึงรายการ Tasks ในโปรเจกต์",
-        "description": "ดึงรายการ task ทั้งหมดที่อยู่ในโปรเจกต์ที่ระบุ",
-        "operationId": "get_tasks_labeling_projects__project_id__tasks_get",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "นำเข้า Tasks แบบกลุ่ม",
-        "description": "นำเข้าข้อมูล task เข้าสู่โปรเจกต์เพื่อการ label",
-        "operationId": "create_tasks_labeling_projects__project_id__tasks_post",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateTasksRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/app__features__labeling__schemas__MessageResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/workers/jobs": {
-      "post": {
-        "tags": [
-          "Workers (Background Jobs)"
-        ],
-        "summary": "Enqueue a new background job",
-        "description": "เพิ่ม Job ใหม่เข้าคิวเพื่อประมวลผลเบื้องหลัง (Background Job) ด้วย ARQ",
-        "operationId": "enqueue_job_workers_jobs_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnqueueJobRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/workers/jobs/{job_id}": {
-      "get": {
-        "tags": [
-          "Workers (Background Jobs)"
-        ],
-        "summary": "Get job status",
-        "description": "ตรวจสอบสถานะการทำงานของ Job ผ่าน Job ID",
-        "operationId": "get_job_status_workers_jobs__job_id__get",
-        "parameters": [
-          {
-            "name": "job_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Job Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobStatusResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/workers/redis/ping": {
-      "get": {
-        "tags": [
-          "Workers (Background Jobs)"
-        ],
-        "summary": "Ping Redis server",
-        "description": "ทดสอบการเชื่อมต่อกับ Redis Server",
-        "operationId": "ping_redis_workers_redis_ping_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RedisPingResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/workers/redis/info": {
-      "get": {
-        "tags": [
-          "Workers (Background Jobs)"
-        ],
-        "summary": "Get Redis server info",
-        "description": "ดึงข้อมูลสถานะและสถิติของ Redis Server",
-        "operationId": "redis_info_workers_redis_info_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RedisInfoResponse"
                 }
               }
             }
@@ -1833,6 +1086,65 @@
         }
       }
     },
+    "/tool-vision/inspections/{ins_id}/blades/{blade}/measure": {
+      "post": {
+        "tags": [
+          "Tool Vision (blade inspection)"
+        ],
+        "summary": "Measure",
+        "operationId": "measure_tool_vision_inspections__ins_id__blades__blade__measure_post",
+        "parameters": [
+          {
+            "name": "ins_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ins Id"
+            }
+          },
+          {
+            "name": "blade",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Blade"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Actor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tool-vision/inspections/{ins_id}/review": {
       "post": {
         "tags": [
@@ -1921,21 +1233,22 @@
         }
       }
     },
-    "/tool-vision/replacements/{blade_id}/done": {
+    "/tool-vision/replacements/{ins_id}/done": {
       "post": {
         "tags": [
           "Tool Vision (blade inspection)"
         ],
         "summary": "Replaced",
-        "operationId": "replaced_tool_vision_replacements__blade_id__done_post",
+        "description": "ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก)",
+        "operationId": "replaced_tool_vision_replacements__ins_id__done_post",
         "parameters": [
           {
-            "name": "blade_id",
+            "name": "ins_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Blade Id"
+              "title": "Ins Id"
             }
           }
         ],
@@ -2022,6 +1335,46 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tool-vision/model/activate": {
+      "post": {
+        "tags": [
+          "Tool Vision (blade inspection)"
+        ],
+        "summary": "Model Activate",
+        "description": "ใช้เวอร์ชันที่เลือกเป็นตัวหลัก (ย้อนเวอร์ชันได้) — ตรวจ sha256 + self-test ก่อนสลับ",
+        "operationId": "model_activate_tool_vision_model_activate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -2796,7 +2149,7 @@
           "Health Check"
         ],
         "summary": "ตรวจสอบสถานะระบบและส่วนประกอบต่างๆ",
-        "description": "ตรวจสอบสถานะการเชื่อมต่อของบริการต่างๆ เช่น Database, Redis, MinIO, Label Studio",
+        "description": "ตรวจสอบสถานะการเชื่อมต่อของบริการต่างๆ เช่น Database, Redis, MinIO",
         "operationId": "get_components_health_api_v1_health_components_get",
         "responses": {
           "200": {
@@ -2952,7 +2305,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__features__auth__schemas__MessageResponse"
+                  "$ref": "#/components/schemas/MessageResponse"
                 }
               }
             }
@@ -3219,753 +2572,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/storage/buckets": {
-      "get": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "รายการ Buckets ทั้งหมด",
-        "description": "ดึงรายการ Buckets ทั้งหมดในระบบ MinIO",
-        "operationId": "list_buckets_api_v1_storage_buckets_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BucketListResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "สร้าง Bucket ใหม่",
-        "description": "สร้าง Bucket ใหม่ในระบบ MinIO",
-        "operationId": "create_bucket_api_v1_storage_buckets_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateBucketRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/storage/buckets/{bucket_name}": {
-      "delete": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "ลบ Bucket",
-        "description": "ลบ Bucket ออกจากระบบ MinIO",
-        "operationId": "delete_bucket_api_v1_storage_buckets__bucket_name__delete",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/storage/buckets/{bucket_name}/objects": {
-      "get": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "รายการ Objects ใน Bucket",
-        "description": "ดึงรายการ Objects ทั้งหมดใน Bucket ที่ระบุ",
-        "operationId": "list_objects_api_v1_storage_buckets__bucket_name__objects_get",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          },
-          {
-            "name": "prefix",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "กรองรายการ Objects ด้วย Prefix",
-              "title": "Prefix"
-            },
-            "description": "กรองรายการ Objects ด้วย Prefix"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ObjectListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/storage/buckets/{bucket_name}/upload": {
-      "post": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "อัปโหลด Object",
-        "description": "อัปโหลดไฟล์ไปยัง Bucket ที่ระบุ",
-        "operationId": "upload_object_api_v1_storage_buckets__bucket_name__upload_post",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_object_api_v1_storage_buckets__bucket_name__upload_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/storage/buckets/{bucket_name}/objects/{object_name}/download": {
-      "get": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "ดาวน์โหลด Object",
-        "description": "ดาวน์โหลดไฟล์จาก Bucket ที่ระบุ",
-        "operationId": "download_object_api_v1_storage_buckets__bucket_name__objects__object_name__download_get",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          },
-          {
-            "name": "object_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Object Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/storage/buckets/{bucket_name}/objects/{object_name}/presigned-url": {
-      "get": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "สร้าง Presigned URL",
-        "description": "สร้าง URL สำหรับดาวน์โหลดไฟล์แบบมีอายุจำกัด",
-        "operationId": "get_presigned_url_api_v1_storage_buckets__bucket_name__objects__object_name__presigned_url_get",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          },
-          {
-            "name": "object_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Object Name"
-            }
-          },
-          {
-            "name": "expires_seconds",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "description": "อายุของ URL (วินาที)",
-              "default": 3600,
-              "title": "Expires Seconds"
-            },
-            "description": "อายุของ URL (วินาที)"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PresignedUrlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/storage/buckets/{bucket_name}/objects/{object_name}": {
-      "delete": {
-        "tags": [
-          "Storage (MinIO)"
-        ],
-        "summary": "ลบ Object",
-        "description": "ลบไฟล์ออกจาก Bucket ที่ระบุ",
-        "operationId": "delete_object_api_v1_storage_buckets__bucket_name__objects__object_name__delete",
-        "parameters": [
-          {
-            "name": "bucket_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Bucket Name"
-            }
-          },
-          {
-            "name": "object_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Object Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/labeling/projects": {
-      "get": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "ดึงรายการโปรเจกต์ทั้งหมด",
-        "description": "ดึงรายการโปรเจกต์ทั้งหมดที่มีอยู่ใน Label Studio",
-        "operationId": "get_projects_api_v1_labeling_projects_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectListResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "สร้างโปรเจกต์ใหม่",
-        "description": "สร้างโปรเจกต์สำหรับ labeling ใหม่ โดยกำหนด title และ label_config",
-        "operationId": "create_project_api_v1_labeling_projects_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProjectRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectDetailResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/labeling/projects/{project_id}": {
-      "get": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "ดึงข้อมูลโปรเจกต์",
-        "description": "ดึงรายละเอียดโปรเจกต์ตาม ID ที่ระบุ",
-        "operationId": "get_project_api_v1_labeling_projects__project_id__get",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectDetailResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "ลบโปรเจกต์",
-        "description": "ลบโปรเจกต์ออกจาก Label Studio",
-        "operationId": "delete_project_api_v1_labeling_projects__project_id__delete",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/app__features__labeling__schemas__MessageResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/labeling/projects/{project_id}/tasks": {
-      "get": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "ดึงรายการ Tasks ในโปรเจกต์",
-        "description": "ดึงรายการ task ทั้งหมดที่อยู่ในโปรเจกต์ที่ระบุ",
-        "operationId": "get_tasks_api_v1_labeling_projects__project_id__tasks_get",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Labeling (Label Studio)"
-        ],
-        "summary": "นำเข้า Tasks แบบกลุ่ม",
-        "description": "นำเข้าข้อมูล task เข้าสู่โปรเจกต์เพื่อการ label",
-        "operationId": "create_tasks_api_v1_labeling_projects__project_id__tasks_post",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateTasksRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/app__features__labeling__schemas__MessageResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/workers/jobs": {
-      "post": {
-        "tags": [
-          "Workers (Background Jobs)"
-        ],
-        "summary": "Enqueue a new background job",
-        "description": "เพิ่ม Job ใหม่เข้าคิวเพื่อประมวลผลเบื้องหลัง (Background Job) ด้วย ARQ",
-        "operationId": "enqueue_job_api_v1_workers_jobs_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnqueueJobRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/workers/jobs/{job_id}": {
-      "get": {
-        "tags": [
-          "Workers (Background Jobs)"
-        ],
-        "summary": "Get job status",
-        "description": "ตรวจสอบสถานะการทำงานของ Job ผ่าน Job ID",
-        "operationId": "get_job_status_api_v1_workers_jobs__job_id__get",
-        "parameters": [
-          {
-            "name": "job_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Job Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobStatusResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/workers/redis/ping": {
-      "get": {
-        "tags": [
-          "Workers (Background Jobs)"
-        ],
-        "summary": "Ping Redis server",
-        "description": "ทดสอบการเชื่อมต่อกับ Redis Server",
-        "operationId": "ping_redis_api_v1_workers_redis_ping_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RedisPingResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/workers/redis/info": {
-      "get": {
-        "tags": [
-          "Workers (Background Jobs)"
-        ],
-        "summary": "Get Redis server info",
-        "description": "ดึงข้อมูลสถานะและสถิติของ Redis Server",
-        "operationId": "redis_info_api_v1_workers_redis_info_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RedisInfoResponse"
                 }
               }
             }
@@ -4588,6 +3194,65 @@
         }
       }
     },
+    "/api/v1/tool-vision/inspections/{ins_id}/blades/{blade}/measure": {
+      "post": {
+        "tags": [
+          "Tool Vision (blade inspection)"
+        ],
+        "summary": "Measure",
+        "operationId": "measure_api_v1_tool_vision_inspections__ins_id__blades__blade__measure_post",
+        "parameters": [
+          {
+            "name": "ins_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ins Id"
+            }
+          },
+          {
+            "name": "blade",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Blade"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Actor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tool-vision/inspections/{ins_id}/review": {
       "post": {
         "tags": [
@@ -4676,21 +3341,22 @@
         }
       }
     },
-    "/api/v1/tool-vision/replacements/{blade_id}/done": {
+    "/api/v1/tool-vision/replacements/{ins_id}/done": {
       "post": {
         "tags": [
           "Tool Vision (blade inspection)"
         ],
         "summary": "Replaced",
-        "operationId": "replaced_api_v1_tool_vision_replacements__blade_id__done_post",
+        "description": "ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก)",
+        "operationId": "replaced_api_v1_tool_vision_replacements__ins_id__done_post",
         "parameters": [
           {
-            "name": "blade_id",
+            "name": "ins_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Blade Id"
+              "title": "Ins Id"
             }
           }
         ],
@@ -4777,6 +3443,46 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tool-vision/model/activate": {
+      "post": {
+        "tags": [
+          "Tool Vision (blade inspection)"
+        ],
+        "summary": "Model Activate",
+        "description": "ใช้เวอร์ชันที่เลือกเป็นตัวหลัก (ย้อนเวอร์ชันได้) — ตรวจ sha256 + self-test ก่อนสลับ",
+        "operationId": "model_activate_api_v1_tool_vision_model_activate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -5546,6 +4252,25 @@
         ],
         "title": "AckBody"
       },
+      "ActivateBody": {
+        "properties": {
+          "actor": {
+            "type": "string",
+            "title": "Actor",
+            "description": "ชื่อผู้ทำรายการ (บันทึกใน audit)",
+            "default": "operator"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "ActivateBody"
+      },
       "Actor": {
         "properties": {
           "actor": {
@@ -5783,16 +4508,28 @@
             "minimum": 1.0,
             "title": "Blade"
           },
-          "label": {
+          "source": {
             "type": "string",
-            "title": "Label",
-            "description": "sharp | used | dulled (label ที่ถูกต้อง)"
+            "title": "Source",
+            "description": "AI = ยอมรับค่าที่ AI วัด · BENCH = ค่าจาก optical bench · MANUAL = ค่าที่วัดเอง",
+            "default": "AI"
+          },
+          "vb_um": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vb Um",
+            "description": "VB (µm) — ใช้เมื่อ source = MANUAL"
           }
         },
         "type": "object",
         "required": [
-          "blade",
-          "label"
+          "blade"
         ],
         "title": "BladeDecision"
       },
@@ -5825,80 +4562,6 @@
           "file"
         ],
         "title": "Body_upload_my_avatar_profile_me_avatar_post"
-      },
-      "Body_upload_object_api_v1_storage_buckets__bucket_name__upload_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "File"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_object_api_v1_storage_buckets__bucket_name__upload_post"
-      },
-      "Body_upload_object_storage_buckets__bucket_name__upload_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "File"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_object_storage_buckets__bucket_name__upload_post"
-      },
-      "BucketInfo": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "creation_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Creation Date"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "BucketInfo"
-      },
-      "BucketListResponse": {
-        "properties": {
-          "buckets": {
-            "items": {
-              "$ref": "#/components/schemas/BucketInfo"
-            },
-            "type": "array",
-            "title": "Buckets"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          }
-        },
-        "type": "object",
-        "required": [
-          "buckets",
-          "total"
-        ],
-        "title": "BucketListResponse"
       },
       "ComponentStatus": {
         "properties": {
@@ -5940,68 +4603,6 @@
           "status"
         ],
         "title": "ComponentStatus"
-      },
-      "CreateBucketRequest": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 63,
-            "minLength": 3,
-            "pattern": "^[a-z0-9][a-z0-9.-]*[a-z0-9]$",
-            "title": "Name"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "CreateBucketRequest"
-      },
-      "CreateProjectRequest": {
-        "properties": {
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "label_config": {
-            "type": "string",
-            "title": "Label Config"
-          }
-        },
-        "type": "object",
-        "required": [
-          "title",
-          "label_config"
-        ],
-        "title": "CreateProjectRequest"
-      },
-      "CreateTasksRequest": {
-        "properties": {
-          "tasks": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Tasks"
-          }
-        },
-        "type": "object",
-        "required": [
-          "tasks"
-        ],
-        "title": "CreateTasksRequest"
       },
       "CreateUserRequest": {
         "properties": {
@@ -6067,47 +4668,6 @@
         ],
         "title": "CreateUserRequest"
       },
-      "DeleteResponse": {
-        "properties": {
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "title": "DeleteResponse"
-      },
-      "EnqueueJobRequest": {
-        "properties": {
-          "job_name": {
-            "type": "string",
-            "title": "Job Name",
-            "description": "ชื่อของ job ที่ต้องการรัน",
-            "default": "simple_work"
-          },
-          "job_data": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Job Data",
-            "description": "ข้อมูลที่ส่งให้ job"
-          }
-        },
-        "type": "object",
-        "title": "EnqueueJobRequest"
-      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -6159,64 +4719,6 @@
         ],
         "title": "HealthResponse"
       },
-      "JobResponse": {
-        "properties": {
-          "job_id": {
-            "type": "string",
-            "title": "Job Id",
-            "description": "ID ของ job"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "description": "สถานะของการ enqueue"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "ข้อความอธิบาย"
-          }
-        },
-        "type": "object",
-        "required": [
-          "job_id",
-          "status",
-          "message"
-        ],
-        "title": "JobResponse"
-      },
-      "JobStatusResponse": {
-        "properties": {
-          "job_id": {
-            "type": "string",
-            "title": "Job Id",
-            "description": "ID ของ job"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "description": "สถานะของ job (queued/in_progress/complete/not_found)",
-            "default": "not_found"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result",
-            "description": "ผลลัพธ์ของ job ถ้าทำเสร็จแล้ว"
-          }
-        },
-        "type": "object",
-        "required": [
-          "job_id"
-        ],
-        "title": "JobStatusResponse"
-      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -6237,89 +4739,19 @@
         "title": "LoginRequest",
         "description": "เข้าสู่ระบบ"
       },
-      "ObjectInfo": {
+      "MessageResponse": {
         "properties": {
-          "name": {
+          "message": {
             "type": "string",
-            "title": "Name"
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Size"
-          },
-          "last_modified": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Modified"
-          },
-          "content_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content Type"
+            "title": "Message"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "message"
         ],
-        "title": "ObjectInfo"
-      },
-      "ObjectListResponse": {
-        "properties": {
-          "bucket": {
-            "type": "string",
-            "title": "Bucket"
-          },
-          "objects": {
-            "items": {
-              "$ref": "#/components/schemas/ObjectInfo"
-            },
-            "type": "array",
-            "title": "Objects"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "prefix": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prefix"
-          }
-        },
-        "type": "object",
-        "required": [
-          "bucket",
-          "objects",
-          "total"
-        ],
-        "title": "ObjectListResponse"
+        "title": "MessageResponse",
+        "description": "Generic message response"
       },
       "PredictBody": {
         "properties": {
@@ -6344,270 +4776,6 @@
           "runs"
         ],
         "title": "PredictBody"
-      },
-      "PresignedUrlResponse": {
-        "properties": {
-          "url": {
-            "type": "string",
-            "title": "Url"
-          },
-          "expires_in_seconds": {
-            "type": "integer",
-            "title": "Expires In Seconds"
-          }
-        },
-        "type": "object",
-        "required": [
-          "url",
-          "expires_in_seconds"
-        ],
-        "title": "PresignedUrlResponse"
-      },
-      "ProjectDetailResponse": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "label_config": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label Config"
-          },
-          "task_number": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Number"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "title"
-        ],
-        "title": "ProjectDetailResponse"
-      },
-      "ProjectListResponse": {
-        "properties": {
-          "projects": {
-            "items": {
-              "$ref": "#/components/schemas/ProjectSummary"
-            },
-            "type": "array",
-            "title": "Projects"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          }
-        },
-        "type": "object",
-        "required": [
-          "projects",
-          "total"
-        ],
-        "title": "ProjectListResponse"
-      },
-      "ProjectSummary": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "task_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Count"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "title"
-        ],
-        "title": "ProjectSummary"
-      },
-      "RedisInfoResponse": {
-        "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "description": "สถานะการดึงข้อมูล"
-          },
-          "version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version",
-            "description": "Redis Version"
-          },
-          "uptime_seconds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Uptime Seconds",
-            "description": "เวลาที่ Redis ทำงาน (วินาที)"
-          },
-          "connected_clients": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Connected Clients",
-            "description": "จำนวน Client ที่เชื่อมต่อ"
-          },
-          "used_memory_human": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Used Memory Human",
-            "description": "หน่วยความจำที่ใช้"
-          },
-          "total_keys": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Keys",
-            "description": "จำนวน Key ทั้งหมดใน Redis"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status"
-        ],
-        "title": "RedisInfoResponse"
-      },
-      "RedisPingResponse": {
-        "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "description": "สถานะการเชื่อมต่อ"
-          },
-          "ping": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ping",
-            "description": "ผลการ Ping (True ถ้าสำเร็จ)"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error",
-            "description": "ข้อความ Error ถ้ามีปัญหา"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status"
-        ],
-        "title": "RedisPingResponse"
       },
       "RefreshTokenRequest": {
         "properties": {
@@ -6816,56 +4984,6 @@
         ],
         "title": "SpeedBody"
       },
-      "TaskListResponse": {
-        "properties": {
-          "project_id": {
-            "type": "integer",
-            "title": "Project Id"
-          },
-          "tasks": {
-            "items": {
-              "$ref": "#/components/schemas/TaskSummary"
-            },
-            "type": "array",
-            "title": "Tasks"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          }
-        },
-        "type": "object",
-        "required": [
-          "project_id",
-          "tasks",
-          "total"
-        ],
-        "title": "TaskListResponse"
-      },
-      "TaskSummary": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "data": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Data"
-          },
-          "annotations_count": {
-            "type": "integer",
-            "title": "Annotations Count",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "data"
-        ],
-        "title": "TaskSummary"
-      },
       "TokenResponse": {
         "properties": {
           "access_token": {
@@ -7041,29 +5159,6 @@
           "role"
         ],
         "title": "UpdateUserRoleRequest"
-      },
-      "UploadResponse": {
-        "properties": {
-          "message": {
-            "type": "string",
-            "title": "Message"
-          },
-          "bucket": {
-            "type": "string",
-            "title": "Bucket"
-          },
-          "object_name": {
-            "type": "string",
-            "title": "Object Name"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message",
-          "bucket",
-          "object_name"
-        ],
-        "title": "UploadResponse"
       },
       "UserItem": {
         "properties": {
@@ -7256,33 +5351,6 @@
           "type"
         ],
         "title": "ValidationError"
-      },
-      "app__features__auth__schemas__MessageResponse": {
-        "properties": {
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "title": "MessageResponse",
-        "description": "Generic message response"
-      },
-      "app__features__labeling__schemas__MessageResponse": {
-        "properties": {
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "title": "MessageResponse"
       }
     },
     "securitySchemes": {
@@ -7295,7 +5363,7 @@
   "tags": [
     {
       "name": "Health Check",
-      "description": "ตรวจสอบสถานะระบบและ Components ต่าง ๆ (Database, Redis, MinIO, Label Studio)"
+      "description": "ตรวจสอบสถานะระบบและ Components ต่าง ๆ (Database, Redis, MinIO)"
     },
     {
       "name": "Authentication",
@@ -7306,20 +5374,8 @@
       "description": "จัดการโปรไฟล์ผู้ใช้ — ดู/แก้ไขข้อมูล, อัปโหลด/ลบรูปโปรไฟล์ผ่าน MinIO"
     },
     {
-      "name": "Storage (MinIO)",
-      "description": "จัดการ Object Storage — CRUD buckets, upload/download ไฟล์, สร้าง presigned URL"
-    },
-    {
-      "name": "Labeling (Label Studio)",
-      "description": "จัดการ Label Studio — CRUD projects, จัดการ tasks สำหรับ data annotation"
-    },
-    {
-      "name": "Workers (Background Jobs)",
-      "description": "จัดการ Background Jobs ผ่าน ARQ + Redis — สร้าง job, ดูสถานะ, ข้อมูล Redis"
-    },
-    {
       "name": "Tool Vision (blade inspection)",
-      "description": "ตรวจใบมีด 4 ใบ/เครื่องจากภาพ (YOLOv8n-cls จาก MinIO) → ผู้ตรวจยืนยัน/แก้ label → งานเปลี่ยนใบมีด → retrain"
+      "description": "วัดรอยสึก VB ของ 4 ใบมีดจากภาพ (ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน → retrain"
     },
     {
       "name": "Tool Life (RUL)",

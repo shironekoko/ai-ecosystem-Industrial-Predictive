@@ -66,7 +66,7 @@ Swagger (ข้อมูลล่าสุดเสมอ): `http://localhost:80
 ### แบบจำลอง
 | Method | Path | ผล |
 |---|---|---|
-| GET | `/tool-life/model` | `status`, `version`, `sha256`, `source` (minio://…), `meta` (อินพุต เกณฑ์ ดอกฝึก/สงวน ช่วง นโยบาย), `evaluation` (LOTO รวม) |
+| GET | `/tool-life/model` | `status`, `version`, `sha256`, `source` (minio://…), `meta` (อินพุต เกณฑ์ ดอกฝึก/สงวน ช่วง นโยบาย), `evaluation` (LOTO รวมของ GRU direct-RUL) |
 | GET | `/tool-life/model/versions` | ทุกเวอร์ชันใน `models/tool-rul/` (+ `active`) |
 | POST | `/tool-life/model/reload` | `{"version": null}` = ตาม `latest.json`; ตรวจ sha256 + self-test ก่อนใช้; `503` ถ้าไม่ผ่าน |
 
@@ -93,25 +93,27 @@ Swagger (ข้อมูลล่าสุดเสมอ): `http://localhost:80
 
 ---
 
-## 2. Tool Vision (`/tool-vision`) — ตรวจใบมีด 4 ใบของดอกที่ถอด (ต่อจาก Machine Monitoring)
+## 2. Tool Vision (`/tool-vision`) — วัดรอยสึก VB ของใบมีด 4 ใบของดอกที่ถอด (ต่อจาก Machine Monitoring)
 
 ขั้นตอน: RUL แจ้ง REPLACE_NOW → `POST /tool-life/machines/{m}/acknowledge {"action": "replace"}` → ระบบสร้างรายการตรวจอัตโนมัติ
-(ภาพ 4 ใบมีดตอนถอดดอก → AI, `trigger = RUL_EOL`, ผูกกับ `cycle_id` ของสตรีม + alarm INFO) → `review` (ผู้ตรวจยืนยัน/แก้ครบ 4 ใบ)
-→ ใบที่ label สุดท้ายเป็น `dulled` = ใบสั่งเปลี่ยนใบมีด (`REQUIRED` → `REPLACED`) + alarm WARNING · label ที่คนยืนยันเข้า pool → `training/start` → candidate → `promote`
+(ภาพ 4 ใบมีดตอนถอดดอก → แบบจำลองวัด VB, `trigger = RUL_EOL`, ผูกกับ `cycle_id` ของสตรีม + alarm INFO)
+→ ผู้ตรวจเลือกค่าที่ใช้ตัดสินของแต่ละใบ: ยอมรับค่า AI / วัดบน optical bench (`measure`) / กรอกค่าที่วัดเอง → `review`
+→ **ระดับดอก = VB เฉลี่ย 4 ใบ** (นิยามเดียวกับ label ของ RUL): ≥ 140 µm = ต้องเปลี่ยน/ลับดอก (`REQUIRED`), 103–140 µm = ควรเปลี่ยนตามแผน (`ADVISED`) → ใบสั่งงาน 1 ใบต่อดอก → `REPLACED` + alarm · VB รายใบบอกคมที่สึกมากสุด/เกิน 140 µm เฉพาะใบ · ค่าที่วัดจริงเข้า pool → `training/start` → candidate → `promote`
 
-เครื่องเดียวกัน ดอกเดียวกัน: M1/M2/M3 = ข้อมูลเซนเซอร์ LUH T3/T6/T9 + ภาพใบมีด Nonastreda ดอก 8/9/10 (รอบสุดท้าย = ภาพตอนถอดดอก) · ตรวจ 1 ครั้งต่อ `cycle_id`
-รายการตรวจแบบเดิมที่ไม่ผูกกับรอบการใช้งานดอกมีสถานะ `ARCHIVED` (ไม่แสดงในคิว/ใบสั่งงาน)
+เกณฑ์เดียวกับแบบจำลอง RUL: `normal` < 103 µm ≤ `accel` < 140 µm ≤ `eol` · เครื่องเดียวกัน ดอกเดียวกัน: M1/M2/M3 = LUH T3/T6/T9 + ภาพ Nonastreda ดอก 8/9/10 (รอบช่วงท้ายอายุที่ VB เฉลี่ย 4 ใบใกล้กับ VB จริงของดอกตอนถอดที่สุด — ค่าจริงใช้เลือกภาพภายใน ไม่ส่งออก)
+ค่าที่ optical bench วัดได้ (`metrology`) ไม่ถูกส่งออกจนกว่าผู้ตรวจสั่งวัดใบนั้น · รายการตรวจแบบเดิมที่ไม่ผูกกับรอบการใช้งานดอกมีสถานะ `ARCHIVED`
 
 | Method | Path | Body / ผล |
 |---|---|---|
-| GET | `/tool-vision/stations` | ต่อเครื่อง: `tool_id`, `rul` (state, rul_min, rul_lo, recommendation, …จาก Machine Monitoring), `cycle_id`, `cycle_inspection` (ผลตรวจของดอกที่เพิ่งถอด), `can_capture`, `pending_review`, `open_replacements` |
+| GET | `/tool-vision/stations` | ต่อเครื่อง: `tool_id`, `rul` (state, rul_min, rul_lo, recommendation, …จาก Machine Monitoring), `cycle_id`, `cycle_inspection`, `can_capture`, `pending_review`, `open_replacements` |
 | POST | `/tool-vision/stations/{m}/capture` | `{"actor"}` — ถ่ายซ้ำด้วยมือเมื่อการถ่ายอัตโนมัติไม่สำเร็จ ได้เฉพาะดอกที่ถอดแล้ว (`409` ถ้าดอกยังอยู่บนเครื่อง; เรียกซ้ำได้ผลเดิม) |
-| GET | `/tool-vision/inspections?status=PENDING_REVIEW\|VERIFIED\|ARCHIVED&machine=` · `/inspections/{id}` · `/inspections/{id}/blades/{b}/image` | รายการ / รายละเอียด (`rul_context` = เวลาตัดตอนถอด, RUL/P10–P90, คำแนะนำ, ผู้ถอด, `images_trained_in`; `blades[]`: `pred_label`, `confidence`, `probs`, `metrology` (flank_wear/gaps/overhang µm)) / ภาพ (MinIO bucket `inspections`) |
-| POST | `/tool-vision/inspections/{id}/review` | `{"actor", "blades": [{"blade": 1, "label": "sharp"}, …4 ใบ], "note"}` → `review` = CONFIRMED (AI ถูก) / CORRECTED (คนแก้) |
-| GET / POST | `/tool-vision/replacements` · `/replacements/{blade_id}/done` · `/replacements/export/csv` | ใบสั่งเปลี่ยนใบมีด `open` / `done` (มี `tool_ref`, `removed_t_min`, `rul_recommendation`, `removed_by`) · `summary` = 1 ใบสั่งงานต่อดอกที่ถอด |
-| GET | `/tool-vision/stats` | `agreement_pct`, `corrected`, `confusion_human_vs_ai` |
-| GET / POST | `/tool-vision/model` · `/model/versions` · `/model/reload` | แบบจำลองจาก MinIO `models/tool-vision/<version>/{model.pt, meta.json}` |
-| GET / POST | `/tool-vision/training/pool` · `/training/start` · `/training/jobs` · `/training/jobs/{id}/promote` · `/training/jobs/{id}/reject` | retrain ใน trainer-worker (ARQ, GPU) · ภาพเดียวกัน (ดอกเดิมถูกเล่นซ้ำ) นับครั้งเดียวและไม่เข้า pool อีกเมื่อฝึกแล้ว · gate: macro-F1 บน validation ไม่ลด > 0.02 และ accuracy บนข้อมูลล่าสุดที่คนยืนยันไม่ลดลง |
+| GET | `/tool-vision/inspections?status=PENDING_REVIEW\|VERIFIED\|ARCHIVED&machine=` · `/inspections/{id}` · `/inspections/{id}/blades/{b}/image` | รายการ / รายละเอียด (`rul_context`, `ai_summary` = ระดับดอกจากค่า AI {mean_vb, mean_lo, mean_hi, verdict, worst_blade, over_limit}, `final_summary` = ระดับดอกจากค่าที่ยืนยัน, `low_confidence` = ช่วงของค่าเฉลี่ยคร่อมเกณฑ์; `blades[]`: `pred_vb`, `vb_lo`, `vb_hi` (P10–P90), `zone`, `probs` {normal, accel, eol}, `confidence`, `near_threshold`, `final_vb`, `vb_source`, `final_zone`, `replace_status`) / ภาพ (MinIO bucket `inspections`) |
+| POST | `/tool-vision/inspections/{id}/blades/{b}/measure` | `{"actor"}` → `{"flank_wear_um", "gaps_um", "overhang_um"}` ค่าที่ optical bench วัดของใบนั้น (บันทึก Audit) |
+| POST | `/tool-vision/inspections/{id}/review` | `{"actor", "blades": [{"blade": 1, "source": "AI" \| "BENCH" \| "MANUAL", "vb_um": 132.5 (MANUAL)}, …4 ใบ], "note"}` → `review` = CONFIRMED (ยอมรับค่า AI) / MEASURED (วัดจริง) |
+| GET / POST | `/tool-vision/replacements` · `/replacements/{inspection_id}/done` · `/replacements/export/csv` | ใบสั่งงานระดับดอก `open` / `done`: `priority` REQUIRED/ADVISED, `mean_vb`, `worst_blade`, `over_limit`, `blades[]` (final_vb, vb_source, pred_vb), `tool_ref`, `removed_t_min`, `rul_recommendation` · `done` ปิดใบสั่งงานทั้งดอก |
+| GET | `/tool-vision/stats` | `measured_blades`, `mae_um` / `bias_um` (AI เทียบค่าวัดจริง), `zone_agreement_pct`, `confusion_measured_vs_ai` |
+| GET / POST | `/tool-vision/model` · `/model/versions` · `/model/reload` · `/model/activate` | แบบจำลองจาก MinIO `models/tool-vision/<version>/{model.pt, meta.json}` (`task = vb_regression`) · `versions` = ตัวที่ใช้งาน/เวอร์ชันก่อน/candidate รอตัดสิน (candidate ที่ reject ยังอยู่ใน MinIO แต่ไม่แสดง) · meta มี `history` (loss/val MAE/lr รายรอบ), ผลระดับดอก · `activate {version, actor}` = สลับ/ย้อนเวอร์ชัน (ตรวจ sha256 + self-test) |
+| GET / POST | `/tool-vision/training/pool` · `/training/start` · `/training/jobs` · `/training/jobs/{id}/promote` · `/training/jobs/{id}/reject` | retrain ใน trainer-worker (ARQ, GPU) จากค่าที่วัดจริงเท่านั้น · `jobs[].progress` = ความคืบหน้าสดรายรอบ (Redis) · `result.history` = กราฟการเทรน · TensorBoard ที่ http://localhost:6006 · ภาพเดียวกัน (ดอกเดิมถูกเล่นซ้ำ) นับครั้งเดียว · gate: MAE บนดอก 7 แย่ลงไม่เกิน 1 µm และ MAE บนค่าที่วัดล่าสุดไม่แย่กว่าเดิม |
 
 ## 3. Reports (`/reports`)
 | Method | Path | ผล |
@@ -127,4 +129,4 @@ Swagger (ข้อมูลล่าสุดเสมอ): `http://localhost:80
 | GET | `/audit-logs?eventType=&search=&page=&limit=` | `TOOL_REPLACED`, `TOOL_LIFE_OVERRIDE`, … |
 
 ## 5. ระบบพื้นฐาน
-`/auth/*` (login, signup, refresh, logout, me) · `/users/*` · `/profile/*` · `/storage/*` (MinIO) · `/labeling/*` (Label Studio) · `/workers/*` (ARQ) · `/health`, `/health/components`
+`/auth/*` (login, signup, refresh, logout, me) · `/users/*` · `/profile/*` · `/health`, `/health/components` (DB, Redis, MinIO)

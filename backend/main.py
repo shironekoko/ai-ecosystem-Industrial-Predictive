@@ -29,7 +29,7 @@ setup_observability(service_name="ai-ecosystem-backend")
 tags_metadata = [
     {
         "name": "Health Check",
-        "description": "ตรวจสอบสถานะระบบและ Components ต่าง ๆ (Database, Redis, MinIO, Label Studio)",
+        "description": "ตรวจสอบสถานะระบบและ Components ต่าง ๆ (Database, Redis, MinIO)",
     },
     {
         "name": "Authentication",
@@ -40,20 +40,9 @@ tags_metadata = [
         "description": "จัดการโปรไฟล์ผู้ใช้ — ดู/แก้ไขข้อมูล, อัปโหลด/ลบรูปโปรไฟล์ผ่าน MinIO",
     },
     {
-        "name": "Storage (MinIO)",
-        "description": "จัดการ Object Storage — CRUD buckets, upload/download ไฟล์, สร้าง presigned URL",
-    },
-    {
-        "name": "Labeling (Label Studio)",
-        "description": "จัดการ Label Studio — CRUD projects, จัดการ tasks สำหรับ data annotation",
-    },
-    {
-        "name": "Workers (Background Jobs)",
-        "description": "จัดการ Background Jobs ผ่าน ARQ + Redis — สร้าง job, ดูสถานะ, ข้อมูล Redis",
-    },
-    {
         "name": "Tool Vision (blade inspection)",
-        "description": "ตรวจใบมีด 4 ใบ/เครื่องจากภาพ (YOLOv8n-cls จาก MinIO) → ผู้ตรวจยืนยัน/แก้ label → งานเปลี่ยนใบมีด → retrain",
+        "description": "วัดรอยสึก VB ของ 4 ใบมีดจากภาพ (ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → "
+                       "ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน → retrain",
     },
     {
         "name": "Tool Life (RUL)",
@@ -142,7 +131,13 @@ async def lifespan(app: FastAPI):
 
     # ── Tool vision: โหลดแบบจำลองภาพใบมีดจาก MinIO (ไม่บล็อกการเริ่มระบบ) ──
     from app.features.tool_vision.registry import registry as vision_registry
-    asyncio.get_running_loop().run_in_executor(None, vision_registry.load)
+    from app.features.tool_vision.service import rescore_legacy_pending
+
+    def _load_vision():
+        vision_registry.load()
+        rescore_legacy_pending()        # รายการรอตรวจที่สร้างโดยแบบจำลองจำแนกคลาสรุ่นเก่า → วัด VB ใหม่
+
+    asyncio.get_running_loop().run_in_executor(None, _load_vision)
 
     yield
 
@@ -160,12 +155,8 @@ app = FastAPI(
         "### 🔑 Authentication & Profile\n"
         "- **Sign-up / Login** → JWT token pair (access + refresh)\n"
         "- **Profile** — ดู/แก้ไขโปรไฟล์ + รูปโปรไฟล์ผ่าน MinIO\n\n"
-        "### 📦 Object Storage (MinIO)\n"
-        "- จัดการ Buckets & Objects — upload, download, presigned URLs\n\n"
-        "### 🏷️ Data Labeling (Label Studio)\n"
-        "- จัดการ Projects & Tasks สำหรับ data annotation\n\n"
-        "### ⚙️ Background Jobs (ARQ + Redis)\n"
-        "- Enqueue jobs, ตรวจสอบสถานะ, ข้อมูล Redis\n\n"
+        "### ⏱️ Tool Life (RUL) — แบบจำลองอนุกรมเวลา GRU + สตรีมข้อมูลจริงตามเวลาจริง\n\n"
+        "### 🔍 Tool Vision — วัดรอยสึก VB ของใบมีดจากภาพ + ผู้ตรวจยืนยัน + ใบสั่งงาน + retrain (ARQ + GPU worker)\n\n"
         "### 💚 Health Check\n"
         "- ตรวจสอบสถานะทุก component ในระบบ\n\n"
         "---\n"
@@ -217,9 +208,6 @@ from fastapi import APIRouter
 from app.features.health.router import router as health_router
 from app.features.auth.router import router as auth_router
 from app.features.profile.router import router as profile_router
-from app.features.storage.router import router as storage_router
-from app.features.labeling.router import router as labeling_router
-from app.features.workers.router import router as workers_router
 from app.features.tool_life.router import router as tool_life_router
 from app.features.tool_vision.router import router as tool_vision_router
 from app.features.alarms.router import router as alarms_router
@@ -231,9 +219,6 @@ from app.features.users.router import router as users_router
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(profile_router)
-app.include_router(storage_router)
-app.include_router(labeling_router)
-app.include_router(workers_router)
 app.include_router(tool_life_router)
 app.include_router(tool_vision_router)
 app.include_router(alarms_router)
@@ -246,9 +231,6 @@ api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(health_router)
 api_v1.include_router(auth_router)
 api_v1.include_router(profile_router)
-api_v1.include_router(storage_router)
-api_v1.include_router(labeling_router)
-api_v1.include_router(workers_router)
 api_v1.include_router(tool_life_router)
 api_v1.include_router(tool_vision_router)
 api_v1.include_router(alarms_router)

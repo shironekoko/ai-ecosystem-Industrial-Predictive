@@ -24,12 +24,8 @@
 - ตั้งค่า Configuration สำหรับ `ARQ` (Background Jobs)
 - ฟังก์ชันตรวจสอบสถานะ (Health check) สำหรับ Redis
 
-### `label_studio_client.py`
-- ตั้งค่า SDK Client สำหรับเชื่อมต่อกับ Label Studio
-- คืนค่า instance ของ Label Studio สำหรับให้ฟีเจอร์ที่เกี่ยวข้องนำไปใช้ต่อ
-
 ## การใช้งานโดยโมดูลฟีเจอร์
-โมดูลฟีเจอร์ (เช่น `features/auth/`, `features/storage/`) จะทำการ `import` เครื่องมือจาก `core/` เหล่านี้ เพื่อไปประกอบใน Business Logic (Services)
+โมดูลฟีเจอร์ (เช่น `features/auth/`, `features/tool_vision/`) จะทำการ `import` เครื่องมือจาก `core/` เหล่านี้ เพื่อไปประกอบใน Business Logic (Services)
 
 ## Configuration Variables (ตัวอย่าง)
 | ตัวแปร | หน้าที่ |
@@ -37,5 +33,4 @@
 | `DATABASE_URL` | String เชื่อมต่อกับ PostgreSQL |
 | `REDIS_URL` | String เชื่อมต่อกับ Redis |
 | `MINIO_ENDPOINT` | URL ของ MinIO Server |
-| `LABEL_STUDIO_URL` | URL ของ Label Studio |
 | `JWT_SECRET_KEY` | รหัสลับสำหรับเซ็น JWT |

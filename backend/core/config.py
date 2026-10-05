@@ -32,10 +32,6 @@ class Settings(BaseSettings):
     # ── Redis ──
     redis_url: str = "redis://localhost:6379"
 
-    # ── Label Studio ──
-    label_studio_url: str = "http://localhost:8080"
-    label_studio_api_key: str = ""
-
     # ── JWT ──
     jwt_secret_key: str = secrets.token_urlsafe(32)
     jwt_algorithm: str = "HS256"
@@ -44,9 +40,6 @@ class Settings(BaseSettings):
 
     # ── CORS ──
     cors_origins: list[str] = ["*"]
-
-    # ── MLflow ──
-    mlflow_tracking_uri: str = "http://localhost:5001"
 
 
 settings = Settings()  # type: ignore[call-arg]

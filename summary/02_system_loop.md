@@ -46,7 +46,7 @@ sequenceDiagram
 ## ขั้น 0 · เริ่มระบบ (`backend/main.py` → `lifespan`)
 1. สร้างตารางใน PostgreSQL + `ensure_schema` (เพิ่มคอลัมน์ใหม่ให้ฐานข้อมูลเดิม, ย้ายข้อมูลรูปแบบเก่า) + สร้างบัญชีตั้งต้นของเครื่องพัฒนา (admin, engineer)
 2. สร้าง bucket `models` ใน MinIO
-3. `StreamManager.start()` — โหลดแบบจำลอง RUL จาก MinIO (sha256 + self-test) · อ่านผลประเมินเดิมจาก `logs/tool_life_evaluations.jsonl` · สร้างสตรีม M1/M2/M3 = ดอกที่สงวนไว้ใน metadata ของแบบจำลอง (T3/T6/T9) · เริ่มสตรีมอัตโนมัติ (`TOOL_LIFE_AUTOSTART`) · ถ้าโหลดแบบจำลองไม่ได้ ลองใหม่ทุก 30 วินาที
+3. `StreamManager.start()` — โหลดแบบจำลอง RUL จาก MinIO (sha256 + self-test) · อ่านผลประเมินเดิมจาก `logs/tool_life_evaluations.jsonl` · สร้างสตรีม M1/M2/M3 = ดอกที่สงวนไว้ใน metadata ของแบบจำลอง (T3/T6/T9) · ทุกเครื่องอยู่ในสถานะ `IDLE` (หยุด) จนผู้ควบคุมกด **เริ่มตัด** ที่ Machine Monitoring (ตั้ง `TOOL_LIFE_AUTOSTART=true` ถ้าต้องการให้เริ่มเอง) · ถ้าโหลดแบบจำลองไม่ได้ ลองใหม่ทุก 30 วินาที
 4. ผูก `removal_listeners` ← `tool_vision.service.on_tool_removed` (ถอดดอกแล้วส่งต่อให้งานตรวจภาพ)
 5. โหลดแบบจำลองภาพจาก MinIO ใน thread แยก (ไม่บล็อกการเริ่มระบบ) + ให้แบบจำลองวัดรายการที่รอตรวจซึ่งสร้างโดยแบบจำลองรุ่นเก่าใหม่
 6. ลงทะเบียน gauge ของ observability (ถ้าเปิดชุด observability)

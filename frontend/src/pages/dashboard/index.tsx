@@ -97,7 +97,13 @@ const MachineCard: React.FC<{ m: MachineSnapshot }> = ({ m }) => {
           </>
         ) : (
           <div className="py-3">
-            <p className="text-sm font-medium text-gray-600">{m.model_ready ? PHASE_TEXT[m.phase] : 'แบบจำลองยังไม่พร้อม (MinIO)'}</p>
+            <p className="text-sm font-medium text-gray-600">
+              {!m.model_ready
+                ? 'แบบจำลองยังไม่พร้อม (MinIO)'
+                : m.state === 'IDLE'
+                ? 'เครื่องหยุดอยู่ — กดเริ่มตัดที่หน้าติดตามเครื่อง'
+                : PHASE_TEXT[m.phase]}
+            </p>
             {m.phase === 'BASELINE' && (
               <div className="mt-2">
                 <div className="h-2 rounded-full bg-gray-100 overflow-hidden">

@@ -28,7 +28,7 @@ uv run pytest tests/ -q
 |---|---|---|
 | `DATABASE_URL` · `REDIS_URL` · `MINIO_ENDPOINT` · `MINIO_ROOT_USER` / `_PASSWORD` | ดู `core/config.py` | การเชื่อมต่อ PostgreSQL / Redis / MinIO |
 | `JWT_SECRET_KEY` · `ACCESS_TOKEN_EXPIRE_MINUTES` | สุ่มทุกครั้งที่เริ่ม · 30 | เซ็น JWT · อายุ token |
-| `TOOL_LIFE_AUTOSTART` | `true` | เริ่มสตรีม 3 เครื่องเมื่อ backend เริ่ม |
+| `TOOL_LIFE_AUTOSTART` | `false` | `false` = ทุกเครื่องหยุดอยู่ (IDLE) จนผู้ควบคุมกดเริ่มตัด · `true` = เริ่มสตรีม 3 เครื่องเองเมื่อ backend เริ่ม |
 | `TOOL_LIFE_HOLD_ON_REPLACE` | `true` | interlock: หยุดป้อนเมื่อถึง REPLACE_NOW |
 | `TOOL_LIFE_STREAMS` | ดอกที่สงวนไว้ใน meta ของแบบจำลอง (`1:3,2:6,3:9`) | เครื่อง → ดอกที่สตรีม |
 | `TOOL_LIFE_STATE_DIR` | `backend/logs` (`/app/logs` ใน container) | ที่เก็บ `tool_life_evaluations.jsonl` |

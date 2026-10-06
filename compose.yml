@@ -86,7 +86,7 @@ services:
       - DATABASE_URL=postgresql://myuser:mypassword@db:5432/mydatabase
       - MINIO_ENDPOINT=minio:9000
       # ── Tool life (RUL) streaming: แบบจำลองดึงจาก MinIO bucket models/tool-rul/, ข้อมูลจาก ./dataset (LUH) ──
-      - TOOL_LIFE_AUTOSTART=true          # เริ่มสตรีมดอกที่สงวนไว้ (T3/T6/T9) ตามเวลาจริงเมื่อ backend เริ่ม
+      - TOOL_LIFE_AUTOSTART=false         # false = ทุกเครื่องหยุดอยู่ (IDLE) จนผู้ควบคุมกดเริ่มตัด · true = เริ่มสตรีม T3/T6/T9 เองเมื่อ backend เริ่ม
       - TOOL_LIFE_HOLD_ON_REPLACE=true    # interlock: หยุดป้อนเมื่อระบบสั่ง REPLACE_NOW รอผู้ควบคุมยืนยัน
     depends_on:
       redis:

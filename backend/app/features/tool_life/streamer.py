@@ -474,7 +474,8 @@ class StreamManager:
             self.error = f"ไม่พบชุดข้อมูลสำหรับสตรีม: {e}"
             log.error(self.error)
             return
-        if os.environ.get("TOOL_LIFE_AUTOSTART", "true").lower() != "false":
+        # ค่าเริ่มต้น: ทุกเครื่องหยุดอยู่ (IDLE) จนผู้ควบคุมกดเริ่มตัดที่ Machine Monitoring
+        if os.environ.get("TOOL_LIFE_AUTOSTART", "false").lower() == "true":
             for s in self.streams.values():
                 s.start()
         self._bg.append(asyncio.create_task(self._retry_model()))

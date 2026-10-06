@@ -33,6 +33,6 @@
 WebSocket: browser ส่ง `Authorization` header ไม่ได้ และไม่ใส่ token ใน URL (ติด access log / trace) → ข้อความแรกต้องเป็น
 `{"token": "<access token>", "waveform": 2}` ภายใน 5 วินาที ไม่เช่นนั้น backend ปิดด้วย code `4401` (เว็บล้าง session แล้วไปหน้า login)
 
-ตัวแปรสภาพแวดล้อม: `LUH_DATASET_DIR`, `TOOL_LIFE_AUTOSTART`, `TOOL_LIFE_HOLD_ON_REPLACE`, `TOOL_LIFE_STREAMS` (เช่น `1:3,2:6,3:9`), `TOOL_LIFE_STATE_DIR`
+ตัวแปรสภาพแวดล้อม: `LUH_DATASET_DIR`, `TOOL_LIFE_AUTOSTART` (ค่าเริ่มต้น `false` = ทุกเครื่องเริ่มที่ `IDLE` รอกดเริ่มตัด), `TOOL_LIFE_HOLD_ON_REPLACE`, `TOOL_LIFE_STREAMS` (เช่น `1:3,2:6,3:9`), `TOOL_LIFE_STATE_DIR`
 
 **กันสปอยข้อมูล:** ระหว่างใช้งานไม่ส่ง VB, RUL จริง หรือชื่อไฟล์ (มี VB ฝังอยู่) ออกนอก backend — ค่าจริงใช้เฉพาะในผลประเมินหลังถอดดอก

@@ -196,18 +196,6 @@ export interface AuditEvent {
   status: 'SUCCESS' | 'WARNING' | 'FAILED';
 }
 
-export interface AlertNotification {
-  id: string;
-  severity: 'CRITICAL' | 'WARNING' | 'INFO';
-  sourceService: string;
-  title: string;
-  message: string;
-  timestamp: string;
-  isRead: boolean;
-  toolRef?: string;
-  actionUrl?: string;
-}
-
 // ─────────────────────────────────────────────────────────────
 // Tool vision — วัดรอยสึก VB ของใบมีด 4 ใบ/ดอกจากภาพ
 // ─────────────────────────────────────────────────────────────
@@ -395,6 +383,7 @@ export interface EvalBrief {
 /** 1 epoch ของการฝึก (loss เป็นหน่วย Huber บน VB/100, val_mae เป็น µm) */
 export interface TrainEpoch {
   epoch: number;
+  member?: number;            // สมาชิกของ ensemble (epoch นับต่อกันข้ามสมาชิก)
   train_loss: number;
   val_loss?: number;
   val_mae?: number;
@@ -420,7 +409,14 @@ export interface TrainingJob {
     history?: TrainEpoch[];
   } | null;
   error: string | null;
-  progress?: { stage: 'training' | 'evaluating' | 'done'; epoch: number; epochs: number; history: TrainEpoch[] } | null;
+  progress?: {
+    stage: 'training' | 'evaluating' | 'done';
+    epoch: number;
+    epochs: number;              // รวมทุกสมาชิก (ใช้กับแถบความคืบหน้า)
+    epochs_per_member?: number;  // ใช้กับแกนของกราฟ
+    members?: number;
+    history: TrainEpoch[];
+  } | null;
 }
 
 export interface VisionModelInfo {

@@ -7,8 +7,14 @@
  *  - event    : เหตุการณ์/การแจ้งเตือน
  *  - frame    : สัญญาณดิบทุก 0.1 วินาที (เฉพาะเครื่องที่เลือกดู)
  * ถ้าการเชื่อมต่อหลุด จะลองเชื่อมใหม่เรื่อย ๆ และแสดงสถานะ DISCONNECTED (ไม่เติมข้อมูลปลอม)
+ *
+ * ยืนยันตัวตน: browser ส่ง Authorization header กับ WebSocket ไม่ได้ และไม่ใส่ token ใน URL (ติด access log)
+ * → ข้อความแรกหลังเชื่อมต่อคือ {token, waveform} · backend ปิดด้วย code 4401 = token ไม่ถูกต้อง/หมดอายุ → ไปหน้า login
  */
 import type { StreamConnectionStatus, StreamMessage } from '../types';
+import { endSession, getToken } from './session';
+
+const WS_UNAUTHORIZED = 4401;
 
 type Listener = (msg: StreamMessage) => void;
 type StatusListener = (s: StreamConnectionStatus) => void;
@@ -42,7 +48,7 @@ class ToolLifeStream {
     this.ws = ws;
     ws.onopen = () => {
       this.setStatus('CONNECTED');
-      ws.send(JSON.stringify({ waveform: this.waveform })); // ค่าที่เลือกระหว่างกำลังเชื่อมต่อ
+      ws.send(JSON.stringify({ token: getToken(), waveform: this.waveform })); // + เครื่องที่เลือกระหว่างกำลังเชื่อมต่อ
     };
     ws.onmessage = (ev) => {
       try {
@@ -52,10 +58,11 @@ class ToolLifeStream {
         /* ignore malformed */
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       this.ws = null;
       this.setStatus('DISCONNECTED');
-      if (this.refCount > 0) this.retry = setTimeout(() => this.connect(), 2000);
+      if (ev.code === WS_UNAUTHORIZED) endSession();
+      else if (this.refCount > 0) this.retry = setTimeout(() => this.connect(), 2000);
     };
     ws.onerror = () => ws.close();
   }

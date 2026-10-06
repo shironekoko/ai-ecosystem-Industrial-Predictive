@@ -38,16 +38,6 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    """สร้าง JWT refresh token."""
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(days=settings.refresh_token_expire_days)
-    )
-    to_encode.update({"exp": expire, "type": "refresh"})
-    return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
-
-
 def decode_token(token: str) -> dict | None:
     """Decode และ validate JWT token — return payload หรือ None ถ้า invalid."""
     try:

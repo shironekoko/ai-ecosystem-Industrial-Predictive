@@ -1,10 +1,14 @@
+from typing import List, Literal
+
 from pydantic import BaseModel
-from typing import List, Literal, Optional
+
 
 class AuditEvent(BaseModel):
+    """eventType ที่ระบบบันทึก: TOOL_REPLACED, TOOL_LIFE_OVERRIDE (Machine Monitoring) · VISION_INSPECTION, VISION_MEASURE,
+    VISION_REVIEW, TOOL_SERVICED, VISION_RETRAIN_REQUESTED, VISION_MODEL_PROMOTED / _REJECTED / _ACTIVATED (Tool Inspection)"""
     id: str
     timestamp: str
-    eventType: Literal["WEAR_CONFIRMED", "FALSE_ALARM_FLAGGED", "RETRAIN_TRIGGERED", "MODEL_PROMOTED", "USER_ACCESS"]
+    eventType: str
     actor: str
     role: str
     targetResource: str

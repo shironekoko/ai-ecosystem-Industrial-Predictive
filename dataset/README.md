@@ -1,100 +1,29 @@
-# Nonastreda Multimodal Tool Wear Dataset
+# dataset — ชุดข้อมูล (ไม่อยู่ใน git)
 
-This repository uses the **Nonastreda Multimodal Dataset for Identifying Tool Wear Condition** for industrial predictive maintenance, cutting dynamics analysis, and dual-AI computer vision quality control.
-
-Due to file size constraints (over 1.5 GB uncompressed, with `forces_xyz_raw.mat` being ~270 MB), raw dataset files are **excluded from Git tracking via `.gitignore`**.
-
----
-
-## 📥 Dataset Download Link
-
-* **Official Mendeley Data Repository:**  
-  👉 **[https://data.mendeley.com/datasets/m892d2wtzh/1](https://data.mendeley.com/datasets/m892d2wtzh/1)**
-
-* **Dataset Citation:**  
-  *Václav, et al.* (2025). *Nonastreda Multimodal Dataset for Identifying Tool Wear Condition*, Mendeley Data, V1, doi: 10.17632/m892d2wtzh.1
-
----
-
-## 📁 Installation & Directory Structure
-
-Download the dataset archive from the link above and extract the contents directly into the `dataset/` directory.
-
-The resulting folder structure should look like this:
+ไฟล์ใหญ่จึงไม่ commit — ดาวน์โหลดแล้วแตกไฟล์ไว้ในโฟลเดอร์นี้ (compose mount เป็น `/dataset` ให้ backend และ trainer-worker แบบอ่านอย่างเดียว)
 
 ```text
-ai-ecosystem-Industrial-Predictive/
-├── dataset/
-│   ├── README.md                                                        <- This instruction file
-│   └── Nonastreda Multimodal Dataset for Identifying Tool Wear Condition/
-│       ├── forces_xyz_raw.mat    (269.9 MB)  <- Raw 3-axis dynamometer forces at 1 kHz (Fx, Fy, Fz)
-│       ├── labels.csv            (7.9 KB)    <- Discrete wear classification (SHARP, USED, DULLED)
-│       ├── labels_reg.csv        (12.6 KB)   <- Continuous flank wear ground truth (Vb in µm)
-│       ├── tool/                             <- Flank face microscope photos (T{tool}R{run}B{blade}.jpg)
-│       ├── chip/                             <- Metal cutting chip morphology photos
-│       ├── scal/                             <- Optical scale calibration images (100 µm target)
-│       ├── spec/                             <- Audio acoustic emission spectrograms
-│       └── work/                             <- Milled workpiece surface roughness photos
+dataset/
+├── Multivariate time series data of milling processes with varying tool wear and machine tools/
+│   └── Multivariate time series data of milling processes with varying tool wear and machine tools/
+│       ├── filelist.csv            ตารางไฟล์: เครื่อง, ดอก, รัน, เวลาตัดสะสม, VB
+│       └── M{m}T{t}R{run}C{…}VB{…}.h5   สัญญาณ 1 แนวตัด (controller 500 Hz + dynamometer 25 kHz)
+└── Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)/
+    └── Nonastreda Multimodal Dataset for Identifying Tool Wear Condition/
+        ├── labels.csv              คลาสเดิม sharp / used / dulled (ไม่ใช้ในระบบ)
+        ├── labels_reg.csv          ค่าที่ optical bench วัด: flank_wear (= VB, µm), gaps, overhang
+        └── tool/T{tool}R{run}B{blade}.jpg   ภาพหน้าคมมีดของแต่ละใบ (1550×500; ดอก 1–2 บางส่วน 3100×1000)
+            (chip/, scal/, spec/, work/, forces_xyz_raw.mat มีในชุดข้อมูลแต่ระบบไม่ใช้)
 ```
 
----
+| ชุดข้อมูล | ใช้ที่ | ใช้อย่างไร |
+|---|---|---|
+| **LUH milling** — Denkena, Klemme & Stiehl (2023), *Multivariate time series data of milling processes with varying tool wear and machine tools*, Data in Brief · Mendeley Data DOI [10.17632/zpxs87bjt8](https://doi.org/10.17632/zpxs87bjt8) | `timeseries_docs/tool_rul_forecast` (ฝึกแบบจำลอง RUL) · `backend/app/features/tool_life` (สตรีมดอก T3/T6/T9 ที่ไม่ได้ใช้ฝึกบนเครื่อง M1/M2/M3) | VB ใช้เป็น label ตอนฝึก และใช้ประเมินหลังถอดดอกเท่านั้น — ระหว่างสตรีมไม่อ่าน/ไม่ส่ง VB หรือชื่อไฟล์ (มี VB ฝังอยู่) |
+| **Nonastreda** — *Nonastreda Multimodal Dataset for Identifying Tool Wear Condition* · Mendeley Data DOI [10.17632/m892d2wtzh.1](https://doi.org/10.17632/m892d2wtzh.1) | `nontime_docs/tool_vb_vision` (ฝึกแบบจำลองวัด VB) · `backend/app/features/tool_vision` (ภาพใบมีดของดอก 8/9/10 = ดอกบนเครื่อง M1/M2/M3) | ใช้ `tool/` + `flank_wear` เท่านั้น · ฝึกดอก 1–6, val ดอก 7, ดอก 8–10 ไม่เคยใช้ฝึก · ค่าที่ bench วัดแสดงเมื่อผู้ตรวจสั่งวัดใบนั้น |
 
-## 🔬 Dataset Specification & File Descriptions
+ตำแหน่งอื่น: ตั้ง `LUH_DATASET_DIR` (โฟลเดอร์ที่มี `filelist.csv`) และ `NONASTREDA_DIR` (โฟลเดอร์ที่มี `labels.csv` + `tool/`)
 
-### 1. `forces_xyz_raw.mat` (Dynamometer Cutting Forces)
-* **Sampling Rate:** $1,000 \text{ Hz}$ ($1 \text{ kHz}$).
-* **Sensors:** 3-Axis Piezoelectric Table Dynamometer (Kistler).
-* **Format:** MATLAB v7 workspace structure.
-* **Fields:** Contains cutting force time-series arrays for each tool cut pass:
-  * `Fx`: Feed force ($\text{N}$) - Direction of table movement.
-  * `Fy`: Normal force ($\text{N}$) - Perpendicular to table feed.
-  * `Fz`: Axial / Thrust force ($\text{N}$) - Parallel to spindle axis (most sensitive indicator of flank wear).
-  * $F_{res} = \sqrt{F_x^2 + F_y^2 + F_z^2}$: Instantaneous resultant cutting force.
-
-### 2. `tool/` (Microscope Flank Face Photos)
-* **Camera / Fixture:** Industrial Tool Presetter / Optical Microscope.
-* **Resolution:** $1550 \times 500 \text{ pixels}$.
-* **File Naming Convention:** `T{tool}R{run}B{blade}.jpg`
-  * Example: `T10R12B2.jpg` = **Tool #10**, **Cut/Pass Cycle #12**, **Blade/Flute #2**.
-* **Ground Truth Features:** Flank wear land ($V_b$), notch wear, burrs, and micro-chipping.
-
-### 3. `labels.csv` & `labels_reg.csv` (Ground Truth Annotations)
-* **`labels.csv` (3-Class Categorical):**
-  * `SHARP` ($V_b < 70\ \mu\text{m}$): Fresh cutting edge, steady cutting forces.
-  * `USED` ($70\ \mu\text{m} \le V_b < 125\ \mu\text{m}$): Moderate flank wear land, elevated friction.
-  * `DULLED` ($V_b \ge 125\ \mu\text{m}$ or catastrophic edge failure): ISO 8688-2 tool life criterion reached, spindle halt required.
-* **`labels_reg.csv` (Regression Targets):**
-  * `flank_wear_um`: Exact physical flank wear land width ($V_b$) measured in micrometers ($\mu\text{m}$).
-  * `chipping_gap_um`: Cutting edge irregular gap width ($\mu\text{m}$).
-  * `overhang_um`: Built-Up Edge (BUE) overhang width ($\mu\text{m}$).
-
----
-
-## 🛠️ Verification Script
-
-To verify that your dataset is correctly extracted and readable by the Python backend:
-
+ตรวจว่าวางถูก:
 ```bash
-# Run from repository root
-python -c "
-import os
-import scipy.io as sio
-import pandas as pd
-
-dataset_path = 'dataset/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition (1)/Nonastreda Multimodal Dataset for Identifying Tool Wear Condition'
-mat_file = os.path.join(dataset_path, 'forces_xyz_raw.mat')
-labels_file = os.path.join(dataset_path, 'labels.csv')
-
-print('Verifying Dataset...')
-if os.path.exists(mat_file):
-    print(f'✅ Found forces_xyz_raw.mat ({os.path.getsize(mat_file) / 1024 / 1024:.1f} MB)')
-else:
-    print('❌ forces_xyz_raw.mat missing!')
-
-if os.path.exists(labels_file):
-    df = pd.read_csv(labels_file)
-    print(f'✅ Found labels.csv ({len(df)} records)')
-else:
-    print('❌ labels.csv missing!')
-"
+cd backend && uv run --no-sync python -c "from app.features.tool_life import luh_dataset as l; from app.features.tool_vision import nonastreda as n; print(l.dataset_dir()); print(n.dataset_dir())"
 ```

@@ -15,9 +15,10 @@ label: เวลาถึงเกณฑ์ VB 140 µm (หมดอายุ) �
 | `rul_ts.py` | label, ชุดฝึก, GRU (PyTorch), ส่งออก, ตัวชี้วัด |
 | `experiments_rul.py` | nested selection, leave-one-tool-out, leave-one-machine-out, ฝึก production, ส่งออก artifact, เล่นดอกที่สงวนไว้ |
 | `wear_ts.py` | การวิเคราะห์รายชั้น (ADF, SETAR, STL) + แบบจำลอง StateSpace ที่ใช้เปรียบเทียบ |
-| `results_rul/` | ผลการประเมิน (csv/json) |
+| `run_features.csv` | ฟีเจอร์รายแนวตัดของทุกดอก (ผลของ `extract_run_features.py`) — อินพุตของการฝึก/ประเมิน |
+| [`results_rul/`](results_rul/README.md) | ผลการประเมิน (csv/json) + `run.log` |
 | `models/tool_rul_model.{npz,json}` | แบบจำลองที่อัปโหลดขึ้น MinIO (ฝึกด้วย T1,T2,T4,T5,T7,T8; สงวน T3,T6,T9 ไว้สตรีม) |
-| `figures/` | รูปในรายงาน (`r*` = งาน RUL, `web_*` = ภาพหน้าเว็บ) |
+| [`figures/`](figures/README.md) | รูปในรายงาน (`0*` = EDA, `r*` = งาน RUL, `web_*` = ภาพหน้าเว็บ) |
 
 ## ทำซ้ำผลลัพธ์
 ```bash

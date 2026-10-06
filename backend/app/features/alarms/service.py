@@ -21,11 +21,6 @@ def _model_to_item(m: Alarm) -> AlarmItem:
     )
 
 
-def seed_alarms_if_empty(db):
-    """No-op: Alarms are generated only by genuine machine telemetry and operator sign-offs."""
-    pass
-
-
 def get_alarms(severity: Optional[str] = "ALL", is_read: Optional[bool] = None) -> List[AlarmItem]:
     db = SessionLocal()
     try:
@@ -87,11 +82,15 @@ def trigger_alarm(
     severity: str,
     title: str,
     message: str,
-    source_service: str = "Force_CRNN_Worker",
-    machine_id: str = "CNC-SP-01",
-    tool_ref: str = "Tool 10",
-    action_url: str = "/machine-monitoring",
+    source_service: str,
+    machine_id: str,
+    tool_ref: str,
+    action_url: str,
 ) -> AlarmItem:
+    """แจ้งเตือนใหม่ — ถ้ามีแจ้งเตือนที่ยังไม่อ่านของเครื่อง/ดอก/บริการเดียวกันอยู่แล้ว จะอัปเดตอันเดิม (ไม่สร้างซ้ำ)
+
+    source_service: "ToolLife_RUL" (tool_life.streamer) หรือ "ToolVision_QC" (tool_vision.service)
+    """
     db = SessionLocal()
     try:
         # Prevent spamming duplicate unread alarms for the same machine and incident

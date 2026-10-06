@@ -8,10 +8,13 @@ REST
 - POST /tool-life/machines/{m}/acknowledge       {"action": "continue"|"replace"}  ตอบสนอง REPLACE_NOW
 - GET  /tool-life/model | /model/versions        แบบจำลองที่โหลดจาก MinIO / ทุกเวอร์ชันใน bucket
 - POST /tool-life/model/reload                   ดึงแบบจำลองจาก MinIO ใหม่
-- POST /tool-life/predict                        พยากรณ์จากฟีเจอร์รายรันที่ส่งมาเอง (stateless)
 - GET  /tool-life/evaluations                    ผลประเมินของดอกที่ถอดออกแล้ว (เปิดเผยค่าจริงหลังถอดดอกเท่านั้น)
 WebSocket
 - /tool-life/stream?waveform=<m>                 snapshot / run / event (+ frame ของเครื่องที่เลือก)
+
+REST ทุก endpoint ต้องล็อกอิน (Bearer token) · /model/reload เฉพาะ admin · ผู้ตัดสินใจใน audit = ผู้ใช้ของ token
+WebSocket: browser ส่ง Authorization header ไม่ได้ → ข้อความแรกต้องเป็น {"token": "<access token>"} ภายใน 5 วินาที
+(ไม่ใส่ token ใน URL เพราะติด access log) — ไม่ผ่าน = ปิดด้วย code 4401
 """
 from __future__ import annotations
 
@@ -19,14 +22,21 @@ import asyncio
 import json
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from app.features.auth.dependencies import actor_name, get_current_active_user, get_current_admin_user, websocket_user
+from app.features.auth.models import User
+
 from .registry import ModelRegistry, registry
-from .runtime import LAYER_MIN, RAW_SENSORS, EOLTracker, FeatureState, interval, recommend, wear_state
 from .streamer import SPEEDS, manager
 
-router = APIRouter(prefix="/tool-life", tags=["Tool Life (RUL)"])
+router = APIRouter(prefix="/tool-life", tags=["Tool Life (RUL)"], dependencies=[Depends(get_current_active_user)])
+# WebSocket แยก router — dependency ของ router ข้างบนอ่าน Authorization header ซึ่ง WebSocket จาก browser ไม่มี
+stream_router = APIRouter(prefix="/tool-life", tags=["Tool Life (RUL)"])
+
+WS_AUTH_TIMEOUT_S = 5
+WS_UNAUTHORIZED = 4401      # close code: token ไม่ถูกต้อง/หมดอายุ → เว็บพากลับหน้า login (ไม่ลองเชื่อมใหม่)
 
 
 def _stream(machine: int):
@@ -63,14 +73,13 @@ async def set_speed(machine: int, body: SpeedBody):
 
 class AckBody(BaseModel):
     action: str = Field(..., description="continue = ตัดต่อ (override), replace = ถอดดอก")
-    actor: str = Field("operator", description="ชื่อผู้ตัดสินใจ (บันทึกใน audit trail)")
 
 
 @router.post("/machines/{machine}/acknowledge", summary="ตอบสนองคำแนะนำ REPLACE_NOW")
-async def acknowledge(machine: int, body: AckBody):
+async def acknowledge(machine: int, body: AckBody, user: User = Depends(get_current_active_user)):
     s = _stream(machine)
     try:
-        await s.acknowledge(body.action, body.actor)
+        await s.acknowledge(body.action, actor_name(user))
     except ValueError as e:
         raise HTTPException(400, str(e))
     manager.publish_snapshot()
@@ -112,7 +121,7 @@ class ReloadBody(BaseModel):
     version: str | None = None
 
 
-@router.post("/model/reload", summary="ดึงแบบจำลองจาก MinIO ใหม่")
+@router.post("/model/reload", summary="ดึงแบบจำลองจาก MinIO ใหม่ (admin)", dependencies=[Depends(get_current_admin_user)])
 async def model_reload(body: ReloadBody | None = None):
     await asyncio.to_thread(registry.load, body.version if body else None)
     manager.publish_snapshot()
@@ -122,43 +131,6 @@ async def model_reload(body: ReloadBody | None = None):
     return info
 
 
-class RunFeatures(BaseModel):
-    contact_s: float = Field(..., description="เวลาตัดสะสมของดอก (วินาที)")
-    x_pos: float = Field(..., description="ตำแหน่ง x ของแนวตัด (mm)")
-    sp_rms: float
-    axy_absmean: float
-    axx_absmean: float
-    fx_mean: float
-    fres_mean: float
-    fy_mean: float
-    fz_mean: float
-
-
-class PredictBody(BaseModel):
-    machine: int = Field(..., ge=1, le=3)
-    runs: list[RunFeatures] = Field(..., description="ฟีเจอร์รายรันของดอกตั้งแต่เริ่มใช้งาน เรียงตามเวลา (ไม่มี VB)")
-
-
-@router.post("/predict", summary="พยากรณ์ RUL จากฟีเจอร์รายรัน (stateless)")
-async def predict(body: PredictBody):
-    if not registry.ready:
-        raise HTTPException(503, f"แบบจำลองยังไม่พร้อม: {registry.error}")
-    fs, tr = FeatureState(body.machine), EOLTracker()
-    out = None
-    for r in body.runs:
-        f = fs.push(r.model_dump())
-        if f["ready"]:
-            p = registry.model.predict(fs.window_array()[None])[0]
-            out = tr.update(r.contact_s / 60.0, p)
-    if out is None:
-        raise HTTPException(422, "ข้อมูลยังไม่พอ: ต้องมีรันหลังพ้น break-in อย่างน้อย 29 รัน")
-    lo, hi = interval(out["rul_eol"], registry.meta["interval"])
-    st = wear_state(out["rul_acc"], out["rul_eol"])
-    return dict(model_version=registry.meta["version"], rul_min=out["rul_eol"], rul_lo=lo, rul_hi=hi,
-                rul_accel_min=out["rul_acc"], wear_state=st, recommendation=recommend(st, lo, registry.meta["policy"]),
-                layer_min=LAYER_MIN, n_runs=len(body.runs), flagged_runs=fs.n_flagged)
-
-
 @router.get("/evaluations", summary="ผลประเมินหลังถอดดอก (เทียบ VB ที่วัดจริง)")
 async def evaluations(detail: bool = Query(False)):
     if detail:
@@ -166,10 +138,19 @@ async def evaluations(detail: bool = Query(False)):
     return [{k: v for k, v in e.items() if k not in ("trajectory", "vb_measured")} for e in manager.evaluations]
 
 
-@router.websocket("/stream")
+@stream_router.websocket("/stream")
 async def stream(ws: WebSocket, waveform: int | None = Query(None)):
     await ws.accept()
-    q = manager.subscribe(waveform)
+    try:                                     # ข้อความแรก: {"token": "...", "waveform": 2}
+        first = json.loads(await asyncio.wait_for(ws.receive_text(), WS_AUTH_TIMEOUT_S))
+    except WebSocketDisconnect:
+        return
+    except (TimeoutError, ValueError, KeyError):
+        first = None
+    if not isinstance(first, dict) or await asyncio.to_thread(websocket_user, first.get("token")) is None:
+        await ws.close(code=WS_UNAUTHORIZED, reason="unauthorized")
+        return
+    q = manager.subscribe(first.get("waveform", waveform))
     try:
         await ws.send_text(json.dumps(dict(type="snapshot", **manager.fleet()), ensure_ascii=False))
 

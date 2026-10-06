@@ -1,33 +1,36 @@
 # Feature Modules
 
-## Feature Module คืออะไร?
-Feature Module คือการแบ่งโครงสร้างของโค้ดตามระบบงานหรือ "ฟีเจอร์" แทนที่จะแบ่งตามเลเยอร์ทางเทคนิค (เช่น นำทุก controller ไปรวมกัน) สถาปัตยกรรมแบบนี้ช่วยให้โค้ดมีความเป็นอิสระต่อกัน (Decoupled) ค้นหาและแก้ไขได้ง่าย และสเกลโปรเจกต์ได้ดีขึ้นในระยะยาว
+โค้ดแบ่งตามระบบงาน (feature) — แต่ละโฟลเดอร์มีทุกอย่างของงานนั้น (router → service → models/schemas) และมี README ของตัวเอง
+ทุก router ถูกรวมใต้ `/api/v1` ใน [`../../main.py`](../../main.py)
 
-## หลักการทำงานของ Feature-Based Architecture
-- แต่ละฟีเจอร์จะประกอบด้วยทุกสิ่งที่จำเป็นสำหรับการทำงานนั้น ๆ
-- หากลบฟีเจอร์หนึ่งทิ้งไป ฟีเจอร์อื่น ๆ จะต้องไม่ได้รับผลกระทบ (หรือกระทบน้อยที่สุด)
+**การล็อกอิน:** ทุก endpoint ต้องมี `Authorization: Bearer <access token>` ยกเว้น `GET /health`, `POST /auth/signup`, `POST /auth/login`
+(dependency ใน [`auth/dependencies.py`](auth/dependencies.py): `get_current_active_user` = ผู้ใช้ที่ล็อกอิน, `get_current_admin_user` = admin)
+ไม่มี/หมดอายุ/ไม่ถูกต้อง → `401` (เว็บล้าง session แล้วพากลับหน้า login) · บัญชีถูกระงับหรือไม่ใช่ admin → `403`
+ผู้ทำรายการที่บันทึกใน audit = ผู้ใช้ของ token (`actor_name`) — backend ไม่รับ `actor` จาก body
 
-## รายการฟีเจอร์ (Feature Modules)
-- **`tool_life/`** - แบบจำลอง RUL ดอกกัด (GRU จาก MinIO) + สตรีมข้อมูล LUH ตามเวลาจริง + interlock + ประเมินผลหลังถอดดอก
-- **`reports/`** - สรุปผลเทียบค่าจริงของดอกที่ถอดแล้ว + CSV
-- **`alarms/`** - แจ้งเตือนจากผลพยากรณ์ (INFO / WARNING / CRITICAL)
-- **`audit/`** - บันทึกการตัดสินใจของผู้ควบคุม
-- **`health/`** - Health Check & Concurrent Component Diagnostics
-- **`auth/`** - Authentication & Session Management (JWT Access & Refresh Token)
-- **`profile/`** - User Profile & Avatar Management (MinIO Storage)
-- **`tool_vision/`** - วัดรอยสึก VB ของใบมีดจากภาพ (ต่อจาก tool_life) + ผู้ตรวจยืนยัน/วัดจริง + ใบสั่งงานระดับดอก + retrain
-- **`users/`** - User Directory & Role-Based Access Control
-- **`workers/`** - ARQ worker (`tasks.WorkerSettings`) ที่ trainer-worker รัน: งาน retrain ของ tool_vision
+| Feature | หน้าที่ | API | สิทธิ์ |
+|---|---|---|---|
+| [`tool_life/`](tool_life/README.md) | ★ แบบจำลอง RUL (GRU จาก MinIO) + สตรีมข้อมูล LUH ตามเวลาจริง + interlock + ประเมินผลหลังถอดดอก | `/tool-life/*` + WebSocket | ล็อกอิน · `/model/reload` admin · WebSocket: token ในข้อความแรก |
+| [`tool_vision/`](tool_vision/README.md) | ★ วัดรอยสึก VB ของใบมีดจากภาพ (ต่อจาก tool_life) + ผู้ตรวจยืนยัน/วัดจริง + ใบสั่งงานระดับดอก + retrain | `/tool-vision/*` | ล็อกอิน · สลับ/โหลดแบบจำลอง, retrain, promote/reject: admin |
+| [`reports/`](reports/README.md) | สรุปผล RUL เทียบค่าจริงของดอกที่ถอดแล้ว + CSV | `/reports/*` | ล็อกอิน |
+| [`alarms/`](alarms/README.md) | แจ้งเตือนจากผลพยากรณ์และผลตรวจใบมีด (INFO / WARNING / CRITICAL) | `/alarms` | ล็อกอิน |
+| [`audit/`](audit/README.md) | บันทึกการตัดสินใจของผู้ใช้ | `/audit-logs` | ล็อกอิน |
+| [`auth/`](auth/README.md) | สมัคร / เข้าสู่ระบบ (JWT) / ผู้ใช้ปัจจุบัน | `/auth/*` | signup, login: ไม่ต้อง · `/me`: ล็อกอิน |
+| [`users/`](users/README.md) | จัดการผู้ใช้และสิทธิ์ (admin) | `/users` | admin |
+| [`health/`](health/README.md) | healthcheck ของ Docker + gauge ของชุด observability | `/health` | ไม่ต้อง |
+| [`workers/`](workers/README.md) | ARQ worker ที่ trainer-worker (GPU) รัน — งาน retrain ของ tool_vision | – | – |
 
-## โครงสร้างมาตรฐานของแต่ละฟีเจอร์
-แต่ละโฟลเดอร์ฟีเจอร์จะมีไฟล์หลักๆ ดังนี้:
-- `router.py` - นิยาม API Routes (Endpoints)
-- `service.py` - Business Logic หลัก
-- `schemas.py` - Pydantic Models สำหรับ Request / Response validation
-- `models.py` - SQLAlchemy Models สำหรับ Database
-- `__init__.py` - สำหรับกำหนด Module exports
+## ไฟล์มาตรฐานของแต่ละ feature
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `router.py` | endpoint (FastAPI `APIRouter`) — รับ/ตรวจ request แล้วเรียก service |
+| `service.py` | business logic |
+| `schemas.py` | Pydantic models ของ request / response |
+| `models.py` | ตารางฐานข้อมูล (SQLAlchemy) — เฉพาะ feature ที่มีตารางของตัวเอง |
+| `__init__.py` | export `router` |
 
-## การสร้างฟีเจอร์ใหม่
-1. สร้างโฟลเดอร์ใหม่ภายใต้ `app/features/` เช่น `new_feature/`
-2. สร้างไฟล์ที่จำเป็น ได้แก่ `router.py`, `service.py`, `schemas.py`
-3. นำ `router` ไปลงทะเบียนในไฟล์ `main.py` หรือไฟล์รวม Router ของแอปพลิเคชัน
+## เพิ่ม feature ใหม่
+1. สร้าง `app/features/<name>/` พร้อม `router.py`, `service.py`, `schemas.py` (+ `models.py` ถ้ามีตาราง) และ `README.md`
+   — `APIRouter(..., dependencies=[Depends(get_current_active_user)])` ให้ทุก endpoint ต้องล็อกอิน
+2. เพิ่ม router ในรายการ `api_v1.include_router(...)` ของ `main.py` (และ import models ใน `lifespan` ถ้ามีตาราง)
+3. เพิ่มการเรียกใน `frontend/src/services/api.ts` และอัปเดต [`API_SPECIFICATION.md`](../../../API_SPECIFICATION.md)

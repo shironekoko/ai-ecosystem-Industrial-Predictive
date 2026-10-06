@@ -1,7 +1,8 @@
 """เก็บ/ดึงแบบจำลองวัด VB จาก MinIO (models/tool-vision/<version>/{model.pt, meta.json}, latest.json)
 
-model.pt = checkpoint ของ vb_model (arch + state_dict + config) · meta.json = task, เกณฑ์, ช่วงความไม่แน่นอน, ผลประเมิน
-การฝึกเองอยู่ใน vb_model.fit (ใช้ทั้งการทดลอง การฝึกครั้งแรก และ retrain)
+model.pt = checkpoint ของ vb_model (config + น้ำหนักของทุกสมาชิก ensemble) · meta.json = task, เกณฑ์, ช่วงความไม่แน่นอน, ผลประเมิน,
+กราฟการฝึก (history) และสถานะ (production / previous / candidate / rejected)
+การฝึกเองอยู่ใน vb_model.fit / fit_ensemble (ใช้ทั้งการทดลอง การฝึกครั้งแรก และ retrain)
 """
 from __future__ import annotations
 

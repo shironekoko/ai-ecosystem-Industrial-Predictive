@@ -10,13 +10,11 @@ dependencies = [
     "email-validator>=2.2.0",
     "fastapi>=0.115.0",
     "minio>=7.2.0",
-    "psycopg2>=2.9.12",
     "pydantic[email]>=2.13.4",
     "pydantic-settings>=2.14.2",
     "pytest>=9.1.1",
     "python-dotenv>=1.1.1",
     "python-jose[cryptography]>=3.3.0",
-    "python-multipart>=0.0.9",
     "redis>=5.0.0",
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.30.0",
@@ -40,7 +38,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pytest>=9.1.1",
 ]
 

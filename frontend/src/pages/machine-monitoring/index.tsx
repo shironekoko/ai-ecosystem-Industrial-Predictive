@@ -28,7 +28,6 @@ import {
   fmt,
   fmtClock,
 } from '../../components/toollife/ui';
-import { useAuth } from '../../context/AuthContext';
 import { useFleet, useMachineHistory, useWaveform } from '../../hooks/useToolLife';
 import { api } from '../../services/api';
 import type { MachineSnapshot, RunRecord, VisionInspection } from '../../types';
@@ -102,15 +101,13 @@ const Controls: React.FC<{ m: MachineSnapshot; speeds: number[] }> = ({ m, speed
 };
 
 const HoldBanner: React.FC<{ m: MachineSnapshot }> = ({ m }) => {
-  const { user } = useAuth();
   const navigate = useNavigate();
-  const actor = user?.name || 'operator';
   const p = m.prediction;
   const [busy, setBusy] = useState(false);
   const remove = async () => {
     setBusy(true);
     try {
-      const snap = await api.acknowledge(m.machine, 'replace', actor);
+      const snap = await api.acknowledge(m.machine, 'replace');
       // ถอดดอกแล้ว → ระบบถ่ายภาพใบมีด 4 ใบ + AI วิเคราะห์ → ไปยืนยันผลต่อที่ Tool Inspection
       navigate(snap.inspection ? `/tool-vision?tab=review&inspection=${snap.inspection.id}` : '/tool-vision');
     } catch (e: any) {
@@ -132,7 +129,7 @@ const HoldBanner: React.FC<{ m: MachineSnapshot }> = ({ m }) => {
         <button disabled={busy} onClick={remove} className="btn-danger">
           <Wrench className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} /> {busy ? 'กำลังถอดดอกและถ่ายภาพใบมีด…' : 'ถอดดอก → ตรวจใบมีด'}
         </button>
-        <button disabled={busy} onClick={() => api.acknowledge(m.machine, 'continue', actor)} className="btn-secondary">
+        <button disabled={busy} onClick={() => api.acknowledge(m.machine, 'continue')} className="btn-secondary">
           ตัดต่อ (override)
         </button>
       </div>

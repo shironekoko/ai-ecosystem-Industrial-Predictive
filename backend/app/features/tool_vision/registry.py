@@ -35,12 +35,12 @@ class VisionRegistry:
 
             torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
             model, ck = vm.load_checkpoint(blob)
-            size = tuple(ck.get("image_size") or (vm.IMG_H, vm.IMG_W))
-            out = vm.predict(model, [torch.zeros(3, *size, dtype=torch.uint8)], device="cpu")   # self-test
+            spec = vm.input_spec(ck.get("config") or {"image_size": ck.get("image_size")})   # ขนาด + การตัดภาพตอนฝึก
+            out = vm.predict(model, [torch.full((3, *spec["size"]), 128, dtype=torch.uint8)], device="cpu")   # self-test
             if out.shape != (1,) or not bool(torch.isfinite(torch.tensor(out)).all()):
                 raise ValueError("self-test ไม่ผ่าน: ผลลัพธ์ไม่ใช่ค่า VB 1 ค่าที่เป็นตัวเลขจำกัด")
             with self._lock:
-                self.model, self.meta, self._size = model, meta, size
+                self.model, self.meta, self._spec = model, meta, spec
                 self.status, self.error = "READY", None
                 self.loaded_at = datetime.now(timezone.utc).isoformat()
         except Exception as e:
@@ -54,7 +54,7 @@ class VisionRegistry:
         from . import vb_model as vm
 
         with obs.timed("tool_vision.inference.duration"):
-            tensors = [vm.load_resized(im, self._size) for im in images]
+            tensors = [vm.load_resized(im, **self._spec) for im in images]
             with self._lock:
                 vb = vm.predict(self.model, tensors, device="cpu")
                 interval = self.meta["interval"]

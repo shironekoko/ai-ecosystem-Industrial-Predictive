@@ -6,9 +6,12 @@
 
 ## รายละเอียดของแต่ละไฟล์
 
+### `__init__.py`
+- ทำให้ `core` เป็น package (ไม่มีโค้ด)
+
 ### `config.py`
-- ใช้ `pydantic-settings` (BaseSettings) เพื่อโหลดและจัดการ Environment Variables จากไฟล์ `.env`
-- รวมการตั้งค่าทั้งหมดไว้ที่นี่ (เช่น URL ของ Database, Redis, JWT Secrets)
+- ใช้ `pydantic-settings` (BaseSettings) โหลดค่าจาก `.env` ที่รากโปรเจกต์ (ตัวอย่าง: `.env.example`)
+- ค่า: `DATABASE_URL`, `MINIO_*` + bucket แบบจำลอง (`models`), `REDIS_URL`, `JWT_SECRET_KEY` / `ACCESS_TOKEN_EXPIRE_MINUTES`, CORS
 
 ### `database.py`
 - ตั้งค่า SQLAlchemy 2.0 Engine
@@ -16,13 +19,16 @@
 - สร้างคลาส `Base` แบบ Declarative สำหรับให้ Models อื่นๆ สืบทอด
 
 ### `minio_client.py`
-- กำหนด Connection Factory สำหรับเชื่อมต่อ MinIO
-- ประกอบด้วยฟังก์ชันอรรถประโยชน์ เช่น `ensure_bucket()`, `upload_file()`, `download_file()`, `get_presigned_url()` ฯลฯ
+- `get_minio_client()` (timeout สั้น — MinIO ล่มแล้ว request ไม่ค้าง) และ `ensure_bucket()`
+- bucket ที่ระบบใช้: `models` (แบบจำลอง `tool-rul/`, `tool-vision/`) และ `inspections` (ภาพตรวจใบมีด)
 
 ### `redis_client.py`
-- จัดการการเชื่อมต่อ Redis และสร้าง Connection Pool
-- ตั้งค่า Configuration สำหรับ `ARQ` (Background Jobs)
-- ฟังก์ชันตรวจสอบสถานะ (Health check) สำหรับ Redis
+- `get_arq_redis_settings()` — ค่าการเชื่อมต่อคิวงาน ARQ (backend ส่งงาน retrain → trainer-worker)
+
+### `observability.py`
+- OpenTelemetry (trace + metric + log) → OTel Collector → Tempo / Prometheus / Loki → Grafana — **เปิดเฉพาะเมื่อมี `OTEL_EXPORTER_OTLP_ENDPOINT`** (ตั้งใน `compose.observability.yml`) ไม่เช่นนั้นทุกฟังก์ชันเป็น no-op
+- `METRICS` = รายชื่อ metric ของระบบ (RUL, vision, retrain) · ฟีเจอร์เรียก `inc()` / `observe()` / `timed()` / `span()` และลงทะเบียน gauge ด้วย `register_gauge()` (ดู `app/features/health/telemetry.py`)
+- `inject_trace_context()` ส่ง trace ไปกับงานในคิว ARQ ให้ retrain ต่อเป็น trace เดียวกับ request ที่สั่ง
 
 ## การใช้งานโดยโมดูลฟีเจอร์
 โมดูลฟีเจอร์ (เช่น `features/auth/`, `features/tool_vision/`) จะทำการ `import` เครื่องมือจาก `core/` เหล่านี้ เพื่อไปประกอบใน Business Logic (Services)

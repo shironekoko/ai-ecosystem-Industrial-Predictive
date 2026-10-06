@@ -187,9 +187,10 @@ def selection_table(table: pd.DataFrame) -> list[dict]:
 
 
 def history_records(hist) -> list[dict]:
-    keep = ("epoch", "train_loss", "val_loss", "val_mae", "lr")
+    keep = ("epoch", "member", "train_loss", "val_loss", "val_mae", "lr")      # member = สมาชิกของ ensemble (epoch นับต่อกัน)
     rows = hist.to_dict("records") if isinstance(hist, pd.DataFrame) else hist
-    return [{k: (round(float(v), 6) if k != "epoch" else int(v)) for k, v in h.items() if k in keep and not pd.isna(v)} for h in rows]
+    return [{k: (round(float(v), 6) if k not in ("epoch", "member") else int(v)) for k, v in h.items() if k in keep and not pd.isna(v)}
+            for h in rows]
 
 
 def tool_results(oof: pd.DataFrame, test: pd.DataFrame) -> dict:
@@ -209,8 +210,9 @@ def final_model(cfg: vm.TrainConfig, df: pd.DataFrame, images: list[torch.Tensor
     va = np.flatnonzero(df.tool.isin(nd.VAL_TOOLS))
     te = np.flatnonzero(df.tool.isin(nd.HELD_OUT_TOOLS))
     w = writer_for("final/" + cfg.arch)
-    model, hist = vm.fit(cfg, [images[i] for i in tr], df.vb_um.values[tr], [images[i] for i in va], df.vb_um.values[va],
-                         writer=w, histograms=True)
+    # images = ภาพเดี่ยว หรือคู่ภาพ (ภาพปัจจุบัน + ภาพตอนติดตั้ง) ถ้า cfg.ref · ensemble = ฝึก cfg.ensemble ตัว (seed ต่างกัน)
+    model, hist = vm.fit_ensemble(cfg, [images[i] for i in tr], df.vb_um.values[tr], [images[i] for i in va],
+                                  df.vb_um.values[va], writer=w, histograms=True)
     pd.DataFrame(hist).to_csv(RES / "final_history.csv", index=False)
     preds = {}
     for split, idx in (("train", tr), ("val", va), ("test", te)):
@@ -249,7 +251,13 @@ def final_model(cfg: vm.TrainConfig, df: pd.DataFrame, images: list[torch.Tensor
 
     MODELS.mkdir(parents=True, exist_ok=True)
     vm.save_checkpoint(model, cfg, MODELS / "tool_vb_model.pt")
-    meta = dict(task="vb_regression", model=f"{cfg.arch} + regression head (VB µm)", arch=cfg.arch,
+    desc = f"{cfg.arch} + regression head (VB µm)"
+    if cfg.ref:
+        desc = f"{cfg.arch} Siamese เทียบภาพตอนติดตั้งดอก + regression head (VB µm)"
+    if cfg.ensemble > 1:
+        desc = f"ensemble {cfg.ensemble} ตัวของ {desc}"
+    meta = dict(task="vb_regression", model=desc, arch=cfg.arch, ensemble=cfg.ensemble, reference_image=cfg.ref,
+                crop=list(cfg.crop), norm=cfg.norm,
                 config=asdict(cfg), image_size=list(cfg.image_size), n_params=vm.n_params(model),
                 thresholds=dict(vb_accel_um=vm.VB_ACCEL, vb_eol_um=vm.VB_EOL),
                 train_tools=list(nd.BASE_TRAIN_TOOLS), val_tools=list(nd.VAL_TOOLS), test_tools=list(nd.HELD_OUT_TOOLS),

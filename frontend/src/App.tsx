@@ -15,11 +15,12 @@ import { api } from './services/api';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 const AppRoutes = () => {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const currentRole = user?.role || 'engineer';
   const [unreadAlertCount, setUnreadAlertCount] = useState<number>(0);
 
   React.useEffect(() => {
+    if (!isAuthenticated) return;
     let isMounted = true;
     const fetchCounters = () => {
       api.getAlarms().then((alarms) => {
@@ -39,7 +40,7 @@ const AppRoutes = () => {
       clearInterval(interval);
       window.removeEventListener('focus', fetchCounters);
     };
-  }, []);
+  }, [isAuthenticated]);
 
   return (
     <BrowserRouter>

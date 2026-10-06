@@ -1,13 +1,14 @@
 /**
  * Model Registry — แบบจำลองทั้งสองตัวของระบบที่ backend ดึงจาก MinIO (bucket "models")
  *   - Time series: GRU direct-RUL (prefix "tool-rul/")
- *   - Vision: ResNet-18 วัดรอยสึก VB จากภาพใบมีด (prefix "tool-vision/") + กราฟการเทรน + งาน retrain
+ *   - Vision: ensemble ของ ResNet-18 วัดรอยสึก VB จากภาพใบมีด (prefix "tool-vision/") + กราฟการเทรน + งาน retrain
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Activity, CheckCircle2, Database, ScanEye, RefreshCw, XCircle } from 'lucide-react';
 import { PageHeader } from '../../components/common';
 import { Card, fmt, fmtDateTime } from '../../components/toollife/ui';
+import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import type { ModelInfo, ModelVersion } from '../../types';
 import { VisionRegistry } from './VisionRegistry';
@@ -25,7 +26,7 @@ export const ModelRegistryPage: React.FC = () => {
         {(
           [
             ['rul', 'Time series — RUL ดอกกัด (GRU)', Activity],
-            ['vision', 'Vision — วัดรอยสึก VB จากภาพ (ResNet-18)', ScanEye],
+            ['vision', 'Vision — วัดรอยสึก VB จากภาพ (ResNet-18 ensemble)', ScanEye],
           ] as const
         ).map(([id, label, Icon]) => (
           <button
@@ -43,6 +44,8 @@ export const ModelRegistryPage: React.FC = () => {
 };
 
 const RulRegistry: React.FC = () => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [info, setInfo] = useState<ModelInfo | null>(null);
   const [versions, setVersions] = useState<ModelVersion[] | null>(null);
   const [vErr, setVErr] = useState<string | null>(null);
@@ -79,7 +82,7 @@ const RulRegistry: React.FC = () => {
   return (
     <div className="space-y-5">
       <div className="flex justify-end">
-        <button onClick={() => reload()} disabled={busy} className="btn-primary">
+        <button onClick={() => reload()} disabled={busy || !isAdmin} title={isAdmin ? '' : 'เฉพาะผู้ดูแลระบบ'} className="btn-primary">
           <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} /> ดึงเวอร์ชันล่าสุดจาก MinIO
         </button>
       </div>
@@ -198,8 +201,8 @@ const RulRegistry: React.FC = () => {
                     {v.train_tools?.map((t) => `T${t}`).join(',')} / {v.held_out?.map((t) => `T${t}`).join(',')}
                   </td>
                   <td className="py-2 text-right">
-                    {info?.version !== v.version && (
-                      <button onClick={() => reload(v.version)} className="btn-secondary">
+                    {isAdmin && info?.version !== v.version && (
+                      <button onClick={() => reload(v.version)} disabled={busy} className="btn-secondary">
                         ใช้เวอร์ชันนี้
                       </button>
                     )}

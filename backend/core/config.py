@@ -25,9 +25,7 @@ class Settings(BaseSettings):
     minio_root_user: str = "minioadmin"
     minio_root_password: str = "minioadmin"
     minio_secure: bool = False
-    minio_profile_bucket: str = "profile-images"
-    minio_datasets_bucket: str = "datasets"
-    minio_models_bucket: str = "models"
+    minio_models_bucket: str = "models"          # แบบจำลอง (tool-rul/, tool-vision/) — ภาพตรวจใบมีดอยู่ใน bucket "inspections"
 
     # ── Redis ──
     redis_url: str = "redis://localhost:6379"
@@ -35,8 +33,7 @@ class Settings(BaseSettings):
     # ── JWT ──
     jwt_secret_key: str = secrets.token_urlsafe(32)
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
-    refresh_token_expire_days: int = 7
+    access_token_expire_minutes: int = 30         # ไม่ตั้ง JWT_SECRET_KEY = สุ่มใหม่ทุกครั้งที่ backend เริ่ม → ต้องล็อกอินใหม่
 
     # ── CORS ──
     cors_origins: list[str] = ["*"]

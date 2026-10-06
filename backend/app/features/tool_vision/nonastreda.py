@@ -82,6 +82,11 @@ def runs_for_tool(tool: int) -> list[int]:
     return sorted(int(r) for r, n in g.items() if n == len(BLADES))
 
 
+def install_run(tool: int) -> int:
+    """รอบแรกที่มีภาพครบ 4 ใบ = ภาพของดอกตอนติดตั้ง (ยังใหม่) — ใช้เป็นภาพอ้างอิงของแบบจำลองแบบเทียบภาพ (RefVB)"""
+    return runs_for_tool(tool)[0]
+
+
 def eol_run(tool: int) -> int:
     """รอบสุดท้ายของดอก = ภาพที่ optical bench ถ่ายตอนดอกหมดอายุและถูกถอด"""
     return runs_for_tool(tool)[-1]

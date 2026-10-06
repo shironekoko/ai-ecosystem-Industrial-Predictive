@@ -7,21 +7,29 @@ from app.features.auth.models import User
 
 router = APIRouter(prefix="/users", tags=["Users & RBAC Access Console"])
 
+
+def _require_admin(user: User):
+    """ทุก endpoint ของ /users เป็นงานของ admin — ตรวจที่ backend (หน้าเว็บซ่อนปุ่มอย่างเดียวไม่พอ)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
 @router.get("", response_model=List[UserItem], summary="Get all operators and users")
 async def get_users(current_user: User = Depends(get_current_active_user)):
     """Retrieve all maintenance engineers and administrators"""
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
     return service.get_users()
 
 @router.post("", response_model=UserItem, status_code=201, summary="Create a new user")
 async def create_user(req: CreateUserRequest, current_user: User = Depends(get_current_active_user)):
     """Register a new operator or staff member into the system"""
+    _require_admin(current_user)
     return service.create_user(req)
 
 @router.patch("/{user_id}/role", response_model=UserItem, summary="Change user RBAC role")
 async def update_user_role(user_id: str, req: UpdateUserRoleRequest, current_user: User = Depends(get_current_active_user)):
     """Change authorization role (admin / engineer / inspector)"""
+    _require_admin(current_user)
     updated = service.update_role(user_id, req.role)
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
@@ -30,8 +38,7 @@ async def update_user_role(user_id: str, req: UpdateUserRoleRequest, current_use
 @router.delete("/{user_id}", summary="Delete user account")
 async def delete_user(user_id: str, current_user: User = Depends(get_current_active_user)):
     """Delete an operator account"""
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
     success = service.delete_user(user_id)
     if not success:
         raise HTTPException(status_code=404, detail="User not found")

@@ -19,11 +19,6 @@ def _model_to_event(m: AuditLog) -> AuditEvent:
     )
 
 
-def seed_audit_logs_if_empty(db):
-    """No-op: Audit logs are recorded only by genuine human operator sign-offs and machine interlock actions."""
-    pass
-
-
 def get_audit_logs(
     event_type: Optional[str] = None,
     search: Optional[str] = None,
@@ -69,11 +64,12 @@ def record_audit_event(
 ) -> AuditEvent:
     db = SessionLocal()
     try:
-        # Prevent duplicate entries from automated monitoring loops
+        # กันบันทึกซ้ำเฉพาะเหตุการณ์เดียวกันทุกอย่าง (summary มีรหัสงาน/เวลาอยู่แล้ว) — การกระทำซ้ำบนเครื่องเดิมต้องถูกบันทึกทุกครั้ง
         existing = db.query(AuditLog).filter(
             AuditLog.event_type == event_type,
             AuditLog.actor == actor,
             AuditLog.target_resource == target_resource,
+            AuditLog.summary == summary,
         ).first()
         if existing:
             return _model_to_event(existing)

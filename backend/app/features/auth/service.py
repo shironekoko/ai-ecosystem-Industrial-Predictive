@@ -21,11 +21,6 @@ def get_user_by_email(db: Session, email: str) -> User | None:
     return db.query(User).filter(User.email == email).first()
 
 
-def get_user_by_username(db: Session, username: str) -> User | None:
-    """ค้นหา user จาก username"""
-    return db.query(User).filter(User.username == username).first()
-
-
 def is_email_or_username_taken(db: Session, email: str, username: str) -> str | None:
     """ตรวจสอบว่า email หรือ username ซ้ำหรือไม่ — return field ที่ซ้ำ หรือ None"""
     existing = (

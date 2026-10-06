@@ -1,62 +1,8 @@
-# Health Check Feature
+# health — สถานะของระบบ
 
-โมดูลสำหรับตรวจสอบสถานะของระบบ (Health Check) และส่วนประกอบที่ระบบต้องการในการทำงาน (Components)
-
-## หน้าที่หลัก
-1. ให้บริการ API สำหรับตรวจสอบว่า Backend ทำงานอยู่หรือไม่
-
-## Endpoints
-
-### 1. `GET /health`
-ตรวจสอบสถานะของ API เบื้องต้น
-
-**Example Response:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-08-14T02:00:00Z",
-  "version": "1.0.0",
-  "components": null
-}
-```
-
-### 2. `GET /health/components`
-ตรวจสอบสถานะ API พร้อมเช็คการเชื่อมต่อส่วนประกอบต่างๆ อย่างละเอียด
-
-**Example Response:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-08-14T02:00:00Z",
-  "version": "1.0.0",
-  "components": [
-    {
-      "name": "PostgreSQL",
-      "status": "connected",
-      "latency_ms": 5.2,
-      "details": null
-    },
-    {
-      "name": "Redis",
-      "status": "connected",
-      "latency_ms": 1.1,
-      "details": null
-    },
-    {
-      "name": "MinIO",
-      "status": "connected",
-      "latency_ms": 12.5,
-      "details": null
-    }
-    }
-  ]
-}
-```
-
-## วิธีการทำงานของ Component Checks (Concurrent & Non-Blocking)
-- **สถาปัตยกรรมทำงานแบบขนาน**: เรียกใช้ `ThreadPoolExecutor(max_workers=4)` เพื่อรันตรวจสอบ 4 Services พร้อมกัน ช่วยลดเวลาตอบสนองรวมจาก >25 วินาที เหลือเพียง ~0.6 วินาที
-- **Fast TCP Reachability**: ก่อนจะเรียกคำสั่งหนักในแต่ละ SDK ระบบจะส่ง Socket Ping ตรวจสอบว่าพอร์ตเปิดอยู่หรือไม่ด้วย Timeout สั้น (0.3 วินาที) ทำให้หาก Service ออฟไลน์จะตอบกลับทันทีโดยไม่บล็อก
-- **Database (SQLite / PostgreSQL)**: ทำการรันคำสั่ง `SELECT 1` ผ่าน SQLAlchemy engine
-- **Redis**: ตรวจสอบ TCP Reachability ไปยัง Redis host:port
-- **MinIO**: ตรวจสอบ TCP Reachability และทดสอบเรียก `list_buckets()` พร้อม timeout ป้องกัน thread ค้าง
-- ทุก Service จะมีการจับเวลาเพื่อวัด `latency_ms` อย่างแม่นยำ
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `router.py` | `GET /health` → `{"status": "healthy", "timestamp", "version"}` — healthcheck ของ Docker (`compose.yml`: frontend เริ่มเมื่อ backend healthy) · endpoint เดียวที่ไม่ต้องล็อกอิน (นอกจาก signup / login) |
+| `service.py` | ตรวจการเชื่อมต่อ PostgreSQL / Redis / MinIO (`check_all_components`) — ใช้โดย `telemetry.py` |
+| `telemetry.py` | gauge ของชุด observability (ทำงานเมื่อเปิด `compose.observability.yml`): การเชื่อมต่อบริการ, แบบจำลองที่โหลด, RUL / drift / สถานะรายเครื่อง, ผลประเมินหลังถอดดอก, งานรอผู้ตรวจ, ใบสั่งงานค้าง, pool retrain, MAE ของ AI เทียบค่าวัดจริง — ดูใน Grafana |
+| `schemas.py` | `HealthResponse`, `ComponentStatus` |

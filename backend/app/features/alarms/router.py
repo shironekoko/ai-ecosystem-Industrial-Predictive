@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from .schemas import AlarmItem, AlarmStatusUpdate
 from . import service
+from app.features.auth.dependencies import get_current_active_user
 
-router = APIRouter(prefix="/alarms", tags=["Industrial Alarms"])
+router = APIRouter(prefix="/alarms", tags=["Industrial Alarms"], dependencies=[Depends(get_current_active_user)])
 
 @router.get("", response_model=List[AlarmItem], summary="Get all industrial alarms")
 async def get_alarms(

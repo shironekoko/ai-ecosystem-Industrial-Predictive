@@ -95,6 +95,12 @@ services:
         condition: service_started
       minio:
         condition: service_started
+    healthcheck:                          # GET /api/v1/health — frontend รอจน backend พร้อม
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     volumes:
       - ./backend:/app
       - /app/.venv
@@ -183,7 +189,8 @@ services:
       - ./frontend:/app
       - /app/node_modules
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 # -------------------------
 # ส่วนประกาศสร้าง Volumes

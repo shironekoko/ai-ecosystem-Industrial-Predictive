@@ -6,6 +6,18 @@ import { AuditEvent } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 
+/** เหตุการณ์ที่ backend บันทึก (ตัวกรองใช้การค้นหาบางส่วน: VISION_MODEL = promote/reject/สลับเวอร์ชัน) */
+const EVENT_TYPES: [string, string][] = [
+  ['TOOL_REPLACED', 'Tool removed (RUL)'],
+  ['TOOL_LIFE_OVERRIDE', 'REPLACE_NOW overridden'],
+  ['VISION_INSPECTION', 'Blade images captured'],
+  ['VISION_MEASURE', 'Bench measurement'],
+  ['VISION_REVIEW', 'Inspection reviewed'],
+  ['TOOL_SERVICED', 'Tool serviced'],
+  ['VISION_RETRAIN_REQUESTED', 'Retrain requested'],
+  ['VISION_MODEL', 'Model promote / reject / switch'],
+];
+
 export function AuditLogPage() {
   const { isAuthenticated } = useAuth();
   const [filterType, setFilterType] = useState<string>('ALL');
@@ -67,10 +79,11 @@ export function AuditLogPage() {
                 className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="ALL">All Event Types</option>
-                <option value="WEAR_CONFIRMED">Wear Confirmed</option>
-                <option value="FALSE_ALARM_FLAGGED">False Alarm Flagged</option>
-                <option value="MODEL_PROMOTED">Model Promoted</option>
-                <option value="RETRAIN_TRIGGERED">Retrain Triggered</option>
+                {EVENT_TYPES.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

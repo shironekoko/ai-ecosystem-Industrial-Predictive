@@ -109,7 +109,7 @@ export default function UserManagementPage() {
             <h3 className="text-sm font-bold text-gray-900">Maintenance Engineer</h3>
           </div>
           <p className="text-xs text-gray-500 leading-relaxed">
-            Can monitor spindle cutting telemetry, perform optical tool wear inspections, and verify AI classification predictions. Restricted from user administration.
+            Monitors machines and RUL predictions, removes tools at REPLACE_NOW, reviews AI blade VB measurements (accept or measure on the bench) and closes replacement work orders. Restricted from user administration.
           </p>
         </div>
 
@@ -121,7 +121,7 @@ export default function UserManagementPage() {
             <h3 className="text-sm font-bold text-gray-900">System Administrator</h3>
           </div>
           <p className="text-xs text-gray-500 leading-relaxed">
-            Full root authority across the platform: manage active learning retrain cycles, configure system parameters, provision team members, reassign roles, and delete user accounts.
+            Everything an engineer can do, plus starting vision retrains, promoting/rejecting candidates, switching model versions, and managing user accounts and roles.
           </p>
         </div>
       </div>

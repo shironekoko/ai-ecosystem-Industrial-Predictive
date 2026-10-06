@@ -557,7 +557,6 @@ flowchart LR
 | POST | `/tool-life/machines/{m}/{start\|pause\|resume\|reset}` · `/speed` | ควบคุมสตรีม (speed 1 = เวลาจริง) |
 | POST | `/tool-life/machines/{m}/acknowledge` | ตอบสนอง REPLACE_NOW: `replace` (ถอดดอก → ประเมินผล) / `continue` (override) — บันทึก Audit |
 | GET / POST | `/tool-life/model` · `/model/versions` · `/model/reload` | แบบจำลองจาก MinIO, ทุกเวอร์ชันใน bucket, ดึงใหม่ |
-| POST | `/tool-life/predict` | พยากรณ์จากฟีเจอร์รายรันที่ระบบอื่นส่งมา (stateless) |
 | GET | `/tool-life/evaluations` · `/reports/tool-life-summary` · `/reports/export/csv` | ผลเทียบค่าจริงหลังถอดดอก |
 | WS | `/tool-life/stream?waveform={m}` | `snapshot` / `run` / `event` / `frame` (สัญญาณดิบ) |
 
@@ -576,23 +575,23 @@ flowchart LR
 | **Machine Monitoring** | สัญญาณสด (แรงตัด/แรงบิด spindle/มอเตอร์แกน), RUL ตามเวลาตัด + ช่วง + ค่าดิบรายรัน + เส้นนโยบาย, แถบสถานะตามเวลา, health indicator รายรัน, ค่าของรันล่าสุด, ควบคุมสตรีม, **แบนเนอร์ interlock** |
 | **Model Registry (MinIO)** | แบบจำลองที่ใช้งาน (แหล่ง, sha256, self-test, อินพุต/เอาต์พุต, ดอกฝึก/สงวน), ผล LOTO จาก `evaluation.json`, ทุกเวอร์ชันใน bucket + สลับเวอร์ชัน |
 | **Tool Life Reports** | ผลหลังถอดดอก: RUL ที่ระบบบอก vs RUL จริง, เวลา REPLACE_NOW vs เวลาหมดอายุจริง, VB ตอนถอด, CSV |
-| **Tool Image Wear** | หน้าจองไว้สำหรับแบบจำลองประเมินการสึกจากภาพใบมีด (ทีมพัฒนาอีกคน) — ไม่มีข้อมูลตัวอย่าง |
+| **Tool Inspection (Vision)** | ขั้นต่อจาก interlock: ผู้ควบคุมถอดดอก → ภาพ 4 ใบมีด → แบบจำลองภาพวัด VB (เกณฑ์ 103/140 µm เดียวกับ RUL) → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน (รายละเอียดในรายงาน non-time-series) |
 | Alarm & Alerts · Audit Trail · Users | แจ้งเตือนจากผลพยากรณ์จริง · การตัดสินใจของผู้ควบคุม · สิทธิ์ผู้ใช้ |
 
 ![dashboard](figures/web_01_dashboard.jpg)
-*รูปที่ 19 Tool Life Dashboard ขณะสตรีม 3 เครื่องตามเวลาจริง (M3 เพิ่งติดตั้งดอกใหม่ ยังอยู่ช่วง break-in)*
+*รูปที่ 19 Tool Life Dashboard ขณะสตรีม 3 เครื่องตามเวลาจริง: RUL + ช่วง P10–P90 รายเครื่อง, ETA บนนาฬิกาจริง, แผนเปลี่ยนดอก และ drift ของอินพุต*
 
-![interlock](figures/web_02_machine_interlock.jpg)
-*รูปที่ 20 Machine Monitoring: ระบบสั่ง REPLACE_NOW ที่เวลาตัด 49.6 นาที (ดอก T9) และหยุดป้อนรอผู้ควบคุม*
+![monitoring](figures/web_02_machine_monitoring.jpg)
+*รูปที่ 20 Machine Monitoring (M1 · ดอก T3): สัญญาณแรงตัดสดของรันปัจจุบัน และ RUL ตามเวลาตัดพร้อมช่วง P10–P90 และเส้นนโยบาย (วางแผน 3 ชั้นงาน / เปลี่ยนทันที 1 ชั้นงาน) — เมื่อถึง REPLACE_NOW หน้านี้แสดงแบนเนอร์ interlock ให้ผู้ควบคุมถอดดอกหรือตัดต่อ*
 
 ![registry](figures/web_03_model_registry.jpg)
-*รูปที่ 21 Model Registry: แบบจำลองที่ดึงจาก MinIO พร้อม sha256, self-test และผลประเมิน*
+*รูปที่ 21 Model Registry: GRU direct-RUL ที่ดึงจาก MinIO พร้อม sha256, self-test, อินพุต/เอาต์พุต และผลประเมิน leave-one-tool-out*
 
 ![reports](figures/web_04_reports.jpg)
-*รูปที่ 22 Reports หลังถอดดอก T9: REPLACE_NOW ที่ 49.6 นาที เทียบหมดอายุจริง 53.5 นาที, VB ตอนถอด 125 µm*
+*รูปที่ 22 Reports หลังผู้ควบคุมถอดดอก T3 (M1) ตามคำแนะนำ: REPLACE_NOW ครั้งแรกที่ 50.9 นาที เทียบหมดอายุจริง 57.9 นาที (เปลี่ยนก่อน 7.0 นาที), VB ตอนถอด 116 µm, ใช้อายุดอกได้ 88%*
 
-![vision](figures/web_05_tool_vision.jpg)
-*รูปที่ 23 หน้าจองสำหรับแบบจำลองภาพใบมีด*
+![inspection](figures/web_05_tool_inspection.jpg)
+*รูปที่ 23 ขั้นถัดไปหลังถอดดอก — Tool Inspection: ภาพ 4 ใบมีดของดอก T3 ที่ถอดจาก M1 พร้อมค่า VB ที่แบบจำลองภาพวัด (ระดับดอก = เฉลี่ย 4 ใบ) และบริบทจากแบบจำลอง RUL ตอนถอด รอผู้ตรวจยืนยัน*
 
 ### 6.6 ผลกับข้อมูลที่แบบจำลองไม่เคยเห็น (ดอกที่สงวนไว้)
 เล่นฟีเจอร์ทีละรันผ่าน `ToolLifeSession` ด้วยไฟล์แบบจำลองที่ส่งออกจริง (โค้ดเดียวกับ backend):

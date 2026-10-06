@@ -1,65 +1,46 @@
-# Environments
+# Environments (ค่าลับอยู่ใน .env — ดูตัวอย่างที่ .env.example)
 .env
 .venv
 backend/.venv
 
-# Local SQLite Databases
-*.db
-*.sqlite
-*.sqlite3
-app.db
-backend/app.db
-
 # Node / Frontend
 node_modules/
-frontend/node_modules/
-frontend/dist/
 dist/
 
-# Python Bytecode & Artifacts
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 build/
+.pytest_cache/
 
-# Logs
+# Logs ที่ระบบเขียนตอนรัน (compose mount ./logs และ backend/logs)
 logs/*
 !logs/.gitkeep
 backend/logs/*
 !backend/logs/.gitkeep
 
-# Datasets (Large binary & telemetry files excluded from Git)
+# ชุดข้อมูล (ไฟล์ใหญ่) — ดูวิธีวางที่ dataset/README.md
 dataset/*
 !dataset/README.md
-!dataset/.gitkeep
 *.mat
 *.h5
+
+# น้ำหนักแบบจำลอง (เก็บใน MinIO; อัปโหลดด้วย backend/scripts/publish_*.py)
 *.pt
 *.pth
 *.onnx
+
+# TensorBoard runs และน้ำหนัก ImageNet ที่ torchvision ดาวน์โหลดระหว่างการทดลอง
+runs/
+nontime_docs/tool_vb_vision/.torch_cache/
+
+# Archives
 *.zip
 *.tar.gz
 *.7z
-data/raw/
-data/processed/
 
-# Training runs (TensorBoard) and legacy tracking dirs
-mlruns/
-backend/mlruns/
-backend/runs/
-runs/
-
-backend/data_yolo_*/
-data_yolo_*/
-*.cache
-minio_data/
-redis_data/
-
-# Testing and Sandbox
-.pytest_cache/
-sandbox/
-
-# OS and IDE
+# OS / IDE
 .DS_Store
 Thumbs.db
 .vscode/

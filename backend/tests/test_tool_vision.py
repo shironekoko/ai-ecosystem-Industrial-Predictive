@@ -173,3 +173,36 @@ def test_vb_model_checkpoint_roundtrip_and_augmentation():
     assert abs(vm.predict(loaded, imgs, device="cpu") - before).max() < 1e-4
     x = vm.augment_batch(torch.stack(imgs))
     assert x.shape == (3, 3, 64, 192) and float(x.min()) >= 0 and float(x.max()) <= 1
+    x = vm.augment_batch(torch.stack(imgs), "strong")
+    assert x.shape == (3, 3, 64, 192) and float(x.min()) >= 0 and float(x.max()) <= 1
+
+
+def test_vb_model_ensemble_crop_and_normalization():
+    """ensemble เก็บ/โหลดทุกสมาชิกใน checkpoint เดียว, โหมด normalization ติดไปกับแบบจำลอง และ crop ตัดแถวก่อนย่อ"""
+    torch = pytest.importorskip("torch")
+    from PIL import Image
+
+    from app.features.tool_vision import vb_model as vm
+
+    cfg = vm.TrainConfig(arch="small_cnn", pretrained=False, image_size=(32, 96), crop=(0.0, 0.7), norm="instance", ensemble=2)
+    ens = vm.Ensemble([vm.build("small_cnn", pretrained=False, norm="instance").eval() for _ in range(2)]).eval()
+    imgs = [torch.randint(0, 255, (3, 32, 96), dtype=torch.uint8) for _ in range(2)]
+    loaded, ck = vm.load_checkpoint(vm.checkpoint_bytes(ens, cfg))
+    assert isinstance(loaded, vm.Ensemble) and len(vm.member_states(ck)) == 2 and loaded.norm_mode == "instance"
+    assert abs(vm.predict(loaded, imgs, device="cpu") - vm.predict(ens, imgs, device="cpu")).max() < 1e-4
+    assert vm.input_spec(ck["config"]) == dict(size=(32, 96), crop=(0.0, 0.7))
+    # ภาพครึ่งบนขาว ครึ่งล่างดำ: ตัดเหลือ 70% บน → แถวล่างสุดของผลยังเป็นส่วนผสม ไม่ใช่ดำล้วนทั้งครึ่งล่าง
+    im = Image.new("RGB", (300, 100), "white")
+    im.paste((0, 0, 0), (0, 50, 300, 100))
+    full, cropped = vm.load_resized(im, (10, 30)), vm.load_resized(im, (10, 30), crop=(0.0, 0.7))
+    assert int((full[0] < 128).sum(0).max()) == 5 and int((cropped[0] < 128).sum(0).max()) < 5
+    for mode in ("imagenet", "instance", "gray"):
+        z = vm.normalize(torch.stack(imgs), mode)
+        assert z.shape == (2, 3, 32, 96) and bool(torch.isfinite(z).all())
+    # checkpoint รุ่นเดิม (state_dict เดี่ยว ไม่มี norm/crop) ยังโหลดได้
+    old = vm.build("small_cnn", pretrained=False)
+    buf = __import__("io").BytesIO()
+    torch.save(dict(arch="small_cnn", p_drop=0.3, image_size=[32, 96], config={"image_size": [32, 96]},
+                    state_dict=old.state_dict()), buf)
+    m, ck = vm.load_checkpoint(buf.getvalue())
+    assert not isinstance(m, vm.Ensemble) and m.norm_mode == "imagenet" and vm.input_spec(ck["config"])["crop"] == (0.0, 1.0)

@@ -24,10 +24,10 @@ PROGRESS_TTL_S = 7 * 24 * 3600
 
 
 def _hist_brief(h: dict) -> dict:
-    return {k: (round(v, 6) if isinstance(v, float) else v) for k, v in h.items() if k in ("epoch", "train_loss", "val_loss", "val_mae", "lr")}
+    return {k: (round(v, 6) if isinstance(v, float) else v) for k, v in h.items() if k in ("epoch", "member", "train_loss", "val_loss", "val_mae", "lr")}
 
 
-def _progress_writer(job_ref: str, epochs: int):
+def _progress_writer(job_ref: str, epochs: int, members: int = 1):
     """เขียนความคืบหน้าลง Redis ทุก epoch (ถ้าเชื่อมต่อไม่ได้ก็ฝึกต่อได้ตามปกติ)"""
     import json
 
@@ -44,14 +44,15 @@ def _progress_writer(job_ref: str, epochs: int):
         if rec is not None:
             hist.append(_hist_brief(rec))
         try:
-            r.set(PROGRESS_KEY.format(job_ref), json.dumps(dict(stage=stage, epoch=len(hist), epochs=epochs, history=hist)),
+            r.set(PROGRESS_KEY.format(job_ref), json.dumps(dict(stage=stage, epoch=len(hist), epochs=epochs * members,
+                                                                epochs_per_member=epochs, members=members, history=hist)),
                   ex=PROGRESS_TTL_S)
         except Exception:
             pass
     return write
 
 
-def _human_images(labels: list[dict]):
+def _human_images(labels: list[dict], spec: dict):
     from core.minio_client import get_minio_client
 
     from . import vb_model as vm
@@ -61,7 +62,7 @@ def _human_images(labels: list[dict]):
     for it in labels:
         resp = c.get_object(INSPECTION_BUCKET, it["image_key"])
         try:
-            out.append(vm.load_resized(resp.read()))
+            out.append(vm.load_resized(resp.read(), **spec))
         finally:
             resp.close()
             resp.release_conn()
@@ -79,22 +80,23 @@ def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int
     blob, base_meta = tr.download_model(base_version)
     base_model, ck = vm.load_checkpoint(blob)
     base_cfg = vm.TrainConfig(**{k: v for k, v in ck["config"].items() if k in vm.TrainConfig.__dataclass_fields__})
-    base_cfg.image_size = tuple(base_cfg.image_size)
+    base_cfg.image_size, base_cfg.crop = tuple(base_cfg.image_size), tuple(base_cfg.crop)
+    spec = vm.input_spec(base_cfg)
 
     labels = sorted(labels, key=lambda d: d["reviewed_at"] or "")
     k = max(2, round(0.2 * len(labels))) if len(labels) >= 10 else 0
     train_lab, recent_lab = (labels[:-k], labels[-k:]) if k else (labels, [])
-    h_train, h_recent = _human_images(train_lab), _human_images(recent_lab)
+    h_train, h_recent = _human_images(train_lab, spec), _human_images(recent_lab, spec)
 
     base_df = nd.vb_samples(nd.BASE_TRAIN_TOOLS)
     val_df = nd.vb_samples(nd.VAL_TOOLS)
-    train_imgs = vm.load_images(base_df.path, base_cfg.image_size) + h_train
+    train_imgs = vm.load_images(base_df.path, spec["size"], crop=spec["crop"]) + h_train
     train_vb = np.concatenate([base_df.vb_um.values, [x["vb_um"] for x in train_lab]])
-    val_imgs = vm.load_images(val_df.path, base_cfg.image_size)
+    val_imgs = vm.load_images(val_df.path, spec["size"], crop=spec["crop"])
 
     cfg = replace(base_cfg, pretrained=False, epochs=epochs, lr=base_cfg.lr / 3, warmup_epochs=1, patience=None,
                   seed=int(datetime.utcnow().timestamp()) % 10000)
-    progress = _progress_writer(job_ref, epochs)
+    progress = _progress_writer(job_ref, epochs, len(vm.member_states(ck)))     # ensemble: fine-tune ทีละสมาชิก
     progress("training")
     writer = None
     try:
@@ -102,9 +104,10 @@ def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int
         writer = SummaryWriter(str(Path(os.environ.get("TB_LOG_DIR", "/logs/tensorboard")) / "tool-vision" / job_ref))
     except Exception:
         pass
-    cand, hist = vm.fit(cfg, train_imgs, train_vb, val_imgs, val_df.vb_um.values,
-                        init_state={k2: v for k2, v in ck["state_dict"].items()}, writer=writer,
-                        on_epoch=lambda rec: progress("training", rec))
+    # fine-tune ทุกสมาชิกของ ensemble จากน้ำหนักของเวอร์ชันที่ใช้งาน (epoch นับต่อกันข้ามสมาชิก)
+    cand, hist = vm.fit_ensemble(cfg, train_imgs, train_vb, val_imgs, val_df.vb_um.values,
+                                 init_states=vm.member_states(ck), writer=writer,
+                                 on_epoch=lambda rec: progress("training", rec))
     progress("evaluating")
     if writer is not None:
         writer.close()

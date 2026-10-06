@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole } from '../types';
 import { api } from '../services/api';
+import { AUTH_STORAGE_KEY, TOKEN_KEY, clearSession } from '../services/session';
 
 interface AuthContextType {
   user: User | null;
@@ -17,8 +18,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const AUTH_STORAGE_KEY = 'pdm_auth_user';
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
     try {
@@ -33,8 +32,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isAuthenticated = !!user;
 
-  // Refresh users directory from PostgreSQL backend
+  // รายชื่อผู้ใช้จาก backend — เฉพาะ admin (backend ตอบ 403 กับสิทธิ์อื่น)
   const refreshUsers = useCallback(async () => {
+    if (!localStorage.getItem(TOKEN_KEY)) return;
+    try {
+      if (JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null')?.role !== 'admin') return;
+    } catch {
+      return;
+    }
     try {
       const backendUsers = await api.getUsers();
       if (Array.isArray(backendUsers)) {
@@ -58,7 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshUsers();
 
     // Verify token validity with backend
-    const token = localStorage.getItem('pdm_access_token');
+    const token = localStorage.getItem(TOKEN_KEY);
     if (token) {
       api.getMe(token).then((me) => {
         if (me && me.email) {
@@ -74,17 +79,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(verifiedUser));
         } else {
           setUser(null);
-          localStorage.removeItem(AUTH_STORAGE_KEY);
-          localStorage.removeItem('pdm_access_token');
-          localStorage.removeItem('pdm_refresh_token');
+          clearSession();
         }
       }).catch(() => {
-        // If token expired/invalid, clear session
+        // token หมดอายุ/ไม่ถูกต้อง (เช่น backend เริ่มใหม่โดยไม่ตั้ง JWT_SECRET_KEY) → ต้องล็อกอินใหม่
         console.warn('[AuthContext] Token validation failed');
         setUser(null);
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        localStorage.removeItem('pdm_access_token');
-        localStorage.removeItem('pdm_refresh_token');
+        clearSession();
       });
     }
     window.addEventListener('focus', refreshUsers);
@@ -108,12 +109,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setUser(authenticatedUser);
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authenticatedUser));
-    if (authData.access_token) {
-      localStorage.setItem('pdm_access_token', authData.access_token);
-    }
-    if (authData.refresh_token) {
-      localStorage.setItem('pdm_refresh_token', authData.refresh_token);
-    }
+    localStorage.setItem(TOKEN_KEY, authData.access_token);
 
     await refreshUsers();
   };
@@ -135,9 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    localStorage.removeItem('pdm_access_token');
-    localStorage.removeItem('pdm_refresh_token');
+    clearSession();
   };
 
   // Admin action: Change role of any user via backend API

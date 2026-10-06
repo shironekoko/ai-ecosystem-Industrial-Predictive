@@ -41,7 +41,6 @@ const MetricRow: React.FC<{ label: string; m?: any; note?: string }> = ({ label,
 
 export const VisionRegistry: React.FC = () => {
   const { user } = useAuth();
-  const actor = user?.name || 'operator';
   const isAdmin = user?.role === 'admin';
   const [info, setInfo] = useState<VisionModelInfo | null>(null);
   const [versions, setVersions] = useState<VisionVersion[]>([]);
@@ -96,7 +95,12 @@ export const VisionRegistry: React.FC = () => {
         <a href={tensorboardUrl()} target="_blank" rel="noreferrer" className="btn-secondary">
           <ExternalLink className="w-3.5 h-3.5" /> เปิด TensorBoard
         </a>
-        <button onClick={() => act(() => api.reloadVisionModel())} disabled={busy} className="btn-primary">
+        <button
+          onClick={() => act(() => api.reloadVisionModel())}
+          disabled={busy || !isAdmin}
+          title={isAdmin ? '' : 'เฉพาะผู้ดูแลระบบ'}
+          className="btn-primary"
+        >
           <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} /> ดึงเวอร์ชันล่าสุดจาก MinIO
         </button>
       </div>
@@ -121,8 +125,21 @@ export const VisionRegistry: React.FC = () => {
               {meta && (
                 <>
                   <Row k="งาน" v="regression: ภาพ 1 ใบ → VB (µm)" />
-                  <Row k="สถาปัตยกรรม" v={`${meta.model} · ${(meta.n_params / 1e6).toFixed(2)}M params`} />
+                  <Row
+                    k="สถาปัตยกรรม"
+                    v={
+                      (meta.ensemble ?? 1) > 1
+                        ? `${meta.arch} + หัว regression × ${meta.ensemble} ตัว (เฉลี่ยค่า VB) · ${(meta.n_params / meta.ensemble / 1e6).toFixed(2)}M params/ตัว`
+                        : `${meta.model} · ${(meta.n_params / 1e6).toFixed(2)}M params`
+                    }
+                  />
                   <Row k="อินพุต" v={`${meta.image_size?.join('×')} px (คงสัดส่วนภาพ)`} />
+                  {meta.config && (
+                    <Row
+                      k="การฝึก"
+                      v={`${meta.config.epochs} epoch · augmentation ${meta.config.aug === 'strong' ? 'สี/แสงแรง' : 'พื้นฐาน'}${meta.config.ema_decay ? ' · EMA' : ''}`}
+                    />
+                  )}
                   <Row k="ฝึก / val / test" v={`ดอก ${meta.train_tools?.join(',')} / ${meta.val_tools?.join(',')} / ${meta.test_tools?.join(',')}`} />
                   <Row k="ค่าวัดจากคน (retrain)" v={`${meta.n_human_labels ?? 0} ใบ`} />
                   <Row k="เกณฑ์" v={`ใกล้หมดอายุ ${meta.thresholds?.vb_accel_um} µm · หมดอายุ ${meta.thresholds?.vb_eol_um} µm (เฉลี่ย 4 ใบ)`} />
@@ -238,7 +255,7 @@ export const VisionRegistry: React.FC = () => {
                       </div>
                     )}
                     {hist?.length ? (
-                      <TrainingCurves history={hist} epochs={j.progress?.epochs} height={160} />
+                      <TrainingCurves history={hist} epochs={j.progress?.epochs_per_member ?? j.progress?.epochs} height={160} />
                     ) : (
                       <p className="text-xs text-gray-400">{live ? 'รอ epoch แรก…' : 'ไม่มีประวัติการเทรน'}</p>
                     )}
@@ -272,7 +289,7 @@ export const VisionRegistry: React.FC = () => {
                   <tr key={v.version} className={`border-b border-gray-50 ${v.active ? 'bg-emerald-50/40' : ''}`}>
                     <td className="py-2 pr-2 font-mono">
                       {v.version}
-                      <span className="block text-[10px] text-gray-400 font-sans">{v.base_version ? `retrain จาก ${v.base_version}` : 'เวอร์ชันแรก (ดอก 1–6)'}</span>
+                      <span className="block text-[10px] text-gray-400 font-sans">{v.base_version ? `retrain จาก ${v.base_version}` : 'ฝึกจากชุดข้อมูล (ดอก 1–6)'}</span>
                     </td>
                     <td className="py-2 pr-2">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${st.cls}`}>{st.label}</span>
@@ -296,7 +313,7 @@ export const VisionRegistry: React.FC = () => {
                         isAdmin && (
                           <button
                             disabled={busy}
-                            onClick={() => confirm(`ใช้ ${v.version} เป็นแบบจำลองหลัก?`) && act(() => api.activateVisionVersion(v.version, actor))}
+                            onClick={() => confirm(`ใช้ ${v.version} เป็นแบบจำลองหลัก?`) && act(() => api.activateVisionVersion(v.version))}
                             className="btn-secondary"
                           >
                             ใช้เวอร์ชันนี้

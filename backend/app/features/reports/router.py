@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Response
 
 from . import service
 from .schemas import ToolLifeSummary
+from app.features.auth.dependencies import get_current_active_user
 
-router = APIRouter(prefix="/reports", tags=["Reports"])
+router = APIRouter(prefix="/reports", tags=["Reports"], dependencies=[Depends(get_current_active_user)])
 
 
 @router.get("/tool-life-summary", response_model=ToolLifeSummary, summary="สรุปผลแบบจำลองเทียบค่าจริงของดอกที่ถอดแล้ว")

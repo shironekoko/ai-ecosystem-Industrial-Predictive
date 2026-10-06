@@ -88,9 +88,9 @@ export const ReportsPage: React.FC = () => {
         title="Reports"
         subtitle="ผลของแบบจำลองเทียบกับ VB ที่วัดจริง — คำนวณเฉพาะดอกที่ถูกถอดออกจากเครื่องแล้ว (ระหว่างใช้งานไม่มีการเปิดเผยค่าจริง)"
         actions={
-          <a href={api.exportCsvUrl()} className="btn-secondary">
+          <button onClick={() => api.downloadEvaluationsCsv().catch((e) => setErr(e.message))} className="btn-secondary">
             <Download className="w-3.5 h-3.5" /> CSV
-          </a>
+          </button>
         }
       />
       {err && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">{err}</div>}

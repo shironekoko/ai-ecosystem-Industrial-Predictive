@@ -1707,7 +1707,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ai_ecosystem_http_server_duration_milliseconds_count{job=\"ai-ecosystem-backend\",http_status_code=~\"5..\"}[5m])) / sum(rate(ai_ecosystem_http_server_duration_milliseconds_count{job=\"ai-ecosystem-backend\"}[5m]))",
+          "expr": "(sum(rate(ai_ecosystem_http_server_duration_milliseconds_count{job=\"ai-ecosystem-backend\",http_status_code=~\"5..\"}[5m])) or vector(0)) / sum(rate(ai_ecosystem_http_server_duration_milliseconds_count{job=\"ai-ecosystem-backend\"}[5m]))",
           "legendFormat": "5xx",
           "refId": "A",
           "range": true,
@@ -1719,7 +1719,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(ai_ecosystem_http_server_duration_milliseconds_count{job=\"ai-ecosystem-backend\",http_status_code=~\"4..\"}[5m])) / sum(rate(ai_ecosystem_http_server_duration_milliseconds_count{job=\"ai-ecosystem-backend\"}[5m]))",
+          "expr": "(sum(rate(ai_ecosystem_http_server_duration_milliseconds_count{job=\"ai-ecosystem-backend\",http_status_code=~\"4..\"}[5m])) or vector(0)) / sum(rate(ai_ecosystem_http_server_duration_milliseconds_count{job=\"ai-ecosystem-backend\"}[5m]))",
           "legendFormat": "4xx",
           "refId": "B",
           "range": true,

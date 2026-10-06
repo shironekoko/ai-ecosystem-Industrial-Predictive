@@ -1,70 +1,51 @@
 """
 FastAPI Application — Entry Point
 
-AI Ecosystem Backend API Server
-
 รัน: uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
-Swagger UI: http://localhost:8000/docs
-ReDoc: http://localhost:8000/redoc
-OpenAPI JSON: http://localhost:8000/openapi.json
+API ทั้งหมดอยู่ใต้ /api/v1 (frontend เรียกผ่าน proxy ของ Vite) · Swagger UI: http://localhost:8000/docs
 """
 
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.requests import Request
 
 from core.config import settings
 from core.database import Base, engine
 from core.minio_client import ensure_bucket
-from core.observability import setup_observability, instrument_fastapi
+from core.observability import instrument_fastapi, setup_observability
 
 # ── OpenTelemetry (trace / metric / log) — เปิดเมื่อมี OTEL_EXPORTER_OTLP_ENDPOINT (compose.observability.yml) ──
 setup_observability(service_name="ai-ecosystem-backend")
 
-
-
-# ── Tag Metadata สำหรับ Swagger UI ──
 tags_metadata = [
-    {
-        "name": "Health Check",
-        "description": "ตรวจสอบสถานะระบบและ Components ต่าง ๆ (Database, Redis, MinIO)",
-    },
-    {
-        "name": "Authentication",
-        "description": "ระบบ Authentication — สมัครสมาชิก, เข้าสู่ระบบ (JWT), ต่ออายุ token, ออกจากระบบ",
-    },
-    {
-        "name": "Profile",
-        "description": "จัดการโปรไฟล์ผู้ใช้ — ดู/แก้ไขข้อมูล, อัปโหลด/ลบรูปโปรไฟล์ผ่าน MinIO",
-    },
-    {
-        "name": "Tool Vision (blade inspection)",
-        "description": "วัดรอยสึก VB ของ 4 ใบมีดจากภาพ (ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → "
-                       "ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน → retrain",
-    },
+    {"name": "Health Check", "description": "สถานะของ backend (ใช้กับ healthcheck ของ Docker)"},
+    {"name": "Authentication", "description": "สมัครสมาชิก / เข้าสู่ระบบ (JWT) / ข้อมูลผู้ใช้ปัจจุบัน"},
     {
         "name": "Tool Life (RUL)",
         "description": "แบบจำลองอนุกรมเวลา (GRU) พยากรณ์อายุใช้งานที่เหลือของดอกกัด — โหลดจาก MinIO, "
                        "สตรีมข้อมูลจริงของชุดข้อมูล LUH (ดอกที่ไม่ได้ใช้ฝึก) ตามเวลาจริง",
     },
+    {
+        "name": "Tool Vision (blade inspection)",
+        "description": "วัดรอยสึก VB ของ 4 ใบมีดจากภาพ (ensemble ของ ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → "
+                       "ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน → retrain",
+    },
+    {"name": "Industrial Alarms", "description": "การแจ้งเตือนจากผลพยากรณ์ RUL และผลตรวจใบมีด"},
+    {"name": "Audit Trail", "description": "บันทึกการตัดสินใจของผู้ใช้ (ถอดดอก, ยืนยันผลตรวจ, retrain, สลับแบบจำลอง)"},
+    {"name": "Reports", "description": "ผลประเมิน RUL หลังถอดดอก (เทียบ VB ที่วัดจริง) + CSV"},
+    {"name": "Users & RBAC Access Console", "description": "จัดการผู้ใช้และสิทธิ์ (admin)"},
 ]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Startup / Shutdown events
-
-    Startup:
-    - สร้าง database tables (ถ้ายังไม่มี)
-    - สร้าง MinIO bucket สำหรับ profile images (ถ้ายังไม่มี)
-    """
-    # ── Startup ──
-    import app.features.auth.models  # noqa: F401
-    import app.features.audit.models  # noqa: F401
+    """Startup: ตาราง DB + บัญชีตั้งต้น, bucket แบบจำลองใน MinIO, สตรีม RUL, โหลดแบบจำลองภาพ, gauge ของ observability"""
     import app.features.alarms.models  # noqa: F401
+    import app.features.audit.models  # noqa: F401
+    import app.features.auth.models  # noqa: F401
     import app.features.tool_vision.models  # noqa: F401
 
     try:
@@ -73,51 +54,25 @@ async def lifespan(app: FastAPI):
         ensure_vision_schema(engine)
         print("[OK] Database tables created")
 
-        # Seed default accounts
+        # บัญชีตั้งต้นสำหรับเครื่องพัฒนา (ปุ่มกรอกอัตโนมัติในหน้า login)
         from app.features.auth.service import create_user, get_user_by_email
         from core.database import SessionLocal
 
         with SessionLocal() as db:
-            if not get_user_by_email(db, "admin@machinery.internal"):
-                create_user(
-                    db,
-                    email="admin@machinery.internal",
-                    username="admin",
-                    password="admin123",
-                    full_name="System Admin",
-                    role="admin",
-                    department="Operations & Security",
-                    title="Platform Administrator",
-                )
-                print("[OK] Seeded admin user")
-            
-            if not get_user_by_email(db, "engineer@machinery.internal"):
-                create_user(
-                    db,
-                    email="engineer@machinery.internal",
-                    username="engineer",
-                    password="engineer123",
-                    full_name="Maintenance Engineer",
-                    role="engineer",
-                    department="Maintenance Team",
-                    title="Reliability Engineer",
-                )
-                print("[OK] Seeded engineer user")
-
-            from app.features.alarms.service import seed_alarms_if_empty
-            from app.features.audit.service import seed_audit_logs_if_empty
-            seed_alarms_if_empty(db)
-            seed_audit_logs_if_empty(db)
-            print("[OK] Seeded alarms and audit logs")
-
+            for email, username, password, full_name, role, department, title in (
+                ("admin@machinery.internal", "admin", "admin123", "System Admin", "admin",
+                 "Operations & Security", "Platform Administrator"),
+                ("engineer@machinery.internal", "engineer", "engineer123", "Maintenance Engineer", "engineer",
+                 "Maintenance Team", "Reliability Engineer"),
+            ):
+                if not get_user_by_email(db, email):
+                    create_user(db, email=email, username=username, password=password, full_name=full_name,
+                                role=role, department=department, title=title)
+                    print(f"[OK] Seeded {username} user")
     except Exception as e:
         print(f"[WARN] Database setup failed (server may not be ready): {e}")
 
     try:
-        ensure_bucket(settings.minio_profile_bucket)
-        print(f"[OK] MinIO bucket '{settings.minio_profile_bucket}' ready")
-        ensure_bucket(settings.minio_datasets_bucket)
-        print(f"[OK] MinIO bucket '{settings.minio_datasets_bucket}' ready")
         ensure_bucket(settings.minio_models_bucket)
         print(f"[OK] MinIO bucket '{settings.minio_models_bucket}' ready")
     except Exception as e:
@@ -135,7 +90,7 @@ async def lifespan(app: FastAPI):
 
     def _load_vision():
         vision_registry.load()
-        rescore_legacy_pending()        # รายการรอตรวจที่สร้างโดยแบบจำลองจำแนกคลาสรุ่นเก่า → วัด VB ใหม่
+        rescore_legacy_pending()        # รายการรอตรวจที่สร้างโดยแบบจำลองรุ่นเก่า → วัด VB ใหม่
 
     asyncio.get_running_loop().run_in_executor(None, _load_vision)
 
@@ -145,47 +100,27 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # ── Shutdown ──
     await tool_life_manager.stop()
     print("[INFO] Application shutting down")
 
 
-# ── สร้าง FastAPI app ──
 app = FastAPI(
-    title="AI Ecosystem API",
+    title="AI Ecosystem API — CNC Tool Life",
     description=(
-        "## AI Ecosystem — Backend API Server\n\n"
-        "ระบบ Backend สำหรับ AI Ecosystem ที่รวม Services ต่าง ๆ ไว้ในที่เดียว\n\n"
-        "### 🔑 Authentication & Profile\n"
-        "- **Sign-up / Login** → JWT token pair (access + refresh)\n"
-        "- **Profile** — ดู/แก้ไขโปรไฟล์ + รูปโปรไฟล์ผ่าน MinIO\n\n"
-        "### ⏱️ Tool Life (RUL) — แบบจำลองอนุกรมเวลา GRU + สตรีมข้อมูลจริงตามเวลาจริง\n\n"
-        "### 🔍 Tool Vision — วัดรอยสึก VB ของใบมีดจากภาพ + ผู้ตรวจยืนยัน + ใบสั่งงาน + retrain (ARQ + GPU worker)\n\n"
-        "### 💚 Health Check\n"
-        "- ตรวจสอบสถานะทุก component ในระบบ\n\n"
-        "---\n"
-        "Use the **Authorize** button above to enter your Bearer token for protected endpoints."
+        "Backend ของระบบ CNC Tool Life AI: พยากรณ์อายุดอกกัด (RUL, time series) → ถอดดอก → "
+        "วัดรอยสึก VB จากภาพใบมีด → ผู้ตรวจยืนยัน → ใบสั่งงาน → retrain\n\n"
+        "ทุก endpoint อยู่ใต้ `/api/v1` · ใช้ปุ่ม **Authorize** ใส่ Bearer token สำหรับ endpoint ที่ต้องล็อกอิน"
     ),
     version="1.0.0",
     openapi_tags=tags_metadata,
-    contact={
-        "name": "AI Ecosystem Team",
-    },
-    license_info={
-        "name": "MIT License",
-        "url": "https://opensource.org/licenses/MIT",
-    },
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
 
-# ── Instrument FastAPI with OpenTelemetry ──
 instrument_fastapi(app)
 
-
-# ── CORS Middleware ──
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -194,11 +129,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Anti-Caching Middleware for Real-time Industrial Telemetry ──
-from starlette.requests import Request
 
 @app.middleware("http")
 async def add_no_cache_header(request: Request, call_next):
+    """ข้อมูลสด (สตรีม/สถานะเครื่อง) — ห้าม browser/proxy cache"""
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -207,52 +141,20 @@ async def add_no_cache_header(request: Request, call_next):
     return response
 
 
-# ── Include Routers ──
-from fastapi import APIRouter
-from app.features.health.router import router as health_router
-from app.features.auth.router import router as auth_router
-from app.features.profile.router import router as profile_router
-from app.features.tool_life.router import router as tool_life_router
-from app.features.tool_vision.router import router as tool_vision_router
-from app.features.alarms.router import router as alarms_router
-from app.features.audit.router import router as audit_router
-from app.features.reports.router import router as reports_router
-from app.features.users.router import router as users_router
+# ── Routers: ทั้งหมดอยู่ใต้ /api/v1 ──
+from app.features.alarms.router import router as alarms_router  # noqa: E402
+from app.features.audit.router import router as audit_router  # noqa: E402
+from app.features.auth.router import router as auth_router  # noqa: E402
+from app.features.health.router import router as health_router  # noqa: E402
+from app.features.reports.router import router as reports_router  # noqa: E402
+from app.features.tool_life.router import router as tool_life_router  # noqa: E402
+from app.features.tool_life.router import stream_router as tool_life_stream_router  # noqa: E402
+from app.features.tool_vision.router import router as tool_vision_router  # noqa: E402
+from app.features.users.router import router as users_router  # noqa: E402
 
-# ── Direct mounts for root fallback (legacy backward compatibility) ──
-app.include_router(health_router)
-app.include_router(auth_router)
-app.include_router(profile_router)
-app.include_router(tool_life_router)
-app.include_router(tool_vision_router)
-app.include_router(alarms_router)
-app.include_router(audit_router)
-app.include_router(reports_router)
-app.include_router(users_router)
-
-# ── Primary API Specification: Mount all under /api/v1 for Frontend client compatibility ──
 api_v1 = APIRouter(prefix="/api/v1")
-api_v1.include_router(health_router)
-api_v1.include_router(auth_router)
-api_v1.include_router(profile_router)
-api_v1.include_router(tool_life_router)
-api_v1.include_router(tool_vision_router)
-api_v1.include_router(alarms_router)
-api_v1.include_router(audit_router)
-api_v1.include_router(reports_router)
-api_v1.include_router(users_router)
+# ต้องล็อกอินทุก router ยกเว้น health (healthcheck ของ Docker) และ /auth/signup, /auth/login — ดู auth/dependencies.py
+for r in (health_router, auth_router, tool_life_router, tool_life_stream_router, tool_vision_router, alarms_router,
+          audit_router, reports_router, users_router):
+    api_v1.include_router(r)
 app.include_router(api_v1)
-
-# ── Serve Frontend Web UI Demo ──
-from pathlib import Path
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-
-_frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
-if (_frontend_dir / "index.html").exists():
-    @app.get("/", include_in_schema=False)
-    async def serve_root_ui():
-        return FileResponse(str(_frontend_dir / "index.html"))
-
-    app.mount("/ui", StaticFiles(directory=str(_frontend_dir), html=True), name="ui")
-

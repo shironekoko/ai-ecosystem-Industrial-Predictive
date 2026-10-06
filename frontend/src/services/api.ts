@@ -1,7 +1,11 @@
 /**
- * API client — FastAPI backend (/api/v1)
- * ระบบมีแบบจำลองอนุกรมเวลาเพียงตัวเดียว: GRU พยากรณ์อายุใช้งานที่เหลือ (RUL) ของดอกกัด
- * แบบจำลองถูกโหลดจาก MinIO โดย backend และข้อมูลไหลจากชุดข้อมูลจริง (LUH) ตามเวลาจริง
+ * API client — FastAPI backend (/api/v1) · ทุก method ในไฟล์นี้ถูกใช้โดยหน้าเว็บ (endpoint ที่ไม่มีผู้เรียกถูกลบออกจาก backend แล้ว)
+ * Tool Life (RUL, GRU) · Tool Vision (วัด VB จากภาพ) · Reports · Alarms · Audit · Users · Auth
+ * สตรีมสด (WebSocket) อยู่ที่ telemetryStream.ts
+ *
+ * ทุก request (ยกเว้น login/signup) ส่ง Authorization: Bearer <token> · 401 = token หมดอายุ/ไม่ถูกต้อง → ล้าง session แล้วไปหน้า login
+ * ภาพใบมีดและ CSV โหลดผ่าน fetch เป็น blob (<img src> / <a href> ส่ง header ไม่ได้) — ไม่ใส่ token ใน URL เพราะติด access log
+ * ผู้ทำรายการใน audit = ผู้ใช้ของ token (backend ไม่รับ actor จาก body)
  */
 import type {
   BenchMeasurement,
@@ -21,14 +25,9 @@ import type {
   ToolEvaluation,
   ToolLifeSummary,
 } from '../types';
+import { endSession, getToken } from './session';
 
 export const API_BASE_URL: string = (import.meta as any).env?.VITE_API_URL || '/api/v1';
-
-export interface ApiStatus {
-  online: boolean;
-  gateway: string;
-  latencyMs?: number;
-}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -36,12 +35,22 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+/** fetch พร้อม Bearer token — url เต็ม (เช่น image_url จาก backend) · 401 → endSession() */
+async function authFetch(url: string, init?: RequestInit): Promise<Response> {
+  const token = getToken();
+  const res = await fetch(url, {
     cache: 'no-store',
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers || {}) },
   });
+  if (res.status === 401) endSession();
+  return res;
+}
+
+const apiFetch = (path: string, init?: RequestInit) => authFetch(`${API_BASE_URL}${path}`, init);
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await apiFetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try {
@@ -53,54 +62,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** บันทึก CSV ที่ต้องล็อกอินเป็นไฟล์ */
+async function downloadCsv(path: string, filename: string) {
+  const res = await apiFetch(path);
+  if (!res.ok) throw new ApiError(res.status, `ดาวน์โหลด ${filename} ไม่สำเร็จ (HTTP ${res.status})`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export class ApiService {
   private static instance: ApiService;
-  private isBackendOnline: boolean = false;
 
-  public getAuthHeaders(): Record<string, string> {
-    const token = localStorage.getItem('pdm_access_token');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }
-
-  private constructor() {
-    this.checkHealth();
-  }
+  private constructor() {}
 
   public static getInstance(): ApiService {
     if (!ApiService.instance) {
       ApiService.instance = new ApiService();
     }
     return ApiService.instance;
-  }
-
-  /**
-   * Check connection to backend FastAPI server
-   */
-  public async checkHealth(): Promise<ApiStatus> {
-    const startTime = performance.now();
-    try {
-      const response = await fetch(`${API_BASE_URL}/health`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const latency = Math.round(performance.now() - startTime);
-      this.isBackendOnline = response.ok;
-      return {
-        online: response.ok,
-        gateway: API_BASE_URL,
-        latencyMs: latency,
-      };
-    } catch {
-      this.isBackendOnline = false;
-      return {
-        online: false,
-        gateway: API_BASE_URL,
-      };
-    }
-  }
-
-  public get online(): boolean {
-    return this.isBackendOnline;
   }
 
   // ───────────────────────── Tool life (RUL) ─────────────────────────
@@ -123,10 +108,10 @@ export class ApiService {
     });
   }
 
-  public acknowledge(machine: number, action: 'continue' | 'replace', actor: string) {
+  public acknowledge(machine: number, action: 'continue' | 'replace') {
     return request<MachineSnapshot>(`/tool-life/machines/${machine}/acknowledge`, {
       method: 'POST',
-      body: JSON.stringify({ action, actor }),
+      body: JSON.stringify({ action }),
     });
   }
 
@@ -138,6 +123,7 @@ export class ApiService {
     return request<ModelVersion[]>('/tool-life/model/versions');
   }
 
+  /** admin */
   public reloadModel(version?: string) {
     return request<ModelInfo>('/tool-life/model/reload', {
       method: 'POST',
@@ -153,8 +139,8 @@ export class ApiService {
     return request<ToolLifeSummary>('/reports/tool-life-summary');
   }
 
-  public exportCsvUrl() {
-    return `${API_BASE_URL}/reports/export/csv`;
+  public downloadEvaluationsCsv() {
+    return downloadCsv('/reports/export/csv', 'tool_life_evaluations.csv');
   }
 
   // ───────────────────────── Tool vision (ตรวจใบมีดด้วยภาพ) ─────────────────────────
@@ -163,11 +149,8 @@ export class ApiService {
   }
 
   /** สำรองเมื่อถ่ายภาพอัตโนมัติตอนถอดดอกไม่สำเร็จ — ได้เฉพาะดอกที่ถอดแล้ว */
-  public captureInspection(machine: number, actor: string) {
-    return request<VisionInspection>(`/tool-vision/stations/${machine}/capture`, {
-      method: 'POST',
-      body: JSON.stringify({ actor }),
-    });
+  public captureInspection(machine: number) {
+    return request<VisionInspection>(`/tool-vision/stations/${machine}/capture`, { method: 'POST' });
   }
 
   public getInspections(status?: string, machine?: number, limit = 100) {
@@ -182,18 +165,22 @@ export class ApiService {
     return request<VisionInspection>(`/tool-vision/inspections/${id}`);
   }
 
-  /** วัดใบมีดบน optical bench — เปิดเผยค่าวัดจริงของใบนั้น */
-  public measureBlade(id: string, blade: number, actor: string) {
-    return request<BenchMeasurement & { blade: number }>(`/tool-vision/inspections/${id}/blades/${blade}/measure`, {
-      method: 'POST',
-      body: JSON.stringify({ actor }),
-    });
+  /** ไฟล์ที่ต้องล็อกอินจาก url เต็มที่ backend ส่งมา (เช่น image_url ของใบมีด) — ใช้ผ่าน <AuthImage> */
+  public async getBlob(url: string) {
+    const res = await authFetch(url);
+    if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+    return res.blob();
   }
 
-  public reviewInspection(id: string, actor: string, blades: { blade: number; source: VbSource; vb_um?: number | null }[], note?: string) {
+  /** วัดใบมีดบน optical bench — เปิดเผยค่าวัดจริงของใบนั้น */
+  public measureBlade(id: string, blade: number) {
+    return request<BenchMeasurement & { blade: number }>(`/tool-vision/inspections/${id}/blades/${blade}/measure`, { method: 'POST' });
+  }
+
+  public reviewInspection(id: string, blades: { blade: number; source: VbSource; vb_um?: number | null }[], note?: string) {
     return request<VisionInspection>(`/tool-vision/inspections/${id}/review`, {
       method: 'POST',
-      body: JSON.stringify({ actor, blades, note: note || null }),
+      body: JSON.stringify({ blades, note: note || null }),
     });
   }
 
@@ -202,15 +189,12 @@ export class ApiService {
   }
 
   /** ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก) */
-  public markToolServiced(inspectionId: string, actor: string) {
-    return request<{ inspection_id: string; status: string }>(`/tool-vision/replacements/${inspectionId}/done`, {
-      method: 'POST',
-      body: JSON.stringify({ actor }),
-    });
+  public markToolServiced(inspectionId: string) {
+    return request<{ inspection_id: string; status: string }>(`/tool-vision/replacements/${inspectionId}/done`, { method: 'POST' });
   }
 
-  public replacementsCsvUrl() {
-    return `${API_BASE_URL}/tool-vision/replacements/export/csv`;
+  public downloadReplacementsCsv() {
+    return downloadCsv('/tool-vision/replacements/export/csv', 'blade_replacements.csv');
   }
 
   public getVisionStats() {
@@ -221,16 +205,16 @@ export class ApiService {
     return request<VisionModelInfo>('/tool-vision/model');
   }
 
-  /** โหลดเวอร์ชันตาม latest.json ใน MinIO ใหม่ */
+  /** โหลดเวอร์ชันตาม latest.json ใน MinIO ใหม่ (admin) */
   public reloadVisionModel() {
     return request<VisionModelInfo>('/tool-vision/model/reload', { method: 'POST' });
   }
 
-  /** ใช้เวอร์ชันที่เลือกเป็นตัวหลัก (ย้อนเวอร์ชันได้) */
-  public activateVisionVersion(version: string, actor: string) {
+  /** ใช้เวอร์ชันที่เลือกเป็นตัวหลัก (ย้อนเวอร์ชันได้, admin) */
+  public activateVisionVersion(version: string) {
     return request<VisionModelInfo>('/tool-vision/model/activate', {
       method: 'POST',
-      body: JSON.stringify({ version, actor }),
+      body: JSON.stringify({ version }),
     });
   }
 
@@ -246,18 +230,14 @@ export class ApiService {
     return request<TrainingJob[]>('/tool-vision/training/jobs');
   }
 
-  public startRetrain(actor: string) {
-    return request<{ job_id: string; n_labels: number }>('/tool-vision/training/start', {
-      method: 'POST',
-      body: JSON.stringify({ actor }),
-    });
+  /** admin */
+  public startRetrain() {
+    return request<{ job_id: string; n_labels: number }>('/tool-vision/training/start', { method: 'POST' });
   }
 
-  public decideTrainingJob(jobId: string, action: 'promote' | 'reject', actor: string) {
-    return request<{ job_id: string; status: string; version: string }>(`/tool-vision/training/jobs/${jobId}/${action}`, {
-      method: 'POST',
-      body: JSON.stringify({ actor }),
-    });
+  /** admin */
+  public decideTrainingJob(jobId: string, action: 'promote' | 'reject') {
+    return request<{ job_id: string; status: string; version: string }>(`/tool-vision/training/jobs/${jobId}/${action}`, { method: 'POST' });
   }
 
   /**
@@ -271,7 +251,7 @@ export class ApiService {
       params.append('page', String(page));
       params.append('limit', String(limit));
 
-      const res = await fetch(`${API_BASE_URL}/audit-logs?${params.toString()}`);
+      const res = await apiFetch(`/audit-logs?${params.toString()}`);
       if (res.ok) {
         return await res.json();
       }
@@ -291,7 +271,7 @@ export class ApiService {
       if (isRead !== undefined) params.append('is_read', String(isRead));
 
       const qs = params.toString() ? `?${params.toString()}` : '';
-      const res = await fetch(`${API_BASE_URL}/alarms${qs}`);
+      const res = await apiFetch(`/alarms${qs}`);
       if (res.ok) {
         return await res.json();
       }
@@ -303,7 +283,7 @@ export class ApiService {
 
   public async markAlarmRead(alarmId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/alarms/${alarmId}/read`, { method: 'PATCH' });
+      const res = await apiFetch(`/alarms/${alarmId}/read`, { method: 'PATCH' });
       if (res.ok) {
         return await res.json();
       }
@@ -315,7 +295,7 @@ export class ApiService {
 
   public async markAllAlarmsRead() {
     try {
-      const res = await fetch(`${API_BASE_URL}/alarms/mark-all-read`, { method: 'POST' });
+      const res = await apiFetch('/alarms/mark-all-read', { method: 'POST' });
       if (res.ok) {
         return await res.json();
       }
@@ -327,7 +307,7 @@ export class ApiService {
 
   public async deleteAlarm(alarmId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/alarms/${alarmId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/alarms/${alarmId}`, { method: 'DELETE' });
       if (res.ok) {
         return await res.json();
       }
@@ -342,7 +322,7 @@ export class ApiService {
    */
   public async getUsers() {
     try {
-      const res = await fetch(`${API_BASE_URL}/users`, { headers: { ...this.getAuthHeaders() } });
+      const res = await apiFetch('/users');
       if (res.ok) {
         return await res.json();
       }
@@ -354,9 +334,9 @@ export class ApiService {
 
   public async createUser(userData: { name: string; email: string; role: string; department?: string; title?: string; password?: string }) {
     try {
-      const res = await fetch(`${API_BASE_URL}/users`, {
+      const res = await apiFetch('/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(userData),
       });
       if (res.ok) {
@@ -370,9 +350,9 @@ export class ApiService {
 
   public async updateUserRole(userId: string, role: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/users/${userId}/role`, {
+      const res = await apiFetch(`/users/${userId}/role`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role }),
       });
       if (res.ok) {
@@ -386,7 +366,7 @@ export class ApiService {
 
   public async deleteUser(userId: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/users/${userId}`, { method: 'DELETE', headers: { ...this.getAuthHeaders() } });
+      const res = await apiFetch(`/users/${userId}`, { method: 'DELETE' });
       if (res.ok) {
         return await res.json();
       }
@@ -396,42 +376,11 @@ export class ApiService {
     return null;
   }
 
-  /** Generic GET helper for flexibility */
-  public async get(endpoint: string): Promise<{ data: any }> {
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    const url = endpoint.startsWith('http')
-      ? endpoint
-      : endpoint.startsWith('/api/v1')
-      ? `${API_BASE_URL.replace('/api/v1', '')}${cleanEndpoint}`
-      : `${API_BASE_URL}${cleanEndpoint}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-    const data = await res.json();
-    return { data };
-  }
-
-  /** Generic POST helper for flexibility */
-  public async post(endpoint: string, body?: any): Promise<{ data: any }> {
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    const url = endpoint.startsWith('http')
-      ? endpoint
-      : endpoint.startsWith('/api/v1')
-      ? `${API_BASE_URL.replace('/api/v1', '')}${cleanEndpoint}`
-      : `${API_BASE_URL}${cleanEndpoint}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-    const data = await res.json();
-    return { data };
-  }
-
   /**
    * Real Authentication: Login against PostgreSQL backed backend (/api/v1/auth/login)
+   * fetch ตรง (ไม่ผ่าน apiFetch): รหัสผ่านผิดก็ตอบ 401 — ต้องแสดงข้อความ ไม่ใช่ล้าง session
    */
-  public async login(email: string, password: string): Promise<{ access_token: string; refresh_token: string; user: any }> {
+  public async login(email: string, password: string): Promise<{ access_token: string; user: any }> {
     const res = await fetch(`${API_BASE_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -488,10 +437,10 @@ export class ApiService {
    * Get Current Authenticated User (/api/v1/auth/me)
    */
   public async getMe(token?: string): Promise<any> {
-    const authToken = token || localStorage.getItem('pdm_access_token');
+    const authToken = token || getToken();
     if (!authToken) return null;
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+      const res = await apiFetch('/auth/me', {
         headers: { Authorization: `Bearer ${authToken}` },
       });
       if (res.ok) {

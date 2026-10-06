@@ -5,7 +5,7 @@ User ORM Model — ตาราง users ใน PostgreSQL
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,12 +28,7 @@ class User(Base):
     )
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # ── Profile fields ──
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
-    profile_image_object: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, comment="MinIO object name for avatar"
-    )
 
     # ── Role & Department (RBAC) ──
     role: Mapped[str] = mapped_column(String(50), default="engineer", nullable=False)

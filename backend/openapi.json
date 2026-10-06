@@ -1,2133 +1,17 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "AI Ecosystem API",
-    "description": "## AI Ecosystem — Backend API Server\n\nระบบ Backend สำหรับ AI Ecosystem ที่รวม Services ต่าง ๆ ไว้ในที่เดียว\n\n### 🔑 Authentication & Profile\n- **Sign-up / Login** → JWT token pair (access + refresh)\n- **Profile** — ดู/แก้ไขโปรไฟล์ + รูปโปรไฟล์ผ่าน MinIO\n\n### ⏱️ Tool Life (RUL) — แบบจำลองอนุกรมเวลา GRU + สตรีมข้อมูลจริงตามเวลาจริง\n\n### 🔍 Tool Vision — วัดรอยสึก VB ของใบมีดจากภาพ + ผู้ตรวจยืนยัน + ใบสั่งงาน + retrain (ARQ + GPU worker)\n\n### 💚 Health Check\n- ตรวจสอบสถานะทุก component ในระบบ\n\n---\nUse the **Authorize** button above to enter your Bearer token for protected endpoints.",
-    "contact": {
-      "name": "AI Ecosystem Team"
-    },
-    "license": {
-      "name": "MIT License",
-      "url": "https://opensource.org/licenses/MIT"
-    },
+    "title": "AI Ecosystem API — CNC Tool Life",
+    "description": "Backend ของระบบ CNC Tool Life AI: พยากรณ์อายุดอกกัด (RUL, time series) → ถอดดอก → วัดรอยสึก VB จากภาพใบมีด → ผู้ตรวจยืนยัน → ใบสั่งงาน → retrain\n\nทุก endpoint อยู่ใต้ `/api/v1` · ใช้ปุ่ม **Authorize** ใส่ Bearer token สำหรับ endpoint ที่ต้องล็อกอิน",
     "version": "1.0.0"
   },
   "paths": {
-    "/health": {
-      "get": {
-        "tags": [
-          "Health Check"
-        ],
-        "summary": "ตรวจสอบสถานะระบบเบื้องต้น",
-        "description": "ตรวจสอบว่า API สามารถทำงานได้ปกติ (Basic Health Check)",
-        "operationId": "get_health_health_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/health/components": {
-      "get": {
-        "tags": [
-          "Health Check"
-        ],
-        "summary": "ตรวจสอบสถานะระบบและส่วนประกอบต่างๆ",
-        "description": "ตรวจสอบสถานะการเชื่อมต่อของบริการต่างๆ เช่น Database, Redis, MinIO",
-        "operationId": "get_components_health_health_components_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/register": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "สมัครสมาชิกใหม่ (Alias)",
-        "description": "สร้างบัญชีผู้ใช้ใหม่\n\n- ตรวจสอบ email / username ซ้ำ\n- Hash password ด้วย bcrypt\n- บันทึกลง PostgreSQL",
-        "operationId": "signup_auth_register_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SignUpRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/signup": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "สมัครสมาชิกใหม่",
-        "description": "สร้างบัญชีผู้ใช้ใหม่\n\n- ตรวจสอบ email / username ซ้ำ\n- Hash password ด้วย bcrypt\n- บันทึกลง PostgreSQL",
-        "operationId": "signup_auth_signup_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SignUpRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/login": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "เข้าสู่ระบบ",
-        "description": "ตรวจสอบ email + password แล้วออก JWT token pair\n\n- Access token (30 นาที)\n- Refresh token (7 วัน)",
-        "operationId": "login_auth_login_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/logout": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "ออกจากระบบ",
-        "description": "ออกจากระบบ — client ควรลบ token ออกจาก storage\n\n(Stateless JWT: ฝั่ง server ไม่ได้ blacklist token\nแต่ยืนยันว่า token ยัง valid ก่อนตอบ)",
-        "operationId": "logout_auth_logout_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/auth/refresh": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "ต่ออายุ token",
-        "description": "ใช้ refresh token เพื่อขอ access token ใหม่\n\n- ตรวจสอบว่า refresh token ยัง valid\n- ออก access + refresh token ใหม่ทั้งคู่ (token rotation)",
-        "operationId": "refresh_token_auth_refresh_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RefreshTokenRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/me": {
-      "get": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "ดูข้อมูลผู้ใช้ปัจจุบัน",
-        "description": "ดึงข้อมูล user ที่ login อยู่",
-        "operationId": "get_me_auth_me_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/profile/me": {
-      "get": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "ดูข้อมูลโปรไฟล์ตัวเอง",
-        "description": "ดึงข้อมูลโปรไฟล์ของ user ที่ login อยู่ พร้อม presigned URL ของรูปโปรไฟล์",
-        "operationId": "get_my_profile_profile_me_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "แก้ไขข้อมูลโปรไฟล์",
-        "description": "อัปเดต full_name และ bio ของ user ที่ login อยู่",
-        "operationId": "update_my_profile_profile_me_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProfileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/profile/me/avatar": {
-      "post": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "อัปโหลดรูปโปรไฟล์ (ไฟล์รูป)",
-        "description": "อัปโหลดรูปโปรไฟล์ไป MinIO\n\n- รองรับ: JPEG, PNG, GIF, WebP\n- ขนาดไม่เกิน 5MB\n- ลบรูปเก่าอัตโนมัติ",
-        "operationId": "upload_my_avatar_profile_me_avatar_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_my_avatar_profile_me_avatar_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AvatarResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "ลบรูปโปรไฟล์",
-        "description": "ลบรูปโปรไฟล์จาก MinIO และ clear ข้อมูลใน DB",
-        "operationId": "delete_my_avatar_profile_me_avatar_delete",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AvatarDeleteResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/profile/me/avatar-url": {
-      "post": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "ตั้งรูปโปรไฟล์จาก URL (ลิงก์ MinIO)",
-        "description": "ตั้งรูปโปรไฟล์โดยใส่ object name ที่เก็บใน MinIO\n\nเช่น ถ้ามีรูปอยู่ใน MinIO แล้ว สามารถใส่ object_name เช่น\n`avatars/my-photo.jpg` เพื่อตั้งเป็นรูปโปรไฟล์ได้เลย",
-        "operationId": "set_avatar_from_url_profile_me_avatar_url_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "object_name",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Object Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AvatarResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/fleet": {
-      "get": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "สถานะ RUL ของทุกเครื่อง",
-        "operationId": "fleet_tool_life_fleet_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/machines/{machine}": {
-      "get": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "รายละเอียดเครื่อง + ประวัติรายรัน",
-        "operationId": "machine_detail_tool_life_machines__machine__get",
-        "parameters": [
-          {
-            "name": "machine",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Machine"
-            }
-          },
-          {
-            "name": "history",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "History"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/machines/{machine}/speed": {
-      "post": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "ตั้งความเร็วการเล่นซ้ำ",
-        "operationId": "set_speed_tool_life_machines__machine__speed_post",
-        "parameters": [
-          {
-            "name": "machine",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Machine"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SpeedBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/machines/{machine}/acknowledge": {
-      "post": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "ตอบสนองคำแนะนำ REPLACE_NOW",
-        "operationId": "acknowledge_tool_life_machines__machine__acknowledge_post",
-        "parameters": [
-          {
-            "name": "machine",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Machine"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AckBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/machines/{machine}/{action}": {
-      "post": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "ควบคุมสตรีม: start / pause / resume / reset",
-        "operationId": "control_tool_life_machines__machine___action__post",
-        "parameters": [
-          {
-            "name": "machine",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Machine"
-            }
-          },
-          {
-            "name": "action",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Action"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/model": {
-      "get": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "แบบจำลองที่ใช้งานอยู่ (โหลดจาก MinIO)",
-        "operationId": "model_info_tool_life_model_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/model/versions": {
-      "get": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "ทุกเวอร์ชันใน MinIO bucket models/tool-rul",
-        "operationId": "model_versions_tool_life_model_versions_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/model/reload": {
-      "post": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "ดึงแบบจำลองจาก MinIO ใหม่",
-        "operationId": "model_reload_tool_life_model_reload_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/ReloadBody"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/predict": {
-      "post": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "พยากรณ์ RUL จากฟีเจอร์รายรัน (stateless)",
-        "operationId": "predict_tool_life_predict_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PredictBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-life/evaluations": {
-      "get": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "ผลประเมินหลังถอดดอก (เทียบ VB ที่วัดจริง)",
-        "operationId": "evaluations_tool_life_evaluations_get",
-        "parameters": [
-          {
-            "name": "detail",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Detail"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/stations": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Stations",
-        "operationId": "stations_tool_vision_stations_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/stations/{machine}/capture": {
-      "post": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Capture",
-        "description": "สำรองกรณีถ่ายภาพอัตโนมัติไม่สำเร็จ (เช่น แบบจำลองภาพยังไม่พร้อมตอนถอดดอก)",
-        "operationId": "capture_tool_vision_stations__machine__capture_post",
-        "parameters": [
-          {
-            "name": "machine",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Machine"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/inspections": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Inspections",
-        "operationId": "inspections_tool_vision_inspections_get",
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "name": "machine",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Machine"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 500,
-              "default": 100,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/inspections/{ins_id}": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Inspection",
-        "operationId": "inspection_tool_vision_inspections__ins_id__get",
-        "parameters": [
-          {
-            "name": "ins_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Ins Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/inspections/{ins_id}/blades/{blade}/image": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Blade Image",
-        "operationId": "blade_image_tool_vision_inspections__ins_id__blades__blade__image_get",
-        "parameters": [
-          {
-            "name": "ins_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Ins Id"
-            }
-          },
-          {
-            "name": "blade",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Blade"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/inspections/{ins_id}/blades/{blade}/measure": {
-      "post": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Measure",
-        "operationId": "measure_tool_vision_inspections__ins_id__blades__blade__measure_post",
-        "parameters": [
-          {
-            "name": "ins_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Ins Id"
-            }
-          },
-          {
-            "name": "blade",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Blade"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/inspections/{ins_id}/review": {
-      "post": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Review",
-        "operationId": "review_tool_vision_inspections__ins_id__review_post",
-        "parameters": [
-          {
-            "name": "ins_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Ins Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/replacements": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Replacements",
-        "operationId": "replacements_tool_vision_replacements_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/replacements/export/csv": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Replacements Csv",
-        "operationId": "replacements_csv_tool_vision_replacements_export_csv_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/replacements/{ins_id}/done": {
-      "post": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Replaced",
-        "description": "ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก)",
-        "operationId": "replaced_tool_vision_replacements__ins_id__done_post",
-        "parameters": [
-          {
-            "name": "ins_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Ins Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/stats": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Stats",
-        "operationId": "stats_tool_vision_stats_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/model": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Model",
-        "operationId": "model_tool_vision_model_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/model/versions": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Model Versions",
-        "operationId": "model_versions_tool_vision_model_versions_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/model/activate": {
-      "post": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Model Activate",
-        "description": "ใช้เวอร์ชันที่เลือกเป็นตัวหลัก (ย้อนเวอร์ชันได้) — ตรวจ sha256 + self-test ก่อนสลับ",
-        "operationId": "model_activate_tool_vision_model_activate_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActivateBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/model/reload": {
-      "post": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Model Reload",
-        "operationId": "model_reload_tool_vision_model_reload_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/training/pool": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Training Pool",
-        "operationId": "training_pool_tool_vision_training_pool_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/training/jobs": {
-      "get": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Training Jobs",
-        "operationId": "training_jobs_tool_vision_training_jobs_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/training/start": {
-      "post": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Training Start",
-        "operationId": "training_start_tool_vision_training_start_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/tool-vision/training/jobs/{job_id}/{action}": {
-      "post": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Training Decide",
-        "operationId": "training_decide_tool_vision_training_jobs__job_id___action__post",
-        "parameters": [
-          {
-            "name": "job_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Job Id"
-            }
-          },
-          {
-            "name": "action",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Action"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/alarms": {
-      "get": {
-        "tags": [
-          "Industrial Alarms"
-        ],
-        "summary": "Get all industrial alarms",
-        "description": "Retrieve industrial telemetry alarms and safety interlock trip events",
-        "operationId": "get_alarms_alarms_get",
-        "parameters": [
-          {
-            "name": "severity",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter severity: ALL, CRITICAL, WARNING, INFO",
-              "default": "ALL",
-              "title": "Severity"
-            },
-            "description": "Filter severity: ALL, CRITICAL, WARNING, INFO"
-          },
-          {
-            "name": "is_read",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter read status",
-              "title": "Is Read"
-            },
-            "description": "Filter read status"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AlarmItem"
-                  },
-                  "title": "Response Get Alarms Alarms Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/alarms/{alarm_id}/read": {
-      "patch": {
-        "tags": [
-          "Industrial Alarms"
-        ],
-        "summary": "Mark alarm as read",
-        "description": "Mark an individual alarm notification as read/acknowledged",
-        "operationId": "mark_alarm_read_alarms__alarm_id__read_patch",
-        "parameters": [
-          {
-            "name": "alarm_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Alarm Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AlarmStatusUpdate"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/alarms/mark-all-read": {
-      "post": {
-        "tags": [
-          "Industrial Alarms"
-        ],
-        "summary": "Mark all alarms as read",
-        "description": "Acknowledge all pending industrial notifications",
-        "operationId": "mark_all_read_alarms_mark_all_read_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/alarms/{alarm_id}": {
-      "delete": {
-        "tags": [
-          "Industrial Alarms"
-        ],
-        "summary": "Delete an alarm",
-        "description": "Dismiss or delete an alarm event",
-        "operationId": "delete_alarm_alarms__alarm_id__delete",
-        "parameters": [
-          {
-            "name": "alarm_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Alarm Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/audit/logs": {
-      "get": {
-        "tags": [
-          "Audit Trail"
-        ],
-        "summary": "Query audit events (alias)",
-        "description": "Retrieve immutable audit logs of operator sign-offs and model lifecycle actions",
-        "operationId": "get_audit_logs_audit_logs_get",
-        "parameters": [
-          {
-            "name": "eventType",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter by event type",
-              "title": "Eventtype"
-            },
-            "description": "Filter by event type"
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Search keyword in actor, summary or target",
-              "title": "Search"
-            },
-            "description": "Search keyword in actor, summary or target"
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuditLogsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/audit-logs": {
-      "get": {
-        "tags": [
-          "Audit Trail"
-        ],
-        "summary": "Query audit events",
-        "description": "Retrieve immutable audit logs of operator sign-offs and model lifecycle actions",
-        "operationId": "get_audit_logs_audit_logs_get",
-        "parameters": [
-          {
-            "name": "eventType",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter by event type",
-              "title": "Eventtype"
-            },
-            "description": "Filter by event type"
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Search keyword in actor, summary or target",
-              "title": "Search"
-            },
-            "description": "Search keyword in actor, summary or target"
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuditLogsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/reports/tool-life-summary": {
-      "get": {
-        "tags": [
-          "Reports"
-        ],
-        "summary": "สรุปผลแบบจำลองเทียบค่าจริงของดอกที่ถอดแล้ว",
-        "operationId": "tool_life_summary_reports_tool_life_summary_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolLifeSummary"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/reports/export/csv": {
-      "get": {
-        "tags": [
-          "Reports"
-        ],
-        "summary": "ดาวน์โหลดผลประเมินรายดอกเป็น CSV",
-        "operationId": "export_csv_reports_export_csv_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/users": {
-      "get": {
-        "tags": [
-          "Users & RBAC Access Console"
-        ],
-        "summary": "Get all operators and users",
-        "description": "Retrieve all maintenance engineers and administrators",
-        "operationId": "get_users_users_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/UserItem"
-                  },
-                  "type": "array",
-                  "title": "Response Get Users Users Get"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Users & RBAC Access Console"
-        ],
-        "summary": "Create a new user",
-        "description": "Register a new operator or staff member into the system",
-        "operationId": "create_user_users_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateUserRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserItem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/users/{user_id}/role": {
-      "patch": {
-        "tags": [
-          "Users & RBAC Access Console"
-        ],
-        "summary": "Change user RBAC role",
-        "description": "Change authorization role (admin / engineer / inspector)",
-        "operationId": "update_user_role_users__user_id__role_patch",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "User Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateUserRoleRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserItem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/users/{user_id}": {
-      "delete": {
-        "tags": [
-          "Users & RBAC Access Console"
-        ],
-        "summary": "Delete user account",
-        "description": "Delete an operator account",
-        "operationId": "delete_user_users__user_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/health": {
       "get": {
         "tags": [
           "Health Check"
         ],
-        "summary": "ตรวจสอบสถานะระบบเบื้องต้น",
-        "description": "ตรวจสอบว่า API สามารถทำงานได้ปกติ (Basic Health Check)",
+        "summary": "backend ทำงานอยู่หรือไม่",
         "operationId": "get_health_api_v1_health_get",
         "responses": {
           "200": {
@@ -2143,77 +27,13 @@
         }
       }
     },
-    "/api/v1/health/components": {
-      "get": {
-        "tags": [
-          "Health Check"
-        ],
-        "summary": "ตรวจสอบสถานะระบบและส่วนประกอบต่างๆ",
-        "description": "ตรวจสอบสถานะการเชื่อมต่อของบริการต่างๆ เช่น Database, Redis, MinIO",
-        "operationId": "get_components_health_api_v1_health_components_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/register": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "สมัครสมาชิกใหม่ (Alias)",
-        "description": "สร้างบัญชีผู้ใช้ใหม่\n\n- ตรวจสอบ email / username ซ้ำ\n- Hash password ด้วย bcrypt\n- บันทึกลง PostgreSQL",
-        "operationId": "signup_api_v1_auth_register_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SignUpRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/auth/signup": {
       "post": {
         "tags": [
           "Authentication"
         ],
         "summary": "สมัครสมาชิกใหม่",
-        "description": "สร้างบัญชีผู้ใช้ใหม่\n\n- ตรวจสอบ email / username ซ้ำ\n- Hash password ด้วย bcrypt\n- บันทึกลง PostgreSQL",
+        "description": "สร้างบัญชีใหม่ (ตรวจ email / username ซ้ำ, hash password ด้วย bcrypt)",
         "operationId": "signup_api_v1_auth_signup_post",
         "requestBody": {
           "content": {
@@ -2255,7 +75,7 @@
           "Authentication"
         ],
         "summary": "เข้าสู่ระบบ",
-        "description": "ตรวจสอบ email + password แล้วออก JWT token pair\n\n- Access token (30 นาที)\n- Refresh token (7 วัน)",
+        "description": "ตรวจ email + password แล้วออก access token (อายุตาม ACCESS_TOKEN_EXPIRE_MINUTES)",
         "operationId": "login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -2291,82 +111,12 @@
         }
       }
     },
-    "/api/v1/auth/logout": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "ออกจากระบบ",
-        "description": "ออกจากระบบ — client ควรลบ token ออกจาก storage\n\n(Stateless JWT: ฝั่ง server ไม่ได้ blacklist token\nแต่ยืนยันว่า token ยัง valid ก่อนตอบ)",
-        "operationId": "logout_api_v1_auth_logout_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/auth/refresh": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "ต่ออายุ token",
-        "description": "ใช้ refresh token เพื่อขอ access token ใหม่\n\n- ตรวจสอบว่า refresh token ยัง valid\n- ออก access + refresh token ใหม่ทั้งคู่ (token rotation)",
-        "operationId": "refresh_token_api_v1_auth_refresh_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RefreshTokenRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/auth/me": {
       "get": {
         "tags": [
           "Authentication"
         ],
-        "summary": "ดูข้อมูลผู้ใช้ปัจจุบัน",
-        "description": "ดึงข้อมูล user ที่ login อยู่",
+        "summary": "ข้อมูลผู้ใช้ปัจจุบัน",
         "operationId": "get_me_api_v1_auth_me_get",
         "responses": {
           "200": {
@@ -2387,198 +137,6 @@
         ]
       }
     },
-    "/api/v1/profile/me": {
-      "get": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "ดูข้อมูลโปรไฟล์ตัวเอง",
-        "description": "ดึงข้อมูลโปรไฟล์ของ user ที่ login อยู่ พร้อม presigned URL ของรูปโปรไฟล์",
-        "operationId": "get_my_profile_api_v1_profile_me_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "แก้ไขข้อมูลโปรไฟล์",
-        "description": "อัปเดต full_name และ bio ของ user ที่ login อยู่",
-        "operationId": "update_my_profile_api_v1_profile_me_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProfileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/profile/me/avatar": {
-      "post": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "อัปโหลดรูปโปรไฟล์ (ไฟล์รูป)",
-        "description": "อัปโหลดรูปโปรไฟล์ไป MinIO\n\n- รองรับ: JPEG, PNG, GIF, WebP\n- ขนาดไม่เกิน 5MB\n- ลบรูปเก่าอัตโนมัติ",
-        "operationId": "upload_my_avatar_api_v1_profile_me_avatar_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_my_avatar_api_v1_profile_me_avatar_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AvatarResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "ลบรูปโปรไฟล์",
-        "description": "ลบรูปโปรไฟล์จาก MinIO และ clear ข้อมูลใน DB",
-        "operationId": "delete_my_avatar_api_v1_profile_me_avatar_delete",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AvatarDeleteResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/profile/me/avatar-url": {
-      "post": {
-        "tags": [
-          "Profile"
-        ],
-        "summary": "ตั้งรูปโปรไฟล์จาก URL (ลิงก์ MinIO)",
-        "description": "ตั้งรูปโปรไฟล์โดยใส่ object name ที่เก็บใน MinIO\n\nเช่น ถ้ามีรูปอยู่ใน MinIO แล้ว สามารถใส่ object_name เช่น\n`avatars/my-photo.jpg` เพื่อตั้งเป็นรูปโปรไฟล์ได้เลย",
-        "operationId": "set_avatar_from_url_api_v1_profile_me_avatar_url_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "object_name",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Object Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AvatarResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/tool-life/fleet": {
       "get": {
         "tags": [
@@ -2595,7 +153,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-life/machines/{machine}": {
@@ -2605,6 +168,11 @@
         ],
         "summary": "รายละเอียดเครื่อง + ประวัติรายรัน",
         "operationId": "machine_detail_api_v1_tool_life_machines__machine__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "machine",
@@ -2655,6 +223,11 @@
         ],
         "summary": "ตั้งความเร็วการเล่นซ้ำ",
         "operationId": "set_speed_api_v1_tool_life_machines__machine__speed_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "machine",
@@ -2705,6 +278,11 @@
         ],
         "summary": "ตอบสนองคำแนะนำ REPLACE_NOW",
         "operationId": "acknowledge_api_v1_tool_life_machines__machine__acknowledge_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "machine",
@@ -2755,6 +333,11 @@
         ],
         "summary": "ควบคุมสตรีม: start / pause / resume / reset",
         "operationId": "control_api_v1_tool_life_machines__machine___action__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "machine",
@@ -2813,7 +396,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-life/model/versions": {
@@ -2832,7 +420,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-life/model/reload": {
@@ -2840,7 +433,7 @@
         "tags": [
           "Tool Life (RUL)"
         ],
-        "summary": "ดึงแบบจำลองจาก MinIO ใหม่",
+        "summary": "ดึงแบบจำลองจาก MinIO ใหม่ (admin)",
         "operationId": "model_reload_api_v1_tool_life_model_reload_post",
         "requestBody": {
           "content": {
@@ -2878,46 +471,12 @@
               }
             }
           }
-        }
-      }
-    },
-    "/api/v1/tool-life/predict": {
-      "post": {
-        "tags": [
-          "Tool Life (RUL)"
-        ],
-        "summary": "พยากรณ์ RUL จากฟีเจอร์รายรัน (stateless)",
-        "operationId": "predict_api_v1_tool_life_predict_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PredictBody"
-              }
-            }
-          },
-          "required": true
         },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+        "security": [
+          {
+            "HTTPBearer": []
           }
-        }
+        ]
       }
     },
     "/api/v1/tool-life/evaluations": {
@@ -2927,6 +486,11 @@
         ],
         "summary": "ผลประเมินหลังถอดดอก (เทียบ VB ที่วัดจริง)",
         "operationId": "evaluations_api_v1_tool_life_evaluations_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "detail",
@@ -2977,7 +541,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/stations/{machine}/capture": {
@@ -2988,6 +557,11 @@
         "summary": "Capture",
         "description": "สำรองกรณีถ่ายภาพอัตโนมัติไม่สำเร็จ (เช่น แบบจำลองภาพยังไม่พร้อมตอนถอดดอก)",
         "operationId": "capture_api_v1_tool_vision_stations__machine__capture_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "machine",
@@ -2999,16 +573,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3038,6 +602,11 @@
         ],
         "summary": "Inspections",
         "operationId": "inspections_api_v1_tool_vision_inspections_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "status",
@@ -3112,6 +681,11 @@
         ],
         "summary": "Inspection",
         "operationId": "inspection_api_v1_tool_vision_inspections__ins_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "ins_id",
@@ -3152,6 +726,11 @@
         ],
         "summary": "Blade Image",
         "operationId": "blade_image_api_v1_tool_vision_inspections__ins_id__blades__blade__image_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "ins_id",
@@ -3201,6 +780,11 @@
         ],
         "summary": "Measure",
         "operationId": "measure_api_v1_tool_vision_inspections__ins_id__blades__blade__measure_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "ins_id",
@@ -3221,16 +805,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3260,6 +834,11 @@
         ],
         "summary": "Review",
         "operationId": "review_api_v1_tool_vision_inspections__ins_id__review_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "ins_id",
@@ -3319,7 +898,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/replacements/export/csv": {
@@ -3338,7 +922,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/replacements/{ins_id}/done": {
@@ -3349,6 +938,11 @@
         "summary": "Replaced",
         "description": "ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก)",
         "operationId": "replaced_api_v1_tool_vision_replacements__ins_id__done_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "ins_id",
@@ -3360,16 +954,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3408,7 +992,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/model": {
@@ -3427,7 +1016,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/model/versions": {
@@ -3446,7 +1040,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/model/activate": {
@@ -3455,7 +1054,7 @@
           "Tool Vision (blade inspection)"
         ],
         "summary": "Model Activate",
-        "description": "ใช้เวอร์ชันที่เลือกเป็นตัวหลัก (ย้อนเวอร์ชันได้) — ตรวจ sha256 + self-test ก่อนสลับ",
+        "description": "ใช้เวอร์ชันที่เลือกเป็นตัวหลัก (ย้อนเวอร์ชันได้) — ตรวจ sha256 + self-test ก่อนสลับ (admin)",
         "operationId": "model_activate_api_v1_tool_vision_model_activate_post",
         "requestBody": {
           "content": {
@@ -3486,7 +1085,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/model/reload": {
@@ -3505,7 +1109,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/training/pool": {
@@ -3524,7 +1133,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/training/jobs": {
@@ -3543,7 +1157,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/training/start": {
@@ -3553,16 +1172,6 @@
         ],
         "summary": "Training Start",
         "operationId": "training_start_api_v1_tool_vision_training_start_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3571,18 +1180,13 @@
                 "schema": {}
               }
             }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/tool-vision/training/jobs/{job_id}/{action}": {
@@ -3592,6 +1196,11 @@
         ],
         "summary": "Training Decide",
         "operationId": "training_decide_api_v1_tool_vision_training_jobs__job_id___action__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "job_id",
@@ -3612,16 +1221,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Actor"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3652,6 +1251,11 @@
         "summary": "Get all industrial alarms",
         "description": "Retrieve industrial telemetry alarms and safety interlock trip events",
         "operationId": "get_alarms_api_v1_alarms_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "severity",
@@ -3727,6 +1331,11 @@
         "summary": "Mark alarm as read",
         "description": "Mark an individual alarm notification as read/acknowledged",
         "operationId": "mark_alarm_read_api_v1_alarms__alarm_id__read_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "alarm_id",
@@ -3779,7 +1388,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/alarms/{alarm_id}": {
@@ -3790,6 +1404,11 @@
         "summary": "Delete an alarm",
         "description": "Dismiss or delete an alarm event",
         "operationId": "delete_alarm_api_v1_alarms__alarm_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "alarm_id",
@@ -3823,99 +1442,6 @@
         }
       }
     },
-    "/api/v1/audit/logs": {
-      "get": {
-        "tags": [
-          "Audit Trail"
-        ],
-        "summary": "Query audit events (alias)",
-        "description": "Retrieve immutable audit logs of operator sign-offs and model lifecycle actions",
-        "operationId": "get_audit_logs_api_v1_audit_logs_get",
-        "parameters": [
-          {
-            "name": "eventType",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter by event type",
-              "title": "Eventtype"
-            },
-            "description": "Filter by event type"
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Search keyword in actor, summary or target",
-              "title": "Search"
-            },
-            "description": "Search keyword in actor, summary or target"
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuditLogsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/audit-logs": {
       "get": {
         "tags": [
@@ -3924,6 +1450,11 @@
         "summary": "Query audit events",
         "description": "Retrieve immutable audit logs of operator sign-offs and model lifecycle actions",
         "operationId": "get_audit_logs_api_v1_audit_logs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "eventType",
@@ -4027,7 +1558,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/reports/export/csv": {
@@ -4046,7 +1582,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/users": {
@@ -4238,12 +1779,6 @@
             "type": "string",
             "title": "Action",
             "description": "continue = ตัดต่อ (override), replace = ถอดดอก"
-          },
-          "actor": {
-            "type": "string",
-            "title": "Actor",
-            "description": "ชื่อผู้ตัดสินใจ (บันทึกใน audit trail)",
-            "default": "operator"
           }
         },
         "type": "object",
@@ -4254,12 +1789,6 @@
       },
       "ActivateBody": {
         "properties": {
-          "actor": {
-            "type": "string",
-            "title": "Actor",
-            "description": "ชื่อผู้ทำรายการ (บันทึกใน audit)",
-            "default": "operator"
-          },
           "version": {
             "type": "string",
             "title": "Version"
@@ -4270,18 +1799,6 @@
           "version"
         ],
         "title": "ActivateBody"
-      },
-      "Actor": {
-        "properties": {
-          "actor": {
-            "type": "string",
-            "title": "Actor",
-            "description": "ชื่อผู้ทำรายการ (บันทึกใน audit)",
-            "default": "operator"
-          }
-        },
-        "type": "object",
-        "title": "Actor"
       },
       "AlarmItem": {
         "properties": {
@@ -4388,13 +1905,6 @@
           },
           "eventType": {
             "type": "string",
-            "enum": [
-              "WEAR_CONFIRMED",
-              "FALSE_ALARM_FLAGGED",
-              "RETRAIN_TRIGGERED",
-              "MODEL_PROMOTED",
-              "USER_ACCESS"
-            ],
             "title": "Eventtype"
           },
           "actor": {
@@ -4434,7 +1944,8 @@
           "summary",
           "status"
         ],
-        "title": "AuditEvent"
+        "title": "AuditEvent",
+        "description": "eventType ที่ระบบบันทึก: TOOL_REPLACED, TOOL_LIFE_OVERRIDE (Machine Monitoring) · VISION_INSPECTION, VISION_MEASURE,\nVISION_REVIEW, TOOL_SERVICED, VISION_RETRAIN_REQUESTED, VISION_MODEL_PROMOTED / _REJECTED / _ACTIVATED (Tool Inspection)"
       },
       "AuditLogsResponse": {
         "properties": {
@@ -4466,39 +1977,6 @@
           "limit"
         ],
         "title": "AuditLogsResponse"
-      },
-      "AvatarDeleteResponse": {
-        "properties": {
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "title": "AvatarDeleteResponse",
-        "description": "ผลลัพธ์หลังลบรูปโปรไฟล์"
-      },
-      "AvatarResponse": {
-        "properties": {
-          "message": {
-            "type": "string",
-            "title": "Message"
-          },
-          "profile_image_url": {
-            "type": "string",
-            "title": "Profile Image Url"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message",
-          "profile_image_url"
-        ],
-        "title": "AvatarResponse",
-        "description": "ผลลัพธ์หลังอัปโหลดรูปโปรไฟล์"
       },
       "BladeDecision": {
         "properties": {
@@ -4532,77 +2010,6 @@
           "blade"
         ],
         "title": "BladeDecision"
-      },
-      "Body_upload_my_avatar_api_v1_profile_me_avatar_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "description": "ไฟล์รูปโปรไฟล์ (JPEG, PNG, GIF, WebP) สูงสุด 5MB"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_my_avatar_api_v1_profile_me_avatar_post"
-      },
-      "Body_upload_my_avatar_profile_me_avatar_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "description": "ไฟล์รูปโปรไฟล์ (JPEG, PNG, GIF, WebP) สูงสุด 5MB"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_my_avatar_profile_me_avatar_post"
-      },
-      "ComponentStatus": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "latency_ms": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latency Ms"
-          },
-          "details": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Details"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "status"
-        ],
-        "title": "ComponentStatus"
       },
       "CreateUserRequest": {
         "properties": {
@@ -4695,20 +2102,6 @@
           "version": {
             "type": "string",
             "title": "Version"
-          },
-          "components": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/ComponentStatus"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Components"
           }
         },
         "type": "object",
@@ -4739,58 +2132,6 @@
         "title": "LoginRequest",
         "description": "เข้าสู่ระบบ"
       },
-      "MessageResponse": {
-        "properties": {
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "title": "MessageResponse",
-        "description": "Generic message response"
-      },
-      "PredictBody": {
-        "properties": {
-          "machine": {
-            "type": "integer",
-            "maximum": 3.0,
-            "minimum": 1.0,
-            "title": "Machine"
-          },
-          "runs": {
-            "items": {
-              "$ref": "#/components/schemas/RunFeatures"
-            },
-            "type": "array",
-            "title": "Runs",
-            "description": "ฟีเจอร์รายรันของดอกตั้งแต่เริ่มใช้งาน เรียงตามเวลา (ไม่มี VB)"
-          }
-        },
-        "type": "object",
-        "required": [
-          "machine",
-          "runs"
-        ],
-        "title": "PredictBody"
-      },
-      "RefreshTokenRequest": {
-        "properties": {
-          "refresh_token": {
-            "type": "string",
-            "title": "Refresh Token"
-          }
-        },
-        "type": "object",
-        "required": [
-          "refresh_token"
-        ],
-        "title": "RefreshTokenRequest",
-        "description": "ต่ออายุ token"
-      },
       "ReloadBody": {
         "properties": {
           "version": {
@@ -4810,12 +2151,6 @@
       },
       "ReviewBody": {
         "properties": {
-          "actor": {
-            "type": "string",
-            "title": "Actor",
-            "description": "ชื่อผู้ทำรายการ (บันทึกใน audit)",
-            "default": "operator"
-          },
           "blades": {
             "items": {
               "$ref": "#/components/schemas/BladeDecision"
@@ -4840,61 +2175,6 @@
           "blades"
         ],
         "title": "ReviewBody"
-      },
-      "RunFeatures": {
-        "properties": {
-          "contact_s": {
-            "type": "number",
-            "title": "Contact S",
-            "description": "เวลาตัดสะสมของดอก (วินาที)"
-          },
-          "x_pos": {
-            "type": "number",
-            "title": "X Pos",
-            "description": "ตำแหน่ง x ของแนวตัด (mm)"
-          },
-          "sp_rms": {
-            "type": "number",
-            "title": "Sp Rms"
-          },
-          "axy_absmean": {
-            "type": "number",
-            "title": "Axy Absmean"
-          },
-          "axx_absmean": {
-            "type": "number",
-            "title": "Axx Absmean"
-          },
-          "fx_mean": {
-            "type": "number",
-            "title": "Fx Mean"
-          },
-          "fres_mean": {
-            "type": "number",
-            "title": "Fres Mean"
-          },
-          "fy_mean": {
-            "type": "number",
-            "title": "Fy Mean"
-          },
-          "fz_mean": {
-            "type": "number",
-            "title": "Fz Mean"
-          }
-        },
-        "type": "object",
-        "required": [
-          "contact_s",
-          "x_pos",
-          "sp_rms",
-          "axy_absmean",
-          "axx_absmean",
-          "fx_mean",
-          "fres_mean",
-          "fy_mean",
-          "fz_mean"
-        ],
-        "title": "RunFeatures"
       },
       "SignUpRequest": {
         "properties": {
@@ -4990,33 +2270,22 @@
             "type": "string",
             "title": "Access Token"
           },
-          "refresh_token": {
-            "type": "string",
-            "title": "Refresh Token"
-          },
           "token_type": {
             "type": "string",
             "title": "Token Type",
             "default": "bearer"
           },
           "user": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/UserResponse"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/UserResponse"
           }
         },
         "type": "object",
         "required": [
           "access_token",
-          "refresh_token"
+          "user"
         ],
         "title": "TokenResponse",
-        "description": "Token pair ที่ได้หลัง login / refresh"
+        "description": "ผลของการ login"
       },
       "ToolLifeSummary": {
         "properties": {
@@ -5110,37 +2379,6 @@
         ],
         "title": "ToolLifeSummary",
         "description": "สรุปผลของดอกที่ถอดออกแล้ว (ค่าจริงจากการวัด VB หลังถอดดอก เทียบกับสิ่งที่แบบจำลองบอกระหว่างใช้งาน)"
-      },
-      "UpdateProfileRequest": {
-        "properties": {
-          "full_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Full Name"
-          },
-          "bio": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 1000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bio"
-          }
-        },
-        "type": "object",
-        "title": "UpdateProfileRequest",
-        "description": "อัปเดตข้อมูลโปรไฟล์"
       },
       "UpdateUserRoleRequest": {
         "properties": {
@@ -5263,28 +2501,6 @@
             "title": "Title",
             "default": "Reliability Engineer"
           },
-          "bio": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bio"
-          },
-          "profile_image_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Image Url"
-          },
           "is_active": {
             "type": "boolean",
             "title": "Is Active"
@@ -5363,23 +2579,35 @@
   "tags": [
     {
       "name": "Health Check",
-      "description": "ตรวจสอบสถานะระบบและ Components ต่าง ๆ (Database, Redis, MinIO)"
+      "description": "สถานะของ backend (ใช้กับ healthcheck ของ Docker)"
     },
     {
       "name": "Authentication",
-      "description": "ระบบ Authentication — สมัครสมาชิก, เข้าสู่ระบบ (JWT), ต่ออายุ token, ออกจากระบบ"
-    },
-    {
-      "name": "Profile",
-      "description": "จัดการโปรไฟล์ผู้ใช้ — ดู/แก้ไขข้อมูล, อัปโหลด/ลบรูปโปรไฟล์ผ่าน MinIO"
-    },
-    {
-      "name": "Tool Vision (blade inspection)",
-      "description": "วัดรอยสึก VB ของ 4 ใบมีดจากภาพ (ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน → retrain"
+      "description": "สมัครสมาชิก / เข้าสู่ระบบ (JWT) / ข้อมูลผู้ใช้ปัจจุบัน"
     },
     {
       "name": "Tool Life (RUL)",
       "description": "แบบจำลองอนุกรมเวลา (GRU) พยากรณ์อายุใช้งานที่เหลือของดอกกัด — โหลดจาก MinIO, สตรีมข้อมูลจริงของชุดข้อมูล LUH (ดอกที่ไม่ได้ใช้ฝึก) ตามเวลาจริง"
+    },
+    {
+      "name": "Tool Vision (blade inspection)",
+      "description": "วัดรอยสึก VB ของ 4 ใบมีดจากภาพ (ensemble ของ ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน → retrain"
+    },
+    {
+      "name": "Industrial Alarms",
+      "description": "การแจ้งเตือนจากผลพยากรณ์ RUL และผลตรวจใบมีด"
+    },
+    {
+      "name": "Audit Trail",
+      "description": "บันทึกการตัดสินใจของผู้ใช้ (ถอดดอก, ยืนยันผลตรวจ, retrain, สลับแบบจำลอง)"
+    },
+    {
+      "name": "Reports",
+      "description": "ผลประเมิน RUL หลังถอดดอก (เทียบ VB ที่วัดจริง) + CSV"
+    },
+    {
+      "name": "Users & RBAC Access Console",
+      "description": "จัดการผู้ใช้และสิทธิ์ (admin)"
     }
   ]
 }

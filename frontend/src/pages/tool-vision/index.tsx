@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Camera, CheckCircle2, ClipboardCheck, Cpu, Download, Gauge, Microscope, RefreshCw, Ruler, ScanEye, ShieldAlert, Wrench } from 'lucide-react';
-import { PageHeader } from '../../components/common';
+import { AuthImage, PageHeader } from '../../components/common';
 import { TrainingCurves } from '../../components/toollife/TrainingCurves';
 import { Card, RecBadge, StreamBadge, WearBadge, fmt, fmtDateTime } from '../../components/toollife/ui';
 import { useAuth } from '../../context/AuthContext';
@@ -142,8 +142,7 @@ const stationStep = (s: VisionStation): number => {
   return 0;
 };
 
-const StationsTab: React.FC<{ actor: string; onOpen: (id: string) => void; onTab: (t: Tab) => void; reloadKey: number }> = ({
-  actor,
+const StationsTab: React.FC<{ onOpen: (id: string) => void; onTab: (t: Tab) => void; reloadKey: number }> = ({
   onOpen,
   onTab,
   reloadKey,
@@ -162,7 +161,7 @@ const StationsTab: React.FC<{ actor: string; onOpen: (id: string) => void; onTab
     setBusy(m);
     setErr(null);
     try {
-      const ins = await api.captureInspection(m, actor);
+      const ins = await api.captureInspection(m);
       onOpen(ins.id);
     } catch (e: any) {
       setErr(e.message);
@@ -251,7 +250,7 @@ const StationsTab: React.FC<{ actor: string; onOpen: (id: string) => void; onTab
                       const z = vb != null ? zoneOf(vb) : null;
                       return (
                         <div key={b.id} className="rounded-md overflow-hidden border border-gray-200">
-                          <img src={b.image_url} alt={`B${b.blade}`} className="w-full h-12 object-cover bg-gray-100" />
+                          <AuthImage src={b.image_url} alt={`B${b.blade}`} className="w-full h-12 object-cover bg-gray-100" />
                           <p className={`text-[9px] text-center font-bold py-0.5 ${z ? ZONE_STYLE[z].solid : 'bg-gray-200'}`}>
                             B{b.blade} {vb != null ? `${vb.toFixed(0)} µm` : '—'}
                           </p>
@@ -312,7 +311,7 @@ const BladeReview: React.FC<{
   return (
     <div className={`rounded-xl border overflow-hidden ${fz === 'eol' ? 'border-red-300' : fz === 'accel' ? 'border-amber-300' : 'border-gray-200'}`}>
       <button onClick={onZoom} className="block w-full">
-        <img src={b.image_url} alt={`B${b.blade}`} className="w-full h-28 object-cover bg-gray-100 hover:opacity-90" />
+        <AuthImage src={b.image_url} alt={`B${b.blade}`} className="w-full h-28 object-cover bg-gray-100 hover:opacity-90" />
       </button>
       <div className="p-3 space-y-2">
         <div className="flex items-center justify-between">
@@ -403,8 +402,7 @@ const BladeReview: React.FC<{
   );
 };
 
-const ReviewTab: React.FC<{ actor: string; selected: string | null; onSelect: (id: string | null) => void; onDone: () => void; reloadKey: number }> = ({
-  actor,
+const ReviewTab: React.FC<{ selected: string | null; onSelect: (id: string | null) => void; onDone: () => void; reloadKey: number }> = ({
   selected,
   onSelect,
   onDone,
@@ -450,7 +448,7 @@ const ReviewTab: React.FC<{ actor: string; selected: string | null; onSelect: (i
     setMeasuring(blade);
     setErr(null);
     try {
-      const m = await api.measureBlade(ins.id, blade, actor);
+      const m = await api.measureBlade(ins.id, blade);
       setDec((p) => ({ ...p, [blade]: { source: 'BENCH', vb: m.flank_wear_um, bench: m } }));
     } catch (e: any) {
       setErr(e.message);
@@ -466,7 +464,6 @@ const ReviewTab: React.FC<{ actor: string; selected: string | null; onSelect: (i
     try {
       await api.reviewInspection(
         ins.id,
-        actor,
         Object.entries(dec).map(([k, v]) => ({ blade: Number(k), source: v.source, vb_um: v.source === 'MANUAL' ? v.vb : null })),
         note,
       );
@@ -629,7 +626,7 @@ const ReviewTab: React.FC<{ actor: string; selected: string | null; onSelect: (i
       </div>
       {zoom && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={() => setZoom(null)}>
-          <img src={zoom} alt="zoom" className="max-w-full max-h-full rounded-lg shadow-2xl" />
+          <AuthImage src={zoom} alt="zoom" className="max-w-full max-h-full rounded-lg shadow-2xl" />
         </div>
       )}
     </div>
@@ -637,14 +634,14 @@ const ReviewTab: React.FC<{ actor: string; selected: string | null; onSelect: (i
 };
 
 // ───────────────────────────── ใบสั่งงานระดับดอก ─────────────────────────────
-const ReplaceTab: React.FC<{ actor: string; reloadKey: number; onChanged: () => void }> = ({ actor, reloadKey, onChanged }) => {
+const ReplaceTab: React.FC<{ reloadKey: number; onChanged: () => void }> = ({ reloadKey, onChanged }) => {
   const [rep, setRep] = useState<Replacements | null>(null);
   const load = useCallback(() => api.getReplacements().then(setRep), []);
   useEffect(() => {
     load();
   }, [load, reloadKey]);
   const done = async (id: string) => {
-    await api.markToolServiced(id, actor);
+    await api.markToolServiced(id);
     await load();
     onChanged();
   };
@@ -669,9 +666,9 @@ const ReplaceTab: React.FC<{ actor: string; reloadKey: number; onChanged: () => 
             </span>
           ))
         )}
-        <a href={api.replacementsCsvUrl()} className="btn-secondary ml-auto">
+        <button onClick={() => api.downloadReplacementsCsv().catch((err) => alert(err.message))} className="btn-secondary ml-auto">
           <Download className="w-3.5 h-3.5" /> CSV
-        </a>
+        </button>
       </div>
       <p className="text-[11px] text-gray-500">
         ใบสั่งงาน 1 ใบต่อดอกที่ถอดตามคำแนะนำของแบบจำลอง RUL — ตัดสินด้วย <b>VB เฉลี่ย 4 ใบ</b> (นิยามเดียวกับ RUL): <b className="text-red-700">ต้องเปลี่ยน/ลับดอก</b> ≥ {VB_EOL} µm ·{' '}
@@ -727,7 +724,7 @@ const OrderTable: React.FC<{ items: WorkOrder[]; action: (o: WorkOrder) => React
                         title={`${b.vb_source ? SOURCE_TEXT[b.vb_source] : ''}${b.pred_vb != null && b.vb_source !== 'AI' ? ` · AI ${b.pred_vb.toFixed(0)} µm` : ''}`}
                         className={`rounded overflow-hidden border-2 ${o.worst_blade === b.blade ? 'border-gray-900' : 'border-transparent'}`}
                       >
-                        <img src={b.image_url} alt="" className="w-14 h-6 object-cover" />
+                        <AuthImage src={b.image_url} alt="" className="w-14 h-6 object-cover" />
                         <p className={`text-[9px] text-center font-bold ${z ? ZONE_STYLE[z].solid : 'bg-gray-200'}`}>
                           B{b.blade} {b.final_vb != null ? b.final_vb.toFixed(0) : '—'}
                         </p>
@@ -769,7 +766,7 @@ const MetricBox: React.FC<{ label: string; m?: { mae?: number; zone_acc?: number
   </div>
 );
 
-const ModelTab: React.FC<{ actor: string; isAdmin: boolean; reloadKey: number; onChanged: () => void }> = ({ actor, isAdmin, reloadKey, onChanged }) => {
+const ModelTab: React.FC<{ isAdmin: boolean; reloadKey: number; onChanged: () => void }> = ({ isAdmin, reloadKey, onChanged }) => {
   const [model, setModel] = useState<VisionModelInfo | null>(null);
   const [stats, setStats] = useState<VisionStats | null>(null);
   const [pool, setPool] = useState<TrainingPool | null>(null);
@@ -839,7 +836,7 @@ const ModelTab: React.FC<{ actor: string; isAdmin: boolean; reloadKey: number; o
               <p className="text-sm font-bold">{model.version || 'ไม่มี'}</p>
               {model.error && <p className="text-red-600">{model.error}</p>}
               <p className="text-gray-500">
-                {meta?.model} · {meta?.n_params ? `${(meta.n_params / 1e6).toFixed(2)}M params` : ''} · อินพุต {meta?.image_size?.join('×')}
+                {meta?.model} · {meta?.n_params ? `${(meta.n_params / (meta.ensemble || 1) / 1e6).toFixed(2)}M params${(meta.ensemble || 1) > 1 ? '/ตัว' : ''}` : ''} · อินพุต {meta?.image_size?.join('×')}
               </p>
               <p className="text-gray-500">
                 ฝึก: ดอก {meta?.train_tools?.join(', ')} + ค่าวัดจากคน {meta?.n_human_labels ?? 0} ใบ · val: ดอก {meta?.val_tools?.join(', ')} · test: ดอก {meta?.test_tools?.join(', ')}
@@ -931,7 +928,7 @@ const ModelTab: React.FC<{ actor: string; isAdmin: boolean; reloadKey: number; o
               </p>
               <button
                 disabled={!isAdmin || busy || running || pool.n_labels === 0}
-                onClick={() => act(() => api.startRetrain(actor))}
+                onClick={() => act(() => api.startRetrain())}
                 className="btn-primary w-full justify-center"
                 title={isAdmin ? '' : 'เฉพาะผู้ดูแลระบบ'}
               >
@@ -948,7 +945,7 @@ const ModelTab: React.FC<{ actor: string; isAdmin: boolean; reloadKey: number; o
           title={`กำลัง retrain ${live.id} — epoch ${live.progress.epoch}/${live.progress.epochs}`}
           right={<Link to="/model-registry?model=vision" className="text-xs text-indigo-600 font-semibold">กราฟทั้งหมดใน Model Registry →</Link>}
         >
-          <TrainingCurves history={live.progress.history} epochs={live.progress.epochs} height={150} compact />
+          <TrainingCurves history={live.progress.history} epochs={live.progress.epochs_per_member ?? live.progress.epochs} height={150} compact />
         </Card>
       )}
       <Card
@@ -1018,13 +1015,13 @@ const ModelTab: React.FC<{ actor: string; isAdmin: boolean; reloadKey: number; o
                           <div className="flex gap-1 justify-end">
                             <button
                               disabled={busy || !r?.gate.passed || !isVb}
-                              onClick={() => act(() => api.decideTrainingJob(j.id, 'promote', actor))}
+                              onClick={() => act(() => api.decideTrainingJob(j.id, 'promote'))}
                               className="btn-primary"
                               title={r?.gate.passed ? '' : 'ไม่ผ่าน gate'}
                             >
                               Promote
                             </button>
-                            <button disabled={busy} onClick={() => act(() => api.decideTrainingJob(j.id, 'reject', actor))} className="btn-secondary">
+                            <button disabled={busy} onClick={() => act(() => api.decideTrainingJob(j.id, 'reject'))} className="btn-secondary">
                               Reject
                             </button>
                           </div>
@@ -1073,7 +1070,6 @@ const ModelTab: React.FC<{ actor: string; isAdmin: boolean; reloadKey: number; o
 // ───────────────────────────── หน้า ─────────────────────────────
 export const ToolVisionPage: React.FC = () => {
   const { user } = useAuth();
-  const actor = user?.name || 'operator';
   const isAdmin = user?.role === 'admin';
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'stations';
@@ -1137,7 +1133,6 @@ export const ToolVisionPage: React.FC = () => {
       </div>
       {tab === 'stations' && (
         <StationsTab
-          actor={actor}
           reloadKey={reloadKey}
           onTab={(t) => setParams({ tab: t })}
           onOpen={(id) => {
@@ -1147,9 +1142,9 @@ export const ToolVisionPage: React.FC = () => {
           }}
         />
       )}
-      {tab === 'review' && <ReviewTab actor={actor} selected={selected} onSelect={setSelected} onDone={bump} reloadKey={reloadKey} />}
-      {tab === 'replace' && <ReplaceTab actor={actor} reloadKey={reloadKey} onChanged={bump} />}
-      {tab === 'model' && <ModelTab actor={actor} isAdmin={isAdmin} reloadKey={reloadKey} onChanged={bump} />}
+      {tab === 'review' && <ReviewTab selected={selected} onSelect={setSelected} onDone={bump} reloadKey={reloadKey} />}
+      {tab === 'replace' && <ReplaceTab reloadKey={reloadKey} onChanged={bump} />}
+      {tab === 'model' && <ModelTab isAdmin={isAdmin} reloadKey={reloadKey} onChanged={bump} />}
     </div>
   );
 };

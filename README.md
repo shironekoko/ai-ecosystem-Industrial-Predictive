@@ -1,114 +1,87 @@
 # 🏭 CNC Tool Life AI — Predictive Maintenance ของดอกกัด
 
-> ระบบพยากรณ์ **อายุใช้งานที่เหลือ (Remaining Useful Life, RUL)** ของดอกกัด CNC ด้วย **แบบจำลองอนุกรมเวลา (GRU) เพียงตัวเดียว**
-> อินพุตเป็นข้อมูลที่เครื่องบันทึกเองทุกแนวตัด (เวลาตัดสะสม, แรงบิด spindle, แรง/แรงบิดมอเตอร์แกนป้อน, แรงตัด, เครื่อง, ตำแหน่งแนวตัด) — **ไม่ต้องวัดรอยสึก VB ระหว่างผลิต**
-> วัดความสึกด้วยความกว้างรอยสึกด้านข้าง VB ตามวิธีของ ISO 8688-2 (ISO ให้ตั้งเกณฑ์อายุดอกล่วงหน้า ตัวอย่างในมาตรฐานคือ VB1 = 0.3 mm) — งานนี้ใช้ **เกณฑ์เฉพาะงาน VB = 140 µm = หมดอายุ** (ผู้ทดลองชุดข้อมูล LUH หยุดใช้ดอกที่ ~150 µm) และ **103 µm = เริ่มสึกเร่ง/ใกล้หมดอายุ** (จุดเปลี่ยนอัตราสึกที่พบในข้อมูล)
+> พยากรณ์ **อายุใช้งานที่เหลือ (RUL)** ของดอกกัด CNC จากข้อมูลที่เครื่องบันทึกเองทุกแนวตัด (time series) แล้ว **วัดรอยสึกด้านข้าง VB จากภาพใบมีด** ตอนถอดดอก (non-time-series)
+> ทั้งสองแบบจำลองใช้เกณฑ์เดียวกัน: VB ≥ **140 µm** = หมดอายุ (เกณฑ์เฉพาะงาน — ISO 8688-2 ให้ตั้งเกณฑ์ล่วงหน้า) · **103 µm** = เริ่มสึกเร่ง/ใกล้หมดอายุ (จุดเปลี่ยนอัตราสึกที่พบในข้อมูล)
 
----
+```mermaid
+flowchart LR
+  LUH["ข้อมูลเครื่อง (LUH .h5)<br/>เล่นตามเวลาจริง"] --> RUL["GRU direct-RUL<br/>RUL + P10–P90 + คำแนะนำ"]
+  RUL -->|REPLACE_NOW = interlock| OP["ผู้ควบคุมถอดดอก"]
+  OP --> IMG["ภาพ 4 ใบมีด"] --> VB["ensemble 5× ResNet-18<br/>VB (µm) รายใบ → เฉลี่ยดอก"]
+  VB --> QC["ผู้ตรวจยอมรับ / วัดจริง"] --> WO["ใบสั่งเปลี่ยน/ลับดอก"]
+  QC -->|ค่าที่วัดจริง| RT["retrain บน GPU (ARQ)"] -->|gate + admin promote| VB
+  MINIO[("MinIO<br/>แบบจำลองทุกเวอร์ชัน · ภาพตรวจ")] -.-> RUL & VB
+```
 
-## 🌟 ฟีเจอร์หลัก
+## 🌟 ฟีเจอร์
+1. **Tool Life Dashboard / Machine Monitoring** — RUL + ช่วง P10–P90, สถานะการสึก, คำแนะนำ (OK / WATCH / PLAN_REPLACEMENT / REPLACE_NOW), ETA, แผนเปลี่ยนดอก, drift ของอินพุต, สัญญาณสด — ข้อมูลจริงของดอก **T3/T6/T9 ที่ไม่เคยใช้ฝึก**
+2. **Interlock** — REPLACE_NOW หยุดป้อนรอผู้ควบคุม (ถอดดอก / ตัดต่อ) · ทุกการตัดสินใจอยู่ใน Audit Trail · แจ้งเตือนจากผลจริง
+3. **Tool Inspection** — ถอดดอกแล้วระบบถ่ายภาพ 4 ใบมีด → AI วัด VB + ช่วงความไม่แน่นอน → ระดับดอก = VB เฉลี่ย 4 ใบ (นิยามเดียวกับ label ของ RUL) → ผู้ตรวจยอมรับค่า AI หรือวัดบน optical bench → ใบสั่งงาน + CSV
+4. **Retrain + Model Registry** — ค่าที่วัดจริงเท่านั้นเข้า pool → fine-tune บน GPU → gate → admin promote · ทุกเวอร์ชันอยู่ใน MinIO สลับกลับได้ · กราฟการเทรนในหน้าเว็บ + TensorBoard
+5. **ไม่สปอยข้อมูล** — ระหว่างใช้งานไม่ส่ง VB / RUL จริง / ชื่อไฟล์ไปหน้าเว็บ · ค่าจริงเปิดเผยหลังถอดดอก (Reports) หรือเมื่อผู้ตรวจสั่งวัด
+6. **Observability (ทางเลือก)** — OpenTelemetry → Prometheus / Tempo / Loki → Grafana
 
-1. **Tool Life Dashboard** — RUL + ช่วง P10–P90, สถานะการสึก (STEADY / ACCELERATED / END_OF_LIFE), คำแนะนำ (OK / WATCH / PLAN_REPLACEMENT / REPLACE_NOW), ETA บนนาฬิกาจริง, แผนเปลี่ยนดอกหลายเครื่อง, สุขภาพข้อมูล/drift ของอินพุต
-2. **สตรีมข้อมูลจริงตามเวลาจริง** — backend เล่นไฟล์ .h5 ของชุดข้อมูล LUH milling ของดอก **T3/T6/T9 ที่ไม่เคยใช้ฝึกแบบจำลอง** ที่อัตราสุ่มจริง (controller 500 Hz, dynamometer 25 kHz) ผ่าน WebSocket
-3. **แบบจำลองเก็บใน MinIO** — backend ดึง `models/tool-rul/<version>/` ตรวจ sha256 และรันเวกเตอร์ทดสอบตัวเองก่อนใช้งาน ไม่มีแบบจำลองสำรอง/ค่าปลอม
-4. **Interlock + Alarms + Audit** — เมื่อระบบสั่ง REPLACE_NOW เครื่องหยุดป้อนรอผู้ควบคุม (เปลี่ยนดอก / ตัดต่อ) ทุกการตัดสินใจบันทึกใน Audit Trail
-5. **ไม่สปอยข้อมูล** — ระหว่างใช้งานไม่มีการส่ง VB, RUL จริง หรือชื่อไฟล์ (ซึ่งมี VB ฝังอยู่) ไปหน้าเว็บ ค่าจริงเปิดเผยใน Reports หลังถอดดอกเท่านั้น
-6. **Tool Inspection (Vision) ต่อจาก Machine Monitoring — วัดรอยสึก VB จากภาพ** — เมื่อแบบจำลอง RUL แจ้งดอกหมดอายุ (REPLACE_NOW) ผู้ควบคุมกด **“ถอดดอก → ตรวจใบมีด”** → ระบบถ่ายภาพ 4 ใบมีดของดอกนั้นทันที (ภาพช่วงท้ายอายุที่สึกเท่ากับดอกจริงในข้อมูลเซนเซอร์ตอนถอด) → **CNN regression (backbone ที่ฝึกมาแล้ว + หัว regression, จาก MinIO) วัด VB (µm) ของแต่ละใบ พร้อมช่วง P10–P90** → เทียบเกณฑ์เดียวกับแบบจำลอง RUL (ปกติ < 103 µm · ใกล้หมดอายุ 103–140 µm · หมดอายุ ≥ 140 µm) → **ผู้ตรวจยอมรับค่า AI หรือวัดจริงบน optical bench** → **ใบสั่งเปลี่ยนใบมีดให้วิศวกร** (ต้องเปลี่ยน / ควรเปลี่ยน, พร้อมเวลาตัดและคำแนะนำของ RUL ตอนถอด, alarm, CSV) → ค่าที่วัดจริงเข้า pool → **retrain บน GPU worker** → ผ่าน gate (MAE) แล้วผู้ดูแลกด promote
-   - การทดลอง/เหตุผลการเลือกแบบจำลอง: [`nontime_docs/tool_vb_vision/Report_NonTimeSeries_VB.md`](nontime_docs/tool_vb_vision/Report_NonTimeSeries_VB.md)
-   - เครื่องเดียวกัน ดอกเดียวกัน: M1/M2/M3 = ข้อมูลเซนเซอร์ LUH **T3/T6/T9** คู่กับภาพใบมีด Nonastreda **ดอก 8/9/10** (ไม่เคยใช้ฝึกทั้งคู่) · 1 รอบการใช้งานดอก (`cycle_id`) = ตรวจ 1 ครั้ง
+เครื่องเดียวกัน ดอกเดียวกัน: M1/M2/M3 = ข้อมูลเครื่อง LUH **T3/T6/T9** คู่กับภาพใบมีด Nonastreda **ดอก 8/9/10** (ไม่เคยใช้ฝึกทั้งคู่)
 
----
-
-## 🏗️ โครงสร้าง
-
+## 🏗️ โครงสร้าง (ทุกโฟลเดอร์มี README อธิบายไฟล์ข้างใน)
 ```
 ai-ecosystem-Industrial-Predictive/
-├── backend/
-│   ├── app/features/
-│   │   ├── tool_life/        # ★ สตรีม LUH + แบบจำลอง RUL จาก MinIO + REST/WebSocket
-│   │   │   ├── runtime.py    #   ตัวกรอง outlier แบบ causal, ฟีเจอร์รายรัน, GRU (numpy), ข้อจำกัดฟิสิกส์
-│   │   │   ├── registry.py   #   ดึงแบบจำลองจาก MinIO + ตรวจ sha256 + self-test
-│   │   │   ├── luh_dataset.py#   อ่าน .h5 (ไม่อ่าน label VB ระหว่างสตรีม)
-│   │   │   ├── streamer.py   #   เล่นข้อมูลตามเวลาจริง, interlock, alarms, ประเมินผลหลังถอดดอก
-│   │   │   └── router.py     #   /api/v1/tool-life/*
-│   │   ├── tool_vision/      # ★ วัด VB ของใบมีดดอกที่ถอด (ต่อจาก tool_life): vb_model (ResNet-18 regression) → ระดับดอก = เฉลี่ย 4 ใบ → review/วัดจริง → ใบสั่งงาน → retrain/promote
-│   │   ├── reports/          # สรุปผลเทียบค่าจริงของดอกที่ถอดแล้ว + CSV
-│   │   ├── workers/          # ARQ WorkerSettings ของ trainer-worker (retrain บน GPU)
-│   │   ├── alarms/ audit/ auth/ users/ profile/ health/
-│   ├── scripts/publish_tool_rul_model.py · publish_tool_vb_model.py   # อัปโหลดแบบจำลองขึ้น MinIO แล้วตั้งเป็น latest
-│   └── tests/                # test_tool_life.py · test_tool_vision.py (ความสอดคล้องกับตอนฝึก + การไม่สปอยข้อมูล)
-├── frontend/                 # React 18 + TypeScript + Vite + Tailwind + Recharts
-├── timeseries_docs/tool_rul_forecast/      # งานอนุกรมเวลา: รายงาน + notebook + การฝึก/ส่งออกแบบจำลอง RUL
-├── nontime_docs/tool_vb_vision/            # งาน non-time-series: รายงาน + การทดลอง/ฝึกแบบจำลองวัด VB จากภาพ
-├── docs/                     # README เอกสาร + progress-3 report · observability/ + compose.observability.yml = ชุดติดตามระบบ (ทางเลือก)
-└── dataset/                  # LUH milling + Nonastreda (ไม่ commit)
+├── backend/                  FastAPI + แบบจำลองตอนใช้งาน                       → backend/README.md
+│   ├── main.py               app, startup, รวม router ใต้ /api/v1
+│   ├── app/features/         tool_life · tool_vision · reports · alarms · audit · auth · users · health · workers
+│   ├── core/                 config · database · MinIO · Redis/ARQ · observability
+│   ├── scripts/              อัปโหลดแบบจำลองขึ้น MinIO
+│   └── tests/                pytest
+├── frontend/                 React 18 + TypeScript + Vite + Tailwind + Recharts  → frontend/src/README.md
+├── timeseries_docs/tool_rul_forecast/   งาน time series: รายงาน, notebook, การทดลอง, แบบจำลอง RUL
+├── nontime_docs/tool_vb_vision/         งาน non-time-series: รายงาน, การทดลอง stage A–D, แบบจำลองวัด VB
+├── observability/            config ของ OTel Collector / Prometheus / Tempo / Loki / Grafana
+├── docs/                     ดัชนีเอกสาร + รายงาน Progress 3
+├── dataset/                  LUH milling + Nonastreda (ไม่อยู่ใน git — ดู dataset/README.md)
+├── logs/                     log ที่ container เขียน (postgres, redis, tensorboard ของ retrain)
+├── compose.yml               db, redis, minio, backend, trainer-worker (GPU), tensorboard, frontend
+├── compose.observability.yml ชุดติดตามระบบ (ซ้อนกับ compose.yml)
+├── API_SPECIFICATION.md      API ทั้งหมด (43 endpoint + WebSocket — ทุกตัวถูกใช้โดยหน้าเว็บ)
+├── .env.example              ตัวอย่างค่าที่ต้องตั้ง (คัดลอกเป็น .env)
+└── .gitignore · .gitattributes
 ```
 
----
-
-## 🔌 API (`/api/v1`)
-
-| Module | Endpoints | รายละเอียด |
-|---|---|---|
-| **Tool Life** | `GET /tool-life/fleet` · `GET /tool-life/machines/{m}?history=true` · `POST /tool-life/machines/{m}/{start\|pause\|resume\|reset}` · `POST /tool-life/machines/{m}/speed` · `POST /tool-life/machines/{m}/acknowledge` | สถานะ/ประวัติรายรัน/ควบคุมสตรีม (speed 1 = เวลาจริง) และตอบสนอง REPLACE_NOW (`continue` / `replace`) |
-| | `GET /tool-life/model` · `GET /tool-life/model/versions` · `POST /tool-life/model/reload` | แบบจำลองที่โหลดจาก MinIO และทุกเวอร์ชันใน bucket |
-| | `POST /tool-life/predict` · `GET /tool-life/evaluations` | พยากรณ์จากฟีเจอร์รายรันที่ส่งมาเอง (stateless) · ผลประเมินหลังถอดดอก |
-| | `WS /tool-life/stream?waveform={m}` | `snapshot` / `run` / `event` / `frame` (สัญญาณดิบทุก 0.1 s ของเครื่องที่เลือก) |
-| **Tool Vision** | `GET /tool-vision/stations` · `GET /tool-vision/inspections` · `POST /tool-vision/inspections/{id}/blades/{b}/measure` · `POST /tool-vision/inspections/{id}/review` · `POST /tool-vision/stations/{m}/capture` | รายการตรวจถูกสร้างอัตโนมัติเมื่อถอดดอก (`acknowledge replace`) → AI วัด VB → ผู้ตรวจยอมรับ/วัดจริง · `capture` = ถ่ายซ้ำด้วยมือ (เฉพาะดอกที่ถอดแล้ว) |
-| | `GET /tool-vision/replacements` · `POST /tool-vision/replacements/{blade}/done` · `GET /tool-vision/replacements/export/csv` | ใบสั่งเปลี่ยนใบมีด (ต้องเปลี่ยน ≥ 140 µm / ควรเปลี่ยน 103–140 µm) |
-| | `GET /tool-vision/stats` · `GET /tool-vision/model` · `GET /tool-vision/training/pool` · `POST /tool-vision/training/start` · `GET /tool-vision/training/jobs` · `POST /tool-vision/training/jobs/{id}/{promote\|reject}` | AI เทียบค่าวัดจริง (MAE), retrain (ARQ + GPU), gate, promote |
-| **Reports** | `GET /reports/tool-life-summary` · `GET /reports/export/csv` | เทียบสิ่งที่ระบบบอกระหว่างใช้งานกับ VB ที่วัดจริงหลังถอดดอก |
-| **Alarms** | `GET /alarms` · `PATCH /alarms/{id}/read` · `POST /alarms/mark-all-read` · `DELETE /alarms/{id}` | แจ้งเตือนจากผลพยากรณ์จริง |
-| **Audit** | `GET /audit-logs` | การตัดสินใจของผู้ควบคุม (override / ถอดดอก) |
-| **Auth / Users / Profile** | `/auth/*` · `/users/*` · `/profile/*` | JWT + RBAC |
-| **Health** | `/health` · `/health/components` | สถานะ DB / Redis / MinIO |
+## 🔌 API (`/api/v1`) — รายละเอียดใน [API_SPECIFICATION.md](API_SPECIFICATION.md)
+| Module | Endpoints |
+|---|---|
+| **Tool Life** | `GET /tool-life/fleet` · `GET /tool-life/machines/{m}` · `POST /tool-life/machines/{m}/{start\|pause\|resume\|reset\|speed\|acknowledge}` · `GET/POST /tool-life/model*` · `GET /tool-life/evaluations` · `WS /tool-life/stream` |
+| **Tool Vision** | `GET /tool-vision/stations` · `POST …/stations/{m}/capture` · `GET …/inspections*` · `POST …/inspections/{id}/blades/{b}/measure` · `POST …/inspections/{id}/review` · `…/replacements*` · `GET …/stats` · `…/model*` · `…/training/*` |
+| **Reports** · **Alarms** · **Audit** | `GET /reports/tool-life-summary` · `GET /reports/export/csv` · `/alarms*` · `GET /audit-logs` |
+| **Auth** · **Users** · **Health** | `POST /auth/signup` · `POST /auth/login` · `GET /auth/me` · `/users*` (admin) · `GET /health` (Docker healthcheck) |
 
 Swagger UI: http://localhost:8000/docs
 
----
-
 ## 🚀 Quickstart (Docker)
-
 ```bash
-docker compose up -d                                   # Postgres, Redis, MinIO, backend, trainer-worker (GPU), TensorBoard, frontend
-cd backend && uv run python scripts/publish_tool_rul_model.py   # อัปโหลดแบบจำลองขึ้น MinIO (ครั้งแรก)
-docker compose restart backend                          # (หรือกด "ดึงเวอร์ชันล่าสุดจาก MinIO" ในหน้า Model Registry)
+cp .env.example .env                                   # ตั้ง JWT_SECRET_KEY เพื่อให้ล็อกอินค้างได้หลัง restart
+docker compose up -d                                   # db, redis, minio, backend, trainer-worker (GPU), tensorboard, frontend
+cd backend
+uv run python scripts/publish_tool_rul_model.py                                          # แบบจำลอง RUL → MinIO (ครั้งแรก)
+uv run python scripts/publish_tool_vb_model.py --version tool-vision-vb-resnet18-2.0.0   # แบบจำลองวัด VB → MinIO (ครั้งแรก)
+docker compose restart backend
 ```
+- เว็บ http://localhost:3000 (บัญชีตั้งต้นของเครื่องพัฒนา: ปุ่มกรอกอัตโนมัติในหน้า login) · MinIO Console http://localhost:9001 · TensorBoard http://localhost:6006
+- ชุดข้อมูล: ดู [`dataset/README.md`](dataset/README.md)
+- Observability: `docker compose -f compose.yml -f compose.observability.yml up -d` → Grafana http://localhost:3001 ([observability/README.md](observability/README.md))
 
-- เว็บ: http://localhost:3000 (บัญชีทดสอบจาก seed ใน `backend/main.py`)
-- MinIO Console: http://localhost:9001
-- TensorBoard (กราฟการเทรน retrain + การทดลองเลือกแบบจำลอง): http://localhost:6006 · กราฟเดียวกันแบบย่อดูได้ในหน้า Model Registry → แท็บ Vision
-- ชุดข้อมูล: วาง LUH milling dataset ไว้ที่ `dataset/Multivariate time series data of milling processes with varying tool wear and machine tools/…/filelist.csv` (หรือกำหนด `LUH_DATASET_DIR`)
-- ตัวแปรสภาพแวดล้อม: `TOOL_LIFE_AUTOSTART` (เริ่มสตรีมอัตโนมัติ), `TOOL_LIFE_HOLD_ON_REPLACE` (interlock), `TOOL_LIFE_STREAMS` (เช่น `1:3,2:6,3:9`)
+## 🧠 ฝึกแบบจำลองใหม่
+| แบบจำลอง | วิธี |
+|---|---|
+| RUL (GRU) | [`timeseries_docs/tool_rul_forecast/README.md`](timeseries_docs/tool_rul_forecast/README.md) → `publish_tool_rul_model.py` |
+| วัด VB จากภาพ | ครั้งแรก/ค้นหาใหม่: [`nontime_docs/tool_vb_vision/README.md`](nontime_docs/tool_vb_vision/README.md) → `publish_tool_vb_model.py` · ระหว่างใช้งาน: ปุ่ม **เริ่ม retrain** ในหน้า Tool Inspection (admin) |
 
-### แบบจำลองวัด VB จากภาพใบมีด (ครั้งแรก)
+## ✅ ทดสอบ
 ```bash
-# ทดลอง/เลือกแบบจำลอง + ฝึกตัวใช้งานจริง (GPU, ~1 ชม.) → nontime_docs/tool_vb_vision/{results_vb,figures,runs,models}
-docker compose run --rm -v "$(pwd)/nontime_docs/tool_vb_vision:/work" -w /work trainer-worker sh -c \
-  "uv pip install -q --python /app/.venv/bin/python 'tensorboard>=2.17' && /app/.venv/bin/python experiments_vb.py"
-cd backend && uv run python scripts/publish_tool_vb_model.py      # อัปโหลดขึ้น MinIO + ตั้งเป็น latest
-tensorboard --logdir ../nontime_docs/tool_vb_vision/runs          # ดูกราฟการฝึก
+cd backend && uv run --no-sync pytest tests/ -q
+cd frontend && npx tsc --noEmit && npm run build
 ```
-ครั้งต่อไปใช้ปุ่ม **เริ่ม retrain** ในหน้า Tool Inspection (ใช้ค่า VB ที่ผู้ตรวจวัดจริง)
-
-### ฝึกแบบจำลอง RUL ใหม่
-```bash
-cd timeseries_docs/tool_rul_forecast
-python extract_run_features.py "<โฟลเดอร์ที่มี filelist.csv>" run_features.csv 12
-python experiments_rul.py            # nested selection + LOTO + ฝึก production + ส่งออก models/tool_rul_model.*
-cd ../../backend && uv run python scripts/publish_tool_rul_model.py
-uv run pytest tests/test_tool_life.py -q
-```
-
-### ทดสอบ
-```bash
-cd backend && uv run pytest tests/test_tool_life.py -q
-cd frontend && npx tsc --noEmit
-```
-
----
 
 ## 📚 เอกสาร
-- รายงานรายวิชาอนุกรมเวลา: [`timeseries_docs/tool_rul_forecast/Report_TimeSeries_Tool_RUL.md`](timeseries_docs/tool_rul_forecast/Report_TimeSeries_Tool_RUL.md)
-- Notebook: [`timeseries_docs/tool_rul_forecast/Tool_RUL_Forecasting.ipynb`](timeseries_docs/tool_rul_forecast/Tool_RUL_Forecasting.ipynb)
-- ชุดข้อมูล: Denkena, Klemme & Stiehl (2023), *Multivariate time series data of milling processes with varying tool wear and machine tools*, Data in Brief — Mendeley Data DOI 10.17632/zpxs87bjt8
+- รายงานอนุกรมเวลา: [`timeseries_docs/tool_rul_forecast/Report_TimeSeries_Tool_RUL.md`](timeseries_docs/tool_rul_forecast/Report_TimeSeries_Tool_RUL.md)
+- รายงาน non-time-series: [`nontime_docs/tool_vb_vision/Report_NonTimeSeries_VB.md`](nontime_docs/tool_vb_vision/Report_NonTimeSeries_VB.md)
+- ดัชนีเอกสารทั้งหมด: [`docs/README.md`](docs/README.md)

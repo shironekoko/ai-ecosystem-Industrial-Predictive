@@ -4,8 +4,8 @@
 (ค่าที่ผู้ตรวจแค่ยอมรับค่า AI ไม่ถูกใช้ฝึก — เป็นคำตอบของแบบจำลองเอง ไม่มีข้อมูลใหม่)
 เริ่มจากน้ำหนักของเวอร์ชันที่ใช้งานอยู่ (fine-tune, lr ต่ำ) แล้วเทียบกับเวอร์ชันเดิมบนข้อมูลชุดเดียวกัน:
   - validation คงที่ = ดอก 7: MAE ต้องไม่แย่ลงเกิน 1 µm
-  - ค่าที่วัดล่าสุด 20% ท้าย (ไม่ใช้ฝึก): MAE ต้องไม่แย่กว่าเดิม
-ผลลัพธ์เป็น "candidate" ใน MinIO — ยังไม่ถูกใช้งานจนกว่าผู้ดูแลจะกด promote
+  - ค่าที่วัดจากดอกล่าสุด 20% (แยกทั้งดอก ไม่ใช้ฝึก): MAE ต้องไม่แย่กว่าเดิม
+งานนี้เริ่มอัตโนมัติ (service.maybe_auto_retrain) · ผลลัพธ์เป็น "candidate" ใน MinIO — ยังไม่ถูกใช้งานจนกว่าผู้ดูแลจะกด promote
 กราฟการฝึก: ความคืบหน้ารายรอบ (epoch) อยู่ใน Redis ให้หน้าเว็บแสดงสด · history เก็บใน meta.json ของ candidate · TensorBoard ที่ /logs/tensorboard
 """
 from __future__ import annotations
@@ -69,6 +69,22 @@ def _human_images(labels: list[dict], spec: dict):
     return out
 
 
+def split_recent(labels: list[dict]) -> tuple[list[dict], list[dict]]:
+    """แยกค่าวัดจริงเป็น (ฝึก, ตรวจ gate) ตามดอก: ดอกล่าสุด 20% (อย่างน้อย 1 ดอก เมื่อมี ≥ 3 ดอก) ไม่ใช้ฝึก
+
+    ต้องแยกทั้งดอก — ถ้าบางใบของดอกเดียวกันอยู่ในชุดฝึก แบบจำลองจะเรียนความคลาดคงที่ของดอกนั้นไปแล้ว
+    gate บนใบที่เหลือจึงผ่านง่ายเกินจริง
+    """
+    def ins(d):
+        return d.get("inspection_id") or d["blade_id"].rsplit("-B", 1)[0]
+
+    labels = sorted(labels, key=lambda d: d["reviewed_at"] or "")
+    order = list(dict.fromkeys(ins(d) for d in labels))          # ดอกเรียงตามเวลาที่ยืนยัน
+    k = max(1, round(0.2 * len(order))) if len(order) >= 3 else 0
+    held = set(order[len(order) - k:]) if k else set()
+    return [d for d in labels if ins(d) not in held], [d for d in labels if ins(d) in held]
+
+
 def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int = 15) -> dict:
     import numpy as np
     import torch
@@ -83,9 +99,7 @@ def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int
     base_cfg.image_size, base_cfg.crop = tuple(base_cfg.image_size), tuple(base_cfg.crop)
     spec = vm.input_spec(base_cfg)
 
-    labels = sorted(labels, key=lambda d: d["reviewed_at"] or "")
-    k = max(2, round(0.2 * len(labels))) if len(labels) >= 10 else 0
-    train_lab, recent_lab = (labels[:-k], labels[-k:]) if k else (labels, [])
+    train_lab, recent_lab = split_recent(labels)
     h_train, h_recent = _human_images(train_lab, spec), _human_images(recent_lab, spec)
 
     base_df = nd.vb_samples(nd.BASE_TRAIN_TOOLS)
@@ -122,7 +136,7 @@ def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int
     recent_ok = (not recent_lab) or cand_recent["mae"] <= base_recent["mae"]
     gate = dict(passed=bool(no_regression and recent_ok), no_regression_on_val=bool(no_regression),
                 not_worse_on_recent=bool(recent_ok),
-                rule=f"MAE บนดอก 7 แย่ลงไม่เกิน {VAL_TOLERANCE_UM:g} µm และ MAE บนค่าที่วัดล่าสุด (ไม่ใช้ฝึก) ไม่แย่กว่าเดิม")
+                rule=f"MAE บนดอก 7 แย่ลงไม่เกิน {VAL_TOLERANCE_UM:g} µm และ MAE บนค่าที่วัดจากดอกล่าสุด (แยกทั้งดอก ไม่ใช้ฝึก) ไม่แย่กว่าเดิม")
     version = f"tool-vision-vb-{cfg.arch.replace('_', '-')}-{datetime.utcnow():%Y%m%d-%H%M%S}"
     meta = dict(
         base_meta, version=version, model=f"{cfg.arch} + regression head (fine-tune จาก {base_version})",
@@ -147,7 +161,7 @@ async def retrain_tool_vision(ctx: dict, job_ref: str, base_version: str, labels
                               trace_ctx: dict | None = None) -> dict:
     """ARQ task — ฝึกใน thread แยกเพื่อไม่บล็อก event loop ของ worker
 
-    trace_ctx = trace context จาก request ที่สั่ง retrain → span ของงานนี้ต่อเป็น trace เดียวกันใน Tempo
+    trace_ctx = trace context จาก request ที่ทำให้ retrain เริ่ม (ยืนยันผล / ตัดสิน candidate) → span ของงานนี้ต่อเป็น trace เดียวกันใน Tempo
     """
     from core import observability as obs
 

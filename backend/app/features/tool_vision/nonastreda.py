@@ -2,7 +2,8 @@
 
 รหัสภาพ: T{tool}R{run}B{blade} เช่น T8R3B2
 - labels.csv      : image_label (sharp / used / dulled) = label จริง — ใช้ฝึก/ประเมินแบบจำลองเท่านั้น ไม่ส่งไปหน้าเว็บ
-- labels_reg.csv  : gaps, flank_wear, overhang (µm) = ค่าที่ optical bench วัดได้ — แสดงให้ผู้ตรวจใช้ประกอบการตัดสินใจ
+- labels_reg.csv  : gaps, flank_wear, overhang (µm) = ค่าที่ optical bench วัดได้ — ใช้ฝึก/ประเมิน, เลือกภาพภายในระบบ
+                    และเป็นค่าเริ่มต้นของช่อง "กรอกค่าที่วัด" เมื่อผู้ตรวจเลือกวัดใบนั้น (ส่งทีละใบเมื่อขอเท่านั้น)
 
 การแบ่งข้อมูล (กันการสปอย):
   ดอก 1–6 = ฝึก · ดอก 7 = validation (เลือก checkpoint / gate ตอน retrain)
@@ -115,8 +116,10 @@ def eol_run_for(tool: int, physical_vb_um: float | None) -> int:
     return min(late, key=lambda r: (abs(late[r] - physical_vb_um), -r))
 
 
-def metrology(image_ref: str) -> dict | None:
-    return _metrology().get(image_ref)
+def measured_vb(image_ref: str) -> float | None:
+    """VB ที่ optical bench วัดได้ของภาพนั้น (µm) = ผลการวัดของใบมีดนี้"""
+    m = _metrology().get(image_ref)
+    return m["flank_wear_um"] if m else None
 
 
 def vb_samples(tools) -> pd.DataFrame:

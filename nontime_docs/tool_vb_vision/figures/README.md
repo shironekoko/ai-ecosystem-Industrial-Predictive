@@ -10,4 +10,4 @@
 | `r02_training_curves.png` | กราฟการฝึกของตัวใช้งานจริงจาก TensorBoard (4) |
 | `r03_test_pred_vs_true.png` | ค่าทายเทียบค่าจริงบนดอกทดสอบ 8–10 (5.5) |
 | `r04_search_stage_d.png` | ผล cross-validation ของ stage D (5.4) |
-| `web_tool_inspection.jpg` · `web_vision_registry.jpg` | ภาพหน้าเว็บ: ผู้ตรวจยืนยันผลวัด VB · Model Registry แท็บ Vision (6) |
+| `web_tool_inspection.jpg` · `web_requisition.jpg` · `web_vision_registry.jpg` | ภาพหน้าเว็บ: ผลวัด VB ที่ผู้ตรวจยืนยัน · ใบเบิกดอกทดแทน · Model Registry แท็บ Vision (6) |

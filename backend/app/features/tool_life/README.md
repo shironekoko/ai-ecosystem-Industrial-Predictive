@@ -12,7 +12,7 @@
 | ไฟล์ | หน้าที่ |
 |---|---|
 | `router.py` | REST `/tool-life/*` (`router`) + WebSocket `/tool-life/stream` (`stream_router` — แยก router เพราะ WebSocket ส่ง Authorization header ไม่ได้) |
-| `streamer.py` | `StreamManager` / `MachineStream`: เล่นข้อมูลตามเวลาจริง (deadline scheduling, ความเร็ว 1–20×), พยากรณ์ทีละรัน, alarm, interlock, ประเมินผลหลังถอดดอก (`backend/logs/tool_life_evaluations.jsonl`), `removal_listeners` (main.py ผูกกับการตรวจใบมีด), metric ของ observability |
+| `streamer.py` | `StreamManager` / `MachineStream`: เล่นข้อมูลตามเวลาจริง (deadline scheduling, ความเร็ว 1–20×), พยากรณ์ทีละรัน, alarm, interlock, ประเมินผลหลังถอดดอก (`backend/logs/tool_life_evaluations.jsonl`), `removal_listeners` (main.py ผูกกับการตรวจใบมีด), `install_new_tool` (ติดตั้งดอกใหม่ตามใบเบิก → หยุดชั่วคราวรอเริ่มตัด), metric ของ observability |
 | `runtime.py` | ส่วนใช้งานของแบบจำลอง (numpy ล้วน): ตัวกรอง outlier แบบ causal, ฟีเจอร์รายรัน, GRU, ข้อจำกัดฟิสิกส์, ช่วงความเชื่อมั่น, สถานะ/คำแนะนำ — **สำเนาของ `timeseries_docs/tool_rul_forecast/rul_runtime.py`** (test ตรวจว่าตรงกัน) |
 | `registry.py` | ดึงแบบจำลองจาก MinIO `models/tool-rul/<version>/` + ตรวจ sha256 + self-test · รายการเวอร์ชัน |
 | `luh_dataset.py` | อ่านชุดข้อมูล LUH: ตารางรันจาก `filelist.csv` (ตัดคอลัมน์ VB ทิ้ง), สัญญาณ .h5, ฟีเจอร์รายรัน · ค่า VB จริงอ่านได้หลังถอดดอกเท่านั้น (`ground_truth`) |
@@ -24,7 +24,7 @@
 |---|---|---|---|
 | GET | `/tool-life/fleet` | Dashboard, Machine Monitoring | ล็อกอิน |
 | GET | `/tool-life/machines/{m}?history=true` | Machine Monitoring | ล็อกอิน |
-| POST | `/tool-life/machines/{m}/{start\|pause\|resume\|reset}` · `/speed` · `/acknowledge` | Machine Monitoring (ควบคุมสตรีม, ตอบ REPLACE_NOW) | ล็อกอิน |
+| POST | `/tool-life/machines/{m}/{start\|pause\|resume\|reset}` · `/speed` · `/acknowledge` | Machine Monitoring (ควบคุมสตรีม, ตอบ REPLACE_NOW) — ดอกที่ถอดแล้ว (`COMPLETED`) `start` ไม่ได้ (`409`): ต้องเบิกและติดตั้งดอกใหม่ตามใบเบิก → `install_new_tool` = รอบใหม่สถานะ `PAUSED` (`installed` ใน snapshot) → `resume` เริ่มตัด | ล็อกอิน |
 | GET | `/tool-life/model` · `/model/versions` | Model Registry | ล็อกอิน |
 | POST | `/tool-life/model/reload` | Model Registry (ดึงล่าสุด / ใช้เวอร์ชันที่เลือก) | admin |
 | GET | `/tool-life/evaluations?detail=true` | Reports | ล็อกอิน |

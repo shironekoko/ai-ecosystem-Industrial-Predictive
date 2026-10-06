@@ -70,11 +70,9 @@ panel("stat", "แบบจำลองที่โหลดอยู่", [tgt(
 panel("stat", "รอผู้ตรวจยืนยัน", [tgt("ai_ecosystem_tool_vision_pending_reviews", "งานตรวจใบมีด", instant=True)], 14, 3, 4,
       "งานตรวจใบมีดสถานะ PENDING_REVIEW", options={**STAT, "textMode": "value"},
       fc={"thresholds": thresholds((None, "green"), (1, "orange"))})
-panel("stat", "ใบสั่งงานค้าง", [tgt("ai_ecosystem_tool_vision_open_work_orders", "{{priority}}", instant=True)], 17, 4, 4,
-      "REQUIRED = VB เฉลี่ย ≥ 140 µm ต้องเปลี่ยน/ลับดอก · ADVISED = 103–140 µm", options=STAT,
-      fc={"thresholds": thresholds((None, "green"), (1, "orange"))},
-      overrides=[{"matcher": {"id": "byName", "options": "REQUIRED"},
-                  "properties": [{"id": "thresholds", "value": thresholds((None, "green"), (1, "red"))}]}])
+panel("stat", "ใบเบิกดอกค้าง", [tgt("ai_ecosystem_tool_vision_open_requisitions", "{{status}}", instant=True)], 17, 4, 4,
+      "OPEN = รอเบิกจากคลัง · ISSUED = เบิกแล้วรอติดตั้ง (เครื่องหยุดรอดอกใหม่)", options=STAT,
+      fc={"thresholds": thresholds((None, "green"), (1, "orange"))})
 panel("stat", "ค่าวัดจริงรอ retrain", [tgt('ai_ecosystem_tool_vision_retrain_pool{kind="all"}', "ใบ", instant=True)], 21, 3, 4,
       "ค่า VB ที่วัดจริงและยังไม่เคยใช้ฝึก", options={**STAT, "textMode": "value", "colorMode": "value"})
 _y[0] += 4
@@ -134,7 +132,7 @@ panel("bargauge", "งานตรวจใบมีด (ช่วงเวล�
                  for n, c in (("OK", "green"), ("MONITOR", "orange"), ("REPLACE", "red"))])
 panel("piechart", "ที่มาของค่า VB ที่ผู้ตรวจยืนยัน", [
     tgt("sum by (source) (increase(ai_ecosystem_tool_vision_blade_reviews_total[$__range]))", "{{source}}", instant=True)], 6, 5, 7,
-      "AI = ยอมรับค่า AI · BENCH = วัดด้วย optical bench · MANUAL = กรอกค่าที่วัดเอง (BENCH/MANUAL ใช้ retrain)",
+      "AI = ยอมรับค่า AI · MANUAL = ผู้ตรวจวัดจริงแล้วกรอกค่า (ใช้ retrain)",
       options={"pieType": "donut", "legend": {"displayMode": "list", "placement": "bottom", "showLegend": True, "values": ["value"]},
                "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}}, fc={"decimals": 0})
 panel("stat", "MAE ของ AI เทียบค่าวัดจริง (สะสม)", [
@@ -147,10 +145,11 @@ panel("stat", "MAE ของ AI เทียบค่าวัดจริง (�
                  {"matcher": {"id": "byName", "options": "จำนวนใบที่วัด"},
                   "properties": [{"id": "unit", "value": "none"}, {"id": "color", "value": {"mode": "fixed", "fixedColor": "text"}}]}])
 panel("timeseries", "Pool ค่าวัดจริงสำหรับ retrain", [
-    tgt('ai_ecosystem_tool_vision_retrain_pool{kind="all"}', "ทั้งหมด", "A"),
-    tgt('ai_ecosystem_tool_vision_retrain_pool{kind="large_error"}', "AI คลาด > 15 µm", "B")], 16, 8, 7,
-      "ระบบแนะนำ retrain เมื่อใบที่ AI คลาด > 15 µm ครบ 8 ใบ (เส้นแดง)", options=TS,
-      fc={"custom": {"thresholdsStyle": {"mode": "line"}, "showPoints": "never"}, "thresholds": thresholds((None, "transparent"), (8, "red")),
+    tgt('ai_ecosystem_tool_vision_retrain_pool{kind="new_tools"}', "ดอกใหม่ที่วัดจริง", "A"),
+    tgt('ai_ecosystem_tool_vision_retrain_pool{kind="all"}', "ภาพทั้งหมด", "B"),
+    tgt('ai_ecosystem_tool_vision_retrain_pool{kind="large_error"}', "ภาพที่ AI คลาด > 15 µm", "C")], 16, 8, 7,
+      "retrain เริ่มอัตโนมัติเมื่อดอกใหม่ที่วัดจริงครบ 3 ดอก (เส้นแดง = VISION_RETRAIN_MIN_TOOLS)", options=TS,
+      fc={"custom": {"thresholdsStyle": {"mode": "line"}, "showPoints": "never"}, "thresholds": thresholds((None, "transparent"), (3, "red")),
           "decimals": 0})
 _y[0] += 7
 panel("stat", "เวลาวัด VB ต่อดอก (เฉลี่ย, CPU)", [

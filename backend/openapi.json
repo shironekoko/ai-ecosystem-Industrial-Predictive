@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "AI Ecosystem API — CNC Tool Life",
-    "description": "Backend ของระบบ CNC Tool Life AI: พยากรณ์อายุดอกกัด (RUL, time series) → ถอดดอก → วัดรอยสึก VB จากภาพใบมีด → ผู้ตรวจยืนยัน → ใบสั่งงาน → retrain\n\nทุก endpoint อยู่ใต้ `/api/v1` · ใช้ปุ่ม **Authorize** ใส่ Bearer token สำหรับ endpoint ที่ต้องล็อกอิน",
+    "description": "Backend ของระบบ CNC Tool Life AI: พยากรณ์อายุดอกกัด (RUL, time series) → ถอดดอก → วัดรอยสึก VB จากภาพใบมีด → ผู้ตรวจยืนยัน → ใบเบิกดอก → retrain\n\nทุก endpoint อยู่ใต้ `/api/v1` · ใช้ปุ่ม **Authorize** ใส่ Bearer token สำหรับ endpoint ที่ต้องล็อกอิน",
     "version": "1.0.0"
   },
   "paths": {
@@ -773,13 +773,13 @@
         }
       }
     },
-    "/api/v1/tool-vision/inspections/{ins_id}/blades/{blade}/measure": {
-      "post": {
+    "/api/v1/tool-vision/inspections/{ins_id}/blades/{blade}/measurement": {
+      "get": {
         "tags": [
           "Tool Vision (blade inspection)"
         ],
-        "summary": "Measure",
-        "operationId": "measure_api_v1_tool_vision_inspections__ins_id__blades__blade__measure_post",
+        "summary": "Blade Measurement",
+        "operationId": "blade_measurement_api_v1_tool_vision_inspections__ins_id__blades__blade__measurement_get",
         "security": [
           {
             "HTTPBearer": []
@@ -882,13 +882,13 @@
         }
       }
     },
-    "/api/v1/tool-vision/replacements": {
+    "/api/v1/tool-vision/requisitions": {
       "get": {
         "tags": [
           "Tool Vision (blade inspection)"
         ],
-        "summary": "Replacements",
-        "operationId": "replacements_api_v1_tool_vision_replacements_get",
+        "summary": "Requisitions",
+        "operationId": "requisitions_api_v1_tool_vision_requisitions_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -906,13 +906,13 @@
         ]
       }
     },
-    "/api/v1/tool-vision/replacements/export/csv": {
+    "/api/v1/tool-vision/requisitions/export/csv": {
       "get": {
         "tags": [
           "Tool Vision (blade inspection)"
         ],
-        "summary": "Replacements Csv",
-        "operationId": "replacements_csv_api_v1_tool_vision_replacements_export_csv_get",
+        "summary": "Requisitions Csv",
+        "operationId": "requisitions_csv_api_v1_tool_vision_requisitions_export_csv_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -930,14 +930,59 @@
         ]
       }
     },
-    "/api/v1/tool-vision/replacements/{ins_id}/done": {
+    "/api/v1/tool-vision/requisitions/{ins_id}/issue": {
       "post": {
         "tags": [
           "Tool Vision (blade inspection)"
         ],
-        "summary": "Replaced",
-        "description": "ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก)",
-        "operationId": "replaced_api_v1_tool_vision_replacements__ins_id__done_post",
+        "summary": "Requisition Issue",
+        "operationId": "requisition_issue_api_v1_tool_vision_requisitions__ins_id__issue_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ins_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ins Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tool-vision/requisitions/{ins_id}/install": {
+      "post": {
+        "tags": [
+          "Tool Vision (blade inspection)"
+        ],
+        "summary": "Requisition Install",
+        "description": "ติดตั้งดอกใหม่แล้ว → เครื่องเริ่มรอบการใช้งานใหม่ในสถานะหยุดชั่วคราว (ผู้ควบคุมกดเริ่มตัดเองที่ Machine Monitoring)",
+        "operationId": "requisition_install_api_v1_tool_vision_requisitions__ins_id__install_post",
         "security": [
           {
             "HTTPBearer": []
@@ -1148,30 +1193,6 @@
         ],
         "summary": "Training Jobs",
         "operationId": "training_jobs_api_v1_tool_vision_training_jobs_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/tool-vision/training/start": {
-      "post": {
-        "tags": [
-          "Tool Vision (blade inspection)"
-        ],
-        "summary": "Training Start",
-        "operationId": "training_start_api_v1_tool_vision_training_start_post",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1945,7 +1966,7 @@
           "status"
         ],
         "title": "AuditEvent",
-        "description": "eventType ที่ระบบบันทึก: TOOL_REPLACED, TOOL_LIFE_OVERRIDE (Machine Monitoring) · VISION_INSPECTION, VISION_MEASURE,\nVISION_REVIEW, TOOL_SERVICED, VISION_RETRAIN_REQUESTED, VISION_MODEL_PROMOTED / _REJECTED / _ACTIVATED (Tool Inspection)"
+        "description": "eventType ที่ระบบบันทึก: TOOL_REPLACED, TOOL_LIFE_OVERRIDE (Machine Monitoring) · VISION_INSPECTION,\nVISION_REVIEW, TOOL_ISSUED, TOOL_INSTALLED, VISION_RETRAIN_REQUESTED, VISION_MODEL_PROMOTED / _REJECTED / _ACTIVATED (Tool Inspection)"
       },
       "AuditLogsResponse": {
         "properties": {
@@ -1989,7 +2010,7 @@
           "source": {
             "type": "string",
             "title": "Source",
-            "description": "AI = ยอมรับค่าที่ AI วัด · BENCH = ค่าจาก optical bench · MANUAL = ค่าที่วัดเอง",
+            "description": "AI = ยอมรับค่าที่ AI วัด · MANUAL = ค่าที่ผู้ตรวจวัดจริงแล้วกรอก",
             "default": "AI"
           },
           "vb_um": {
@@ -2591,7 +2612,7 @@
     },
     {
       "name": "Tool Vision (blade inspection)",
-      "description": "วัดรอยสึก VB ของ 4 ใบมีดจากภาพ (ensemble ของ ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน → retrain"
+      "description": "วัดรอยสึก VB ของ 4 ใบมีดจากภาพ (ensemble ของ ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบเบิกดอก → retrain"
     },
     {
       "name": "Industrial Alarms",

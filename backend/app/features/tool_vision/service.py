@@ -1,23 +1,28 @@
 """ขั้นตอนงานตรวจใบมีด (ต่อจาก Machine Monitoring):
 Machine Monitoring แจ้งดอกหมดอายุ (REPLACE_NOW) → ผู้ควบคุมถอดดอก → ถ่ายภาพ 4 ใบมีดของดอกนั้น
 → แบบจำลองวัดรอยสึก VB (µm) ของแต่ละใบ + ช่วง P10–P90 → โซนตามเกณฑ์ของงาน (ปกติ < 103 / ใกล้หมดอายุ / หมดอายุ ≥ 140 µm)
-→ ผู้ตรวจยืนยันค่า AI หรือวัดจริง (optical bench) → ใบสั่งงานระดับดอกให้วิศวกร + ค่าที่วัดจริงเข้า pool สำหรับ retrain
+→ ผู้ตรวจยืนยันค่า AI หรือวัดจริงแล้วกรอกค่า → ใบเบิกดอกทดแทน (PDF) → รับดอกจากคลัง → ติดตั้งบนเครื่อง
+  (Machine Monitoring เริ่มรอบใหม่ในสถานะหยุดชั่วคราว) + ค่าที่วัดจริงเข้า pool สำหรับ retrain
+→ ค่าวัดจริงจากดอกใหม่ครบ AUTO_RETRAIN_MIN_TOOLS ดอก → retrain อัตโนมัติ → ผู้ดูแลตัดสิน promote / reject
 
 กติกา
 - เครื่องเดียวกัน ดอกเดียวกัน: ข้อมูลเซนเซอร์ของ M1/M2/M3 (LUH T3/T6/T9) คู่กับภาพใบมีด (Nonastreda ดอก 8/9/10)
 - ตรวจ 1 ครั้งต่อการใช้งานดอก 1 รอบ (cycle_id ของสตรีม) ด้วยภาพช่วงท้ายอายุที่สึกเท่ากับดอกจริงตอนถอด
   (VB เฉลี่ย 4 ใบของภาพ ≈ VB ของดอกในข้อมูลเซนเซอร์ — ใช้เลือกภาพภายในเท่านั้น ไม่ส่งออกหน้าเว็บ)
-- ผล AI ทุกครั้งต้องผ่านผู้ตรวจ (PENDING_REVIEW → VERIFIED) ก่อนออกใบสั่งงาน
-- ตัดสินระดับดอกด้วย VB เฉลี่ย 4 ใบ (นิยามเดียวกับ label ของ RUL): ≥ 140 µm = ต้องเปลี่ยน/ลับดอก (REQUIRED)
-  · 103–140 µm = ใกล้หมดอายุ ควรเปลี่ยนตามแผน (ADVISED) จนกว่าช่างบันทึกว่าเปลี่ยนแล้ว (REPLACED)
+- ผล AI ทุกครั้งต้องผ่านผู้ตรวจ (PENDING_REVIEW → VERIFIED) ก่อนออกใบเบิก
+- ตัดสินระดับดอกด้วย VB เฉลี่ย 4 ใบ (นิยามเดียวกับ label ของ RUL) → การจัดการดอกที่ถอด: ≥ 140 µm ส่งลับคม/ตัดจำหน่าย
+  · 103–140 µm ส่งลับคมตามแผน · < 103 µm เก็บเป็นดอกสำรอง — เครื่องต้องได้ดอกใหม่ทุกครั้ง จึงออกใบเบิกทุกการถอด
 - VB รายใบใช้บอกว่าคมไหนสึกมากสุด / คมไหนเกิน 140 µm เฉพาะใบ (รอยสึกเฉพาะจุด)
-- เฉพาะค่าที่ "วัด" (optical bench / กรอกจากการวัดเอง) เป็น label สำหรับ retrain — ค่าที่ยอมรับจาก AI ไม่ใช่ข้อมูลใหม่
-- ค่าที่ optical bench วัดได้ของแต่ละใบถูกเปิดเผยเมื่อผู้ตรวจสั่งวัดใบนั้นเท่านั้น (กันการสปอยคำตอบของแบบจำลอง)
+- เฉพาะค่าที่ผู้ตรวจวัดจริงแล้วกรอก (MANUAL) เป็น label สำหรับ retrain — ค่าที่ยอมรับจาก AI ไม่ใช่ข้อมูลใหม่
+- ค่า VB จริงของชุดข้อมูล (ผลวัด optical bench) ไม่อยู่ในข้อมูลที่ส่งหน้าเว็บตามปกติ — ส่งทีละใบเมื่อผู้ตรวจเลือก
+  "กรอกค่าที่วัด" ของใบนั้นเท่านั้น (blade_measurement) เป็นค่าเริ่มต้นที่ผู้ตรวจแก้ได้ (กันการสปอยคำตอบของแบบจำลอง)
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import json
+import os
 import threading
 import uuid
 from datetime import datetime
@@ -34,9 +39,12 @@ from .registry import registry
 from .vb_rules import VB_ACCEL, VB_EOL, tool_summary, tool_vb, tool_verdict, zone_code
 from .worker_tasks import INSPECTION_BUCKET
 
-RETRAIN_SUGGEST_LABELS = 8        # แนะนำ retrain เมื่อมีค่าที่วัดจริงซึ่ง AI คลาด > 15 µm อย่างน้อย 8 ใบ
+# retrain อัตโนมัติเมื่อมีค่าวัดจริงจากดอกใหม่ (ยังไม่เคยลองฝึก) ครบ N ดอก = N × 4 ภาพ — นับเป็นดอก ไม่ใช่ภาพ
+# เพราะ 4 ใบของดอกเดียวกันมีความคลาดคงที่ร่วมกัน · 3 ดอก = ฝึก 2 ดอก + กันไว้ตรวจ gate 1 ดอก (ขั้นต่ำที่ gate มีความหมาย)
+AUTO_RETRAIN_MIN_TOOLS = int(os.environ.get("VISION_RETRAIN_MIN_TOOLS", "3"))
+AUTO_ACTOR = "auto-retrain"
 LARGE_ERROR_UM = 15.0
-SOURCES = ("AI", "BENCH", "MANUAL")
+SOURCES = ("AI", "MANUAL")
 
 
 class WorkflowError(Exception):
@@ -48,7 +56,11 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat(timespec="seconds") + "Z" if dt else None
 
 
-ORDER_STATUS = {"REPLACE": "REQUIRED", "MONITOR": "ADVISED", "OK": "NONE"}
+# การจัดการดอกที่ถอด ตามระดับดอก (VB เฉลี่ย 4 ใบ)
+DISPOSITION = {"REPLACE": f"ส่งลับคม / ตัดจำหน่าย (VB เฉลี่ย ≥ {VB_EOL:.0f} µm)",
+               "MONITOR": f"ส่งลับคมตามแผน (VB เฉลี่ย {VB_ACCEL:.0f}–{VB_EOL:.0f} µm)",
+               "OK": f"เก็บเป็นดอกสำรอง (VB เฉลี่ย < {VB_ACCEL:.0f} µm)"}
+REQ_OPEN = ("OPEN", "ISSUED")
 
 
 def _ai_summary(blade_vbs: dict[int, float]) -> dict:
@@ -66,19 +78,23 @@ def _final_summary(blades: list[VisionBlade]) -> dict | None:
 
 
 def _blade_dict(b: VisionBlade) -> dict:
-    measured = b.vb_source == "BENCH" and b.metrology
     return dict(id=b.id, blade=b.blade, pred_vb=b.pred_vb, vb_lo=b.vb_lo, vb_hi=b.vb_hi, zone=b.pred_label,
                 confidence=b.confidence, probs=json.loads(b.probs),
                 near_threshold=bool(b.vb_lo is not None and any(b.vb_lo < t <= b.vb_hi for t in (VB_ACCEL, VB_EOL))),
-                metrology=json.loads(b.metrology) if measured else None,      # เปิดเผยเมื่อวัดแล้วเท่านั้น
                 review=b.review, final_vb=b.final_vb, vb_source=b.vb_source, final_zone=b.final_label,
-                replace_status=b.replace_status, replaced_by=b.replaced_by, replaced_at=_iso(b.replaced_at),
                 trained_in_version=b.trained_in_version,
                 image_url=f"/api/v1/tool-vision/inspections/{b.inspection_id}/blades/{b.blade}/image")
 
 
 def _ctx(i: VisionInspection) -> dict | None:
     return json.loads(i.rul_context) if i.rul_context else None
+
+
+def _req_brief(i: VisionInspection) -> dict | None:
+    if not i.req_no:
+        return None
+    return dict(req_no=i.req_no, status=i.req_status, created_at=_iso(i.req_created_at), issued_by=i.issued_by,
+                issued_at=_iso(i.issued_at), installed_by=i.installed_by, installed_at=_iso(i.installed_at))
 
 
 def _ins_dict(i: VisionInspection, blades: list[VisionBlade] | None = None) -> dict:
@@ -89,7 +105,7 @@ def _ins_dict(i: VisionInspection, blades: list[VisionBlade] | None = None) -> d
              trigger=i.trigger, captured_by=i.captured_by,
              captured_at=_iso(i.captured_at), model_version=i.model_version, ai_verdict=i.ai_verdict,
              status=i.status, final_verdict=i.final_verdict, reviewed_by=i.reviewed_by,
-             reviewed_at=_iso(i.reviewed_at), note=i.note)
+             reviewed_at=_iso(i.reviewed_at), note=i.note, requisition=_req_brief(i))
     if blades is not None:
         d["blades"] = [_blade_dict(b) for b in sorted(blades, key=lambda x: x.blade)]
         ai = json.loads(i.ai_summary) if i.ai_summary else None
@@ -114,10 +130,8 @@ def stations(rul: dict[int, dict] | None = None) -> list[dict]:
                     .order_by(VisionInspection.captured_at.desc()).first())
             pending = db.query(func.count(VisionInspection.id)).filter(
                 VisionInspection.machine == m, VisionInspection.status == "PENDING_REVIEW").scalar() or 0
-            open_rep = (db.query(func.count(func.distinct(VisionBlade.inspection_id)))
-                        .join(VisionInspection, VisionBlade.inspection_id == VisionInspection.id)
-                        .filter(VisionInspection.machine == m, VisionInspection.status != "ARCHIVED",
-                                VisionBlade.replace_status.in_(["REQUIRED", "ADVISED"])).scalar() or 0)   # ใบสั่งงาน (ดอก)
+            open_req = db.query(func.count(VisionInspection.id)).filter(
+                VisionInspection.machine == m, VisionInspection.req_status.in_(REQ_OPEN)).scalar() or 0   # ใบเบิกที่ยังไม่ติดตั้ง
             pred = snap.get("prediction") or {}
             out.append(dict(
                 machine=m, machine_id=f"M{m}", tool_id=snap.get("tool_id"), image_tool=f"N{tool}",
@@ -127,7 +141,7 @@ def stations(rul: dict[int, dict] | None = None) -> list[dict]:
                          completed=snap.get("completed")) if snap else None,
                 cycle_id=cycle, cycle_inspection=_ins_dict(cur, cur_blades) if cur else None,
                 can_capture=snap.get("state") == "COMPLETED" and cur is None,
-                pending_review=pending, open_replacements=open_rep, last=_ins_dict(last) if last else None))
+                pending_review=pending, open_requisitions=open_req, last=_ins_dict(last) if last else None))
         return out
 
 
@@ -178,10 +192,8 @@ def _create(machine: int, images: list[bytes], refs: list[str], actor: str, seq:
         db.flush()                                  # แถวแม่ต้องมีก่อน (FK ของ vision_blades)
         blades = []
         for b, ref, p in zip(nd.BLADES, refs, preds):
-            met = nd.metrology(ref)
             vb = VisionBlade(id=f"{ins_id}-B{b}", inspection_id=ins_id, blade=b, image_key=f"{ins_id}/B{b}.jpg",
-                             image_ref=ref, metrology=json.dumps(met) if met else None, review="PENDING",
-                             replace_status="NONE")
+                             image_ref=ref, review="PENDING")
             _apply_prediction(vb, p)
             blades.append(vb)
         db.add_all(blades)
@@ -198,7 +210,7 @@ _capture_lock = threading.Lock()
 
 
 def capture_eol(ctx: dict, actor: str | None = None) -> dict:
-    """ถ่ายภาพ 4 ใบมีดของดอกที่เพิ่งถอดจากเครื่อง (optical bench) — ใช้ภาพรอบสุดท้ายของดอกที่คู่กับเครื่องนั้น
+    """ถ่ายภาพ 4 ใบมีดของดอกที่เพิ่งถอดจากเครื่อง — ใช้ภาพช่วงท้ายอายุของดอกที่คู่กับเครื่องนั้น
 
     ctx = removal_context() จาก Machine Monitoring; ตรวจได้ 1 ครั้งต่อ cycle_id (เรียกซ้ำได้ผลเดิม)
     """
@@ -293,30 +305,30 @@ def image_bytes(ins_id: str, blade: int) -> bytes:
         resp.close(); resp.release_conn()
 
 
-def measure(ins_id: str, blade: int, actor: str) -> dict:
-    """วัดใบมีดบน optical bench (ใช้เวลาจริง ~ไม่กี่นาที/ใบ) → ค่า VB/gaps/overhang ที่วัดได้ของใบนั้น"""
+def blade_measurement(ins_id: str, blade: int) -> dict:
+    """ผลวัด VB ของใบมีดใบเดียว (optical bench ของชุดข้อมูล) — ค่าเริ่มต้นของช่อง "กรอกค่าที่วัด" ซึ่งผู้ตรวจแก้ได้
+    ให้เฉพาะรายการที่ยังรอตรวจ: ใบที่ผู้ตรวจแค่ยอมรับค่า AI จะไม่ถูกเปิดเผยค่าจริงภายหลัง"""
     with SessionLocal() as db:
         ins = db.get(VisionInspection, ins_id)
         b = db.get(VisionBlade, f"{ins_id}-B{blade}")
         if not ins or not b:
             raise WorkflowError("ไม่พบใบมีด")
         if ins.status != "PENDING_REVIEW":
-            raise WorkflowError("รายการนี้ปิดแล้ว")
-        if not b.metrology:
-            raise WorkflowError("ใบมีดนี้ไม่มีค่าวัดจาก optical bench")
-        met = json.loads(b.metrology)
-    _audit("VISION_MEASURE", actor, f"M{ins.machine}", f"วัด {ins_id} B{blade} บน optical bench: VB {met['flank_wear_um']:.1f} µm "
-           f"(AI {b.pred_vb:.1f} µm)")
-    return dict(blade=blade, **met)
+            raise WorkflowError("รายการนี้ยืนยันแล้ว")
+        ref = b.image_ref
+    vb = nd.measured_vb(ref) if ref else None
+    if vb is None:
+        raise WorkflowError("ไม่มีผลวัดของใบมีดนี้ — กรอกค่าที่วัดเอง")
+    return dict(blade=blade, vb_um=round(vb, 1))
 
 
 def review(ins_id: str, decisions: dict[int, dict], actor: str, note: str | None = None) -> dict:
-    """decisions = {ใบที่: {"source": AI|BENCH|MANUAL, "vb_um": ค่า (เฉพาะ MANUAL)}} ต้องครบ 4 ใบ
+    """decisions = {ใบที่: {"source": AI|MANUAL, "vb_um": ค่า (เฉพาะ MANUAL)}} ต้องครบ 4 ใบ
 
-    AI = ยอมรับค่าที่ AI วัด (CONFIRMED) · BENCH = ใช้ค่าที่ optical bench วัด · MANUAL = ค่าที่ผู้ตรวจวัดเอง (MEASURED)
+    AI = ยอมรับค่าที่ AI วัด (CONFIRMED) · MANUAL = ค่าที่ผู้ตรวจวัดจริงแล้วกรอก (MEASURED)
     """
     if set(decisions) != set(nd.BLADES) or any(d.get("source") not in SOURCES for d in decisions.values()):
-        raise WorkflowError("ต้องระบุผลครบ 4 ใบมีด (source = AI / BENCH / MANUAL)")
+        raise WorkflowError("ต้องระบุผลครบ 4 ใบมีด (source = AI / MANUAL)")
     with SessionLocal() as db:
         ins = db.get(VisionInspection, ins_id)
         if not ins:
@@ -331,10 +343,6 @@ def review(ins_id: str, decisions: dict[int, dict], actor: str, note: str | None
             d = decisions[b.blade]
             if d["source"] == "AI":
                 vb = b.pred_vb
-            elif d["source"] == "BENCH":
-                if not b.metrology:
-                    raise WorkflowError(f"B{b.blade} ไม่มีค่าวัดจาก optical bench")
-                vb = json.loads(b.metrology)["flank_wear_um"]
             else:
                 vb = float(d.get("vb_um") or -1)
                 if not 0 < vb < 1000:
@@ -342,12 +350,11 @@ def review(ins_id: str, decisions: dict[int, dict], actor: str, note: str | None
             b.final_vb, b.vb_source = round(float(vb), 1), d["source"]
             b.review = "CONFIRMED" if d["source"] == "AI" else "MEASURED"
             b.final_label = zone_code(b.final_vb)
-        # ตัดสินระดับดอกด้วยค่าเฉลี่ย 4 ใบ → ใบสั่งงาน 1 ใบต่อดอก (ทุกคมของดอกอยู่ในใบสั่งงานเดียวกัน)
+        # ตัดสินระดับดอกด้วยค่าเฉลี่ย 4 ใบ → ออกใบเบิกดอกทดแทน 1 ใบต่อการถอด (เครื่องรอดอกใหม่)
         fs = _final_summary(blades)
-        for b in blades:
-            b.replace_status = ORDER_STATUS[fs["verdict"]]
         ins.status, ins.reviewed_by, ins.reviewed_at, ins.note = "VERIFIED", actor, now, note
         ins.final_verdict = fs["verdict"]
+        ins.req_no, ins.req_status, ins.req_created_at = f"REQ-{ins_id.removeprefix('INS-')}", "OPEN", now
         db.commit()
         measured = [b for b in blades if b.review == "MEASURED"]
         tool = (_ctx(ins) or {}).get("tool_id") or "-"
@@ -357,78 +364,90 @@ def review(ins_id: str, decisions: dict[int, dict], actor: str, note: str | None
         for b in measured:
             obs.observe("tool_vision.ai_abs_error", abs(b.pred_vb - b.final_vb), source=b.vb_source)
     _audit("VISION_REVIEW", actor, f"M{ins.machine}", f"ยืนยัน {ins_id}: ยอมรับค่า AI {4 - len(measured)}/4 ใบ"
-           + (f", วัดจริง {', '.join(f'B{b.blade} {b.final_vb:.0f} µm (AI {b.pred_vb:.0f})' for b in measured)}" if measured else ""))
-    if fs["verdict"] != "OK":
-        over = f" · คมที่เกิน {VB_EOL:.0f} µm เฉพาะใบ: {', '.join(f'B{b}' for b in fs['over_limit'])}" if fs["over_limit"] else ""
-        _alarm("WARNING" if fs["verdict"] == "REPLACE" else "INFO", f"เปลี่ยนดอก M{ins.machine}/{tool}",
-               f"ผลตรวจ {ins_id} (ยืนยันโดย {actor}) ดอก {tool} ที่ถอดจาก M{ins.machine}: VB เฉลี่ย 4 ใบ {fs['mean_vb']} µm → "
-               + ("ต้องเปลี่ยน/ลับดอกก่อนใช้ต่อ" if fs["verdict"] == "REPLACE" else "ใกล้หมดอายุ ควรเปลี่ยนตามแผน")
-               + f" · คมที่สึกมากสุด B{fs['worst_blade']} {fs['worst_vb']} µm{over}", ins.machine, tool_ref=tool)
+           + (f", วัดจริง {', '.join(f'B{b.blade} {b.final_vb:.0f} µm (AI {b.pred_vb:.0f})' for b in measured)}" if measured else "")
+           + f" → ออกใบเบิกดอก {ins.req_no}")
+    over = f" · คมที่เกิน {VB_EOL:.0f} µm เฉพาะใบ: {', '.join(f'B{b}' for b in fs['over_limit'])}" if fs["over_limit"] else ""
+    _alarm("WARNING" if fs["verdict"] == "REPLACE" else "INFO", f"ใบเบิกดอก {ins.req_no} — M{ins.machine}/{tool}",
+           f"ผลตรวจ {ins_id} (ยืนยันโดย {actor}): VB เฉลี่ย 4 ใบ {fs['mean_vb']} µm → ดอกที่ถอด: {DISPOSITION[fs['verdict']]}"
+           f" · คมที่สึกมากสุด B{fs['worst_blade']} {fs['worst_vb']} µm{over} · M{ins.machine} รอเบิกดอกใหม่จากคลังแล้วติดตั้ง",
+           ins.machine, tool_ref=tool)
     return result
 
 
-# ---------------------------------------------------------------- ใบสั่งงานระดับดอก
-def _order(i: VisionInspection, blades: list[VisionBlade]) -> dict:
+# ---------------------------------------------------------------- ใบเบิกดอกทดแทน
+def _requisition(i: VisionInspection, blades: list[VisionBlade]) -> dict:
+    """ข้อมูลของใบเบิก 1 ใบ (หน้าเว็บแสดงและสร้าง PDF จากข้อมูลนี้) — ไม่มีรหัสภาพ/ค่าจริงของชุดข้อมูล"""
     ctx = _ctx(i) or {}
-    fs = _final_summary(blades)
-    st = {b.replace_status for b in blades}
-    status = "REPLACED" if st == {"REPLACED"} else "REQUIRED" if "REQUIRED" in st else "ADVISED" if "ADVISED" in st else "NONE"
-    done = [b for b in blades if b.replace_status == "REPLACED"]
+    fs = _final_summary(blades) or {}
+    verdict = i.final_verdict or fs.get("verdict")
     return dict(
-        inspection_id=i.id, machine=i.machine, machine_id=f"M{i.machine}", tool_ref=ctx.get("tool_id"),
-        priority="REQUIRED" if i.final_verdict == "REPLACE" else "ADVISED", status=status,
-        mean_vb=fs["mean_vb"] if fs else None, worst_blade=fs["worst_blade"] if fs else None,
-        over_limit=fs["over_limit"] if fs else [],
+        **_req_brief(i), inspection_id=i.id, machine=i.machine, machine_id=f"M{i.machine}", tool_ref=ctx.get("tool_id"),
+        cycle_id=i.cycle_id, requested_by=i.reviewed_by, verdict=verdict, disposition=DISPOSITION.get(verdict),
+        mean_vb=fs.get("mean_vb"), worst_blade=fs.get("worst_blade"), worst_vb=fs.get("worst_vb"), over_limit=fs.get("over_limit", []),
         blades=[dict(blade=b.blade, final_vb=b.final_vb, vb_source=b.vb_source, pred_vb=b.pred_vb, zone=b.final_label,
                      image_url=f"/api/v1/tool-vision/inspections/{i.id}/blades/{b.blade}/image")
                 for b in sorted(blades, key=lambda x: x.blade)],
-        removed_t_min=ctx.get("t_min"), removed_by=ctx.get("removed_by"), rul_recommendation=ctx.get("recommendation"),
-        captured_at=_iso(i.captured_at), reviewed_by=i.reviewed_by, reviewed_at=_iso(i.reviewed_at),
-        replaced_by=done[0].replaced_by if done else None, replaced_at=_iso(done[0].replaced_at) if done else None)
+        removed_t_min=ctx.get("t_min"), removed_by=ctx.get("removed_by"), removed_at=ctx.get("removed_at"),
+        removal_reason=ctx.get("reason"), rul_recommendation=ctx.get("recommendation"), rul_model_version=ctx.get("model_version"),
+        vision_model_version=i.model_version, captured_at=_iso(i.captured_at), reviewed_at=_iso(i.reviewed_at), note=i.note)
 
 
-def replacements() -> dict:
-    """ใบสั่งงาน 1 ใบ = ดอก 1 ดอกที่ถอดมา: ต้องเปลี่ยน (VB เฉลี่ย ≥ 140 µm) / ควรเปลี่ยน (103–140 µm) + VB รายใบ"""
+def requisitions() -> dict:
+    """ใบเบิกดอกทดแทน 1 ใบต่อการถอด 1 ครั้ง: open = รอเบิก / เบิกแล้วรอติดตั้ง · done = ติดตั้งแล้ว"""
     with SessionLocal() as db:
-        rows = (db.query(VisionBlade, VisionInspection).join(VisionInspection, VisionBlade.inspection_id == VisionInspection.id)
-                .filter(VisionBlade.replace_status.in_(["REQUIRED", "ADVISED", "REPLACED"]), VisionInspection.status != "ARCHIVED")
-                .order_by(VisionInspection.captured_at.desc()).all())
-        by_ins: dict[str, tuple[VisionInspection, list[VisionBlade]]] = {}
-        for b, i in rows:
-            by_ins.setdefault(i.id, (i, []))[1].append(b)
-        orders = [_order(i, bl) for i, bl in by_ins.values()]
-    open_ = [o for o in orders if o["status"] in ("REQUIRED", "ADVISED")]
-    return dict(open=sorted(open_, key=lambda o: (o["priority"] != "REQUIRED", o["machine_id"])),
-                done=[o for o in orders if o["status"] == "REPLACED"])
+        items = (db.query(VisionInspection).filter(VisionInspection.req_no.isnot(None), VisionInspection.status != "ARCHIVED")
+                 .order_by(VisionInspection.req_created_at.desc()).all())
+        blades: dict[str, list[VisionBlade]] = {}
+        for b in db.query(VisionBlade).filter(VisionBlade.inspection_id.in_([i.id for i in items])).all():
+            blades.setdefault(b.inspection_id, []).append(b)
+        out = [_requisition(i, blades.get(i.id, [])) for i in items]
+    return dict(open=[r for r in out if r["status"] in REQ_OPEN], done=[r for r in out if r["status"] == "INSTALLED"])
 
 
-def mark_replaced(ins_id: str, actor: str) -> dict:
-    """ช่างบันทึกว่าเปลี่ยน/ลับดอกแล้ว — ปิดใบสั่งงานของดอกนั้นทั้งใบ"""
+def _advance(ins_id: str, expect: str, new: str, actor: str) -> VisionInspection:
     with SessionLocal() as db:
         ins = db.get(VisionInspection, ins_id)
-        blades = db.query(VisionBlade).filter(VisionBlade.inspection_id == ins_id,
-                                              VisionBlade.replace_status.in_(["REQUIRED", "ADVISED"])).all()
-        if not ins or ins.status == "ARCHIVED" or not blades:
-            raise WorkflowError("ไม่มีใบสั่งงานนี้ (หรือเปลี่ยนไปแล้ว)")
+        if not ins or not ins.req_no:
+            raise WorkflowError("ไม่พบใบเบิกนี้")
+        if ins.req_status != expect:
+            raise WorkflowError(f"ใบเบิก {ins.req_no} อยู่ในสถานะ {ins.req_status} แล้ว")
         now = datetime.utcnow()
-        for b in blades:
-            b.replace_status, b.replaced_by, b.replaced_at = "REPLACED", actor, now
+        ins.req_status = new
+        if new == "ISSUED":
+            ins.issued_by, ins.issued_at = actor, now
+        else:
+            ins.installed_by, ins.installed_at = actor, now
         db.commit()
-        machine, tool = ins.machine, (_ctx(ins) or {}).get("tool_id")
-    _audit("TOOL_SERVICED", actor, f"M{machine}", f"เปลี่ยน/ลับดอก {tool} ตามใบสั่งงาน {ins_id}")
-    return dict(inspection_id=ins_id, status="REPLACED")
+        db.refresh(ins)
+        db.expunge(ins)
+        return ins
 
 
-def replacements_csv() -> str:
-    r = replacements()
-    cols = ["machine_id", "tool_ref", "priority", "status", "mean_vb", "B1", "B2", "B3", "B4", "worst_blade", "over_limit",
-            "inspection_id", "removed_t_min", "rul_recommendation", "removed_by", "captured_at", "reviewed_by",
-            "replaced_by", "replaced_at"]
+def issue_requisition(ins_id: str, actor: str) -> dict:
+    """รับดอกทดแทนจากคลังเครื่องมือแล้ว (OPEN → ISSUED)"""
+    ins = _advance(ins_id, "OPEN", "ISSUED", actor)
+    tool = (_ctx(ins) or {}).get("tool_id")
+    _audit("TOOL_ISSUED", actor, f"M{ins.machine}", f"รับดอกทดแทนจากคลังตามใบเบิก {ins.req_no} (ดอก {tool} ที่ถอดจาก M{ins.machine})")
+    return dict(req_no=ins.req_no, status=ins.req_status, inspection_id=ins_id)
+
+
+def install_requisition(ins_id: str, actor: str) -> dict:
+    """ติดตั้งดอกใหม่บนเครื่องแล้ว (ISSUED → INSTALLED) — router สั่ง Machine Monitoring เริ่มรอบใหม่ในสถานะหยุดชั่วคราว"""
+    ins = _advance(ins_id, "ISSUED", "INSTALLED", actor)
+    _audit("TOOL_INSTALLED", actor, f"M{ins.machine}", f"ติดตั้งดอกใหม่บน M{ins.machine} ตามใบเบิก {ins.req_no}")
+    return dict(req_no=ins.req_no, status=ins.req_status, inspection_id=ins_id, machine=ins.machine, cycle_id=ins.cycle_id)
+
+
+def requisitions_csv() -> str:
+    r = requisitions()
+    cols = ["req_no", "status", "machine_id", "tool_ref", "verdict", "disposition", "mean_vb", "B1", "B2", "B3", "B4",
+            "worst_blade", "over_limit", "inspection_id", "removed_t_min", "rul_recommendation", "removed_by",
+            "requested_by", "created_at", "issued_by", "issued_at", "installed_by", "installed_at"]
     lines = [",".join(cols)]
     for o in r["open"] + r["done"]:
         row = dict(o, **{f"B{b['blade']}": b["final_vb"] for b in o["blades"]},
                    over_limit=" ".join(f"B{b}" for b in o["over_limit"]), worst_blade=f"B{o['worst_blade']}" if o["worst_blade"] else None)
-        lines.append(",".join("" if row.get(c) is None else str(row.get(c)) for c in cols))
+        lines.append(",".join("" if row.get(c) is None else str(row.get(c)).replace(",", " ") for c in cols))
     return "\n".join(lines) + "\n"
 
 
@@ -471,13 +490,43 @@ def _pool(db) -> list[tuple[VisionBlade, VisionInspection]]:
     return out
 
 
+def _attempted_blade_ids(db) -> set[str]:
+    """ใบที่เคยถูกส่งไปฝึกในงานที่ฝึกเสร็จแล้ว (candidate รอตัดสิน / ถูก reject) — ไม่นับเป็นข้อมูลใหม่ของรอบถัดไป
+    (ใบของงานที่ promote แล้วออกจาก pool เอง · งานที่ล้มเหลวไม่นับ → ลองใหม่ได้)"""
+    out: set[str] = set()
+    for (ids,) in db.query(VisionTrainingJob.label_blade_ids).filter(VisionTrainingJob.status.in_(["DONE", "REJECTED"])):
+        out.update(json.loads(ids or "[]"))
+    return out
+
+
+def new_tool_count(pool_blades, attempted: set[str]) -> int:
+    """จำนวนดอก (รายการตรวจ) ใน pool ที่มีใบซึ่งยังไม่เคยถูกลองฝึก"""
+    return len({b.inspection_id for b in pool_blades if b.id not in attempted})
+
+
 def training_pool() -> dict:
     with SessionLocal() as db:
         pool = [b for b, _ in _pool(db)]
+        attempted = _attempted_blade_ids(db)
         running = db.query(func.count(VisionTrainingJob.id)).filter(VisionTrainingJob.status.in_(["QUEUED", "RUNNING"])).scalar() or 0
+        awaiting = db.query(func.count(VisionTrainingJob.id)).filter(VisionTrainingJob.status == "DONE").scalar() or 0
     large = sum(abs(b.pred_vb - b.final_vb) > LARGE_ERROR_UM for b in pool if b.pred_vb is not None)
-    return dict(n_labels=len(pool), n_large_error=large, large_error_um=LARGE_ERROR_UM,
-                suggest_retrain=large >= RETRAIN_SUGGEST_LABELS, threshold=RETRAIN_SUGGEST_LABELS, job_running=running > 0)
+    return dict(n_labels=len(pool), n_tools=len({b.inspection_id for b in pool}), n_new_tools=new_tool_count(pool, attempted),
+                min_new_tools=AUTO_RETRAIN_MIN_TOOLS, n_large_error=large, large_error_um=LARGE_ERROR_UM,
+                job_running=running > 0, awaiting_decision=awaiting > 0)
+
+
+_auto_lock = asyncio.Lock()
+
+
+async def maybe_auto_retrain() -> dict | None:
+    """เริ่ม retrain อัตโนมัติเมื่อค่าวัดจริงจากดอกใหม่ครบ AUTO_RETRAIN_MIN_TOOLS ดอก (เรียกหลังผู้ตรวจยืนยันผล / หลังตัดสิน candidate)
+    ไม่เริ่มถ้ามีงานกำลังฝึก หรือมี candidate รอผู้ดูแลตัดสิน — ผู้ใช้ไม่ต้องกดเริ่มเอง แต่การนำไปใช้ยังต้องผ่าน gate + ผู้ดูแลกด promote"""
+    async with _auto_lock:
+        p = await asyncio.to_thread(training_pool)
+        if p["job_running"] or p["awaiting_decision"] or p["n_new_tools"] < AUTO_RETRAIN_MIN_TOOLS or not registry.ready:
+            return None
+        return await start_retrain(AUTO_ACTOR)
 
 
 async def start_retrain(actor: str, epochs: int = 15) -> dict:
@@ -493,8 +542,9 @@ async def start_retrain(actor: str, epochs: int = 15) -> dict:
         pool = _pool(db)
         if not pool:
             raise WorkflowError("ยังไม่มีค่า VB ที่วัดจริงใหม่ (ค่าที่ยอมรับจาก AI ไม่ใช้ฝึก)")
-        labels = [dict(blade_id=b.id, image_key=b.image_key, vb_um=b.final_vb, reviewed_at=_iso(i.reviewed_at))
-                  for b, i in pool]
+        labels = [dict(blade_id=b.id, inspection_id=b.inspection_id, image_key=b.image_key, vb_um=b.final_vb,
+                       reviewed_at=_iso(i.reviewed_at)) for b, i in pool]
+        n_tools = len({b.inspection_id for b, _ in pool})
         job = VisionTrainingJob(id=f"VTR-{datetime.utcnow():%y%m%d%H%M%S}", requested_by=actor,
                                 base_version=registry.meta["version"], n_labels=len(labels),
                                 n_corrected=sum(abs(b.pred_vb - b.final_vb) > LARGE_ERROR_UM for b, _ in pool),
@@ -512,8 +562,9 @@ async def start_retrain(actor: str, epochs: int = 15) -> dict:
         j = db.get(VisionTrainingJob, job_id)
         j.arq_job_id = arq_job.job_id if arq_job else None
         db.commit()
-    _audit("VISION_RETRAIN_REQUESTED", actor, "tool-vision", f"{job_id}: retrain จากค่า VB ที่วัดจริง {len(labels)} ใบ")
-    return dict(job_id=job_id, n_labels=len(labels))
+    _audit("VISION_RETRAIN_REQUESTED", actor, "tool-vision",
+           f"{job_id}: retrain อัตโนมัติ — ค่า VB ที่วัดจริงจาก {n_tools} ดอก ({len(labels)} ใบ) ครบเกณฑ์ {AUTO_RETRAIN_MIN_TOOLS} ดอกใหม่")
+    return dict(job_id=job_id, n_labels=len(labels), n_tools=n_tools)
 
 
 async def refresh_jobs() -> list[dict]:
@@ -672,7 +723,7 @@ def _audit(event: str, actor: str, target: str, summary: str):
         pass
 
 
-def _alarm(severity: str, title: str, message: str, machine: int, action_url: str = "/tool-vision?tab=replace",
+def _alarm(severity: str, title: str, message: str, machine: int, action_url: str = "/tool-vision?tab=requisition",
            tool_ref: str = "blades"):
     try:
         from app.features.alarms.service import trigger_alarm

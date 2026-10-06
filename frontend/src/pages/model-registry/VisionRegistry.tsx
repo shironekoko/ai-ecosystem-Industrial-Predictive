@@ -219,7 +219,7 @@ export const VisionRegistry: React.FC = () => {
         )}
       </Card>
 
-      <Card title="งาน retrain (trainer-worker, GPU)" right={<Link to="/tool-vision?tab=model" className="text-xs text-indigo-600 font-semibold">เริ่ม retrain / promote ที่ Tool Inspection →</Link>}>
+      <Card title="งาน retrain (trainer-worker, GPU)" right={<Link to="/tool-vision?tab=model" className="text-xs text-indigo-600 font-semibold">สถานะ retrain / promote ที่ Tool Inspection →</Link>}>
         {jobs.length === 0 ? (
           <p className="text-xs text-gray-400">ยังไม่มีงาน retrain</p>
         ) : (

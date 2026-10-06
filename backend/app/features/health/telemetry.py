@@ -3,7 +3,7 @@
 - system.component.*            การเชื่อมต่อ DB / Redis / MinIO (ชุดเดียวกับ /health/components)
 - model.ready                   แบบจำลองที่โหลดอยู่ (tool-rul / tool-vision + เวอร์ชัน)
 - tool_rul.*                    สถานะสตรีมรายเครื่อง: RUL P50/P10, % อายุที่ใช้, ระดับคำแนะนำ, drift อินพุต, ผลประเมินหลังถอดดอก
-- tool_vision.*                 งานรอผู้ตรวจ, ใบสั่งงานค้าง, pool ค่าที่วัดจริงสำหรับ retrain, MAE ของ AI เทียบค่าวัดจริง (สะสม)
+- tool_vision.*                 งานรอผู้ตรวจ, ใบเบิกดอกค้าง, pool ค่าที่วัดจริงสำหรับ retrain, MAE ของ AI เทียบค่าวัดจริง (สะสม)
 
 ไม่มี VB จริงของดอกที่ยังอยู่บนเครื่อง — ค่าจริงมีเฉพาะในผลประเมินหลังถอดดอก เหมือนหน้า Reports
 """
@@ -96,12 +96,13 @@ def register_gauges() -> None:
     # ── Vision ──
     stats = _cached(vision.stats)
     pool = _cached(vision.training_pool)
-    orders = _cached(vision.replacements)
+    reqs = _cached(vision.requisitions)
     g("tool_vision.pending_reviews", "งานตรวจใบมีดที่รอผู้ตรวจยืนยัน", "", lambda: [(stats()["pending_review"], {})])
-    g("tool_vision.open_work_orders", "ใบสั่งเปลี่ยน/ลับดอกที่ยังไม่ปิด", "", lambda: [
-        (sum(o["priority"] == p for o in orders()["open"]), {"priority": p}) for p in ("REQUIRED", "ADVISED")])
-    g("tool_vision.retrain_pool", "ค่า VB ที่วัดจริงและยังไม่เคยใช้ฝึก", "", lambda: [
-        (pool()["n_labels"], {"kind": "all"}), (pool()["n_large_error"], {"kind": "large_error"})])
+    g("tool_vision.open_requisitions", "ใบเบิกดอกที่ยังไม่ติดตั้ง แยกตามสถานะ (OPEN = รอเบิก, ISSUED = เบิกแล้วรอติดตั้ง)", "", lambda: [
+        (sum(r["status"] == st for r in reqs()["open"]), {"status": st}) for st in ("OPEN", "ISSUED")])
+    g("tool_vision.retrain_pool", "ค่า VB ที่วัดจริงและยังไม่เคยใช้ฝึก (ใบ) + ดอกใหม่ที่นับเข้าเกณฑ์ retrain อัตโนมัติ", "", lambda: [
+        (pool()["n_labels"], {"kind": "all"}), (pool()["n_large_error"], {"kind": "large_error"}),
+        (pool()["n_new_tools"], {"kind": "new_tools"})])
     g("tool_vision.measured_mae", "MAE สะสมของ AI เทียบค่า VB ที่วัดจริง (ทุกใบที่วัด)", "um",
       lambda: [(stats()["mae_um"], {})] if stats()["mae_um"] is not None else [])
     g("tool_vision.measured_blades", "จำนวนใบมีดที่มีค่าวัดจริง", "", lambda: [(stats()["measured_blades"], {})])

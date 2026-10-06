@@ -1,5 +1,5 @@
 """Tool Vision API — วัดรอยสึก VB (µm) ของใบมีด 4 ใบของดอกที่ถอดจากเครื่องเมื่อ Machine Monitoring แจ้งหมดอายุ
-+ การยืนยัน/วัดจริงของผู้ตรวจ + ใบสั่งเปลี่ยนใบมีดให้วิศวกร + retrain
++ การยืนยัน/วัดจริงของผู้ตรวจ + ใบเบิกดอกทดแทน + retrain อัตโนมัติ
 
 ปกติรายการตรวจถูกสร้างอัตโนมัติเมื่อผู้ควบคุมกดถอดดอกที่ Machine Monitoring (listener ใน main.py)
 - GET  /tool-vision/stations                         สถานีตรวจของแต่ละเครื่อง (+ สถานะ RUL ของดอกบนเครื่อง)
@@ -7,19 +7,22 @@
 - GET  /tool-vision/inspections?status=&machine=     รายการตรวจ
 - GET  /tool-vision/inspections/{id}                 รายละเอียด 4 ใบ
 - GET  /tool-vision/inspections/{id}/blades/{b}/image  ภาพจาก MinIO
-- POST /tool-vision/inspections/{id}/blades/{b}/measure  วัดใบมีดบน optical bench (เปิดเผยค่าวัดของใบนั้น)
-- POST /tool-vision/inspections/{id}/review          ผู้ตรวจสรุปค่า VB ครบ 4 ใบ (AI / BENCH / MANUAL)
-- GET  /tool-vision/replacements · /replacements/export/csv · POST /replacements/{ins_id}/done   ใบสั่งงานระดับดอก
+- GET  /tool-vision/inspections/{id}/blades/{b}/measurement  ผลวัด VB ของใบนั้น = ค่าเริ่มต้นของช่องกรอกค่าที่วัด (เฉพาะที่รอตรวจ)
+- POST /tool-vision/inspections/{id}/review          ผู้ตรวจสรุปค่า VB ครบ 4 ใบ (AI / MANUAL)
+- GET  /tool-vision/requisitions · /requisitions/export/csv   ใบเบิกดอกทดแทน (หน้าเว็บสร้าง PDF จากข้อมูลนี้)
+- POST /tool-vision/requisitions/{ins_id}/issue · /install   รับดอกจากคลังแล้ว · ติดตั้งแล้ว (Machine Monitoring เริ่มรอบใหม่แบบหยุดชั่วคราว)
 - GET  /tool-vision/stats                            AI เทียบผลที่คนยืนยัน
 - GET  /tool-vision/model · /model/versions (มี history การฝึก) · POST /model/reload · POST /model/activate
-- GET  /tool-vision/training/pool · /training/jobs · POST /training/start · POST /training/jobs/{id}/{promote|reject}
+- GET  /tool-vision/training/pool · /training/jobs · POST /training/jobs/{id}/{promote|reject}
+  retrain เริ่มเองเมื่อค่าวัดจริงจากดอกใหม่ครบเกณฑ์ (หลัง /review และหลัง promote/reject) — ไม่มีปุ่มเริ่มด้วยมือ
 
-ทุก endpoint ต้องล็อกอิน (Bearer token) · /model/activate, /model/reload, /training/start, /training/jobs/{id}/… เฉพาะ admin
+ทุก endpoint ต้องล็อกอิน (Bearer token) · /model/activate, /model/reload, /training/jobs/{id}/… เฉพาะ admin
 ผู้ทำรายการใน audit = ผู้ใช้ของ token (ไม่รับ actor จาก body)
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
@@ -32,6 +35,7 @@ from .registry import registry
 
 router = APIRouter(prefix="/tool-vision", tags=["Tool Vision (blade inspection)"],
                    dependencies=[Depends(get_current_active_user)])
+log = logging.getLogger(__name__)
 
 
 def _run(fn, *a, **k):
@@ -91,9 +95,14 @@ async def blade_image(ins_id: str, blade: int):
     return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
+@router.get("/inspections/{ins_id}/blades/{blade}/measurement")
+async def blade_measurement(ins_id: str, blade: int):
+    return await asyncio.to_thread(_run, svc.blade_measurement, ins_id, blade)
+
+
 class BladeDecision(BaseModel):
     blade: int = Field(..., ge=1, le=4)
-    source: str = Field("AI", description="AI = ยอมรับค่าที่ AI วัด · BENCH = ค่าจาก optical bench · MANUAL = ค่าที่วัดเอง")
+    source: str = Field("AI", description="AI = ยอมรับค่าที่ AI วัด · MANUAL = ค่าที่ผู้ตรวจวัดจริงแล้วกรอก")
     vb_um: float | None = Field(None, description="VB (µm) — ใช้เมื่อ source = MANUAL")
 
 
@@ -102,33 +111,48 @@ class ReviewBody(BaseModel):
     note: str | None = None
 
 
-@router.post("/inspections/{ins_id}/blades/{blade}/measure")
-async def measure(ins_id: str, blade: int, user: User = Depends(get_current_active_user)):
-    return await asyncio.to_thread(_run, svc.measure, ins_id, blade, actor_name(user))
-
-
 @router.post("/inspections/{ins_id}/review")
 async def review(ins_id: str, body: ReviewBody, user: User = Depends(get_current_active_user)):
     decisions = {d.blade: dict(source=d.source.upper(), vb_um=d.vb_um) for d in body.blades}
-    return await asyncio.to_thread(_run, svc.review, ins_id, decisions, actor_name(user), body.note)
+    result = await asyncio.to_thread(_run, svc.review, ins_id, decisions, actor_name(user), body.note)
+    await _auto_retrain()
+    return result
 
 
-@router.get("/replacements")
-async def replacements():
-    return await asyncio.to_thread(svc.replacements)
+async def _auto_retrain():
+    """มีค่าวัดจริงใหม่ / ตัดสิน candidate แล้ว → เริ่ม retrain อัตโนมัติถ้าครบเกณฑ์ (เริ่มไม่ได้ก็ไม่กระทบผลของ request)"""
+    try:
+        await svc.maybe_auto_retrain()
+    except Exception as e:
+        log.warning("auto retrain ไม่เริ่ม: %s", e)
 
 
-@router.get("/replacements/export/csv")
-async def replacements_csv():
-    data = await asyncio.to_thread(svc.replacements_csv)
+@router.get("/requisitions")
+async def requisitions():
+    return await asyncio.to_thread(svc.requisitions)
+
+
+@router.get("/requisitions/export/csv")
+async def requisitions_csv():
+    data = await asyncio.to_thread(svc.requisitions_csv)
     return Response(content=data, media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=blade_replacements.csv"})
+                    headers={"Content-Disposition": "attachment; filename=tool_requisitions.csv"})
 
 
-@router.post("/replacements/{ins_id}/done")
-async def replaced(ins_id: str, user: User = Depends(get_current_active_user)):
-    """ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก)"""
-    return await asyncio.to_thread(_run, svc.mark_replaced, ins_id, actor_name(user))
+@router.post("/requisitions/{ins_id}/issue")
+async def requisition_issue(ins_id: str, user: User = Depends(get_current_active_user)):
+    return await asyncio.to_thread(_run, svc.issue_requisition, ins_id, actor_name(user))
+
+
+@router.post("/requisitions/{ins_id}/install")
+async def requisition_install(ins_id: str, user: User = Depends(get_current_active_user)):
+    """ติดตั้งดอกใหม่แล้ว → เครื่องเริ่มรอบการใช้งานใหม่ในสถานะหยุดชั่วคราว (ผู้ควบคุมกดเริ่มตัดเองที่ Machine Monitoring)"""
+    from app.features.tool_life.streamer import manager
+
+    res = await asyncio.to_thread(_run, svc.install_requisition, ins_id, actor_name(user))
+    stream = manager.streams.get(res["machine"])
+    res["machine_ready"] = bool(stream and await stream.install_new_tool(actor_name(user), res["req_no"], res["cycle_id"]))
+    return res
 
 
 @router.get("/stats")
@@ -183,14 +207,8 @@ async def training_jobs():
         raise HTTPException(503, f"ตรวจสถานะงานไม่ได้ (Redis/ARQ): {e}")
 
 
-@router.post("/training/start")
-async def training_start(user: User = Depends(get_current_admin_user)):
-    try:
-        return await svc.start_retrain(actor_name(user))
-    except svc.WorkflowError as e:
-        raise HTTPException(409, str(e))
-
-
 @router.post("/training/jobs/{job_id}/{action}")
 async def training_decide(job_id: str, action: str, user: User = Depends(get_current_admin_user)):
-    return await asyncio.to_thread(_run, svc.decide, job_id, action, actor_name(user))
+    result = await asyncio.to_thread(_run, svc.decide, job_id, action, actor_name(user))
+    await _auto_retrain()                       # ระหว่างรอตัดสินอาจมีค่าวัดจากดอกใหม่ครบเกณฑ์แล้ว
+    return result

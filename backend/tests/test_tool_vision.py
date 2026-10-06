@@ -86,12 +86,6 @@ def test_training_samples_never_include_machine_tools():
 
 
 @needs_data
-def test_metrology_comes_from_bench_measurements():
-    m = nd.metrology("T8R1B1")
-    assert set(m) == {"flank_wear_um", "gaps_um", "overhang_um"}
-
-
-@needs_data
 def test_vb_samples_split_by_tool():
     """ภาพของดอกเดียวกันอยู่ฝั่งเดียว (แบ่งตามดอก ไม่ใช่ตามภาพ) และทุกภาพมีค่า VB จาก optical bench"""
     tr, va, te = (nd.vb_samples(t) for t in (nd.BASE_TRAIN_TOOLS, nd.VAL_TOOLS, nd.HELD_OUT_TOOLS))
@@ -132,7 +126,7 @@ def test_uncertainty_from_out_of_fold_residuals():
 
 
 def test_api_payload_has_no_dataset_label():
-    """สิ่งที่ส่งไปหน้าเว็บมีค่าที่ AI วัด แต่ไม่มี label จริง/รหัสภาพ และไม่มีค่าที่ bench วัดจนกว่าผู้ตรวจสั่งวัด"""
+    """สิ่งที่ส่งไปหน้าเว็บมีค่าที่ AI วัด แต่ไม่มี label จริง/รหัสภาพ/ค่า VB จริงของชุดข้อมูล (ผู้ตรวจวัดเองแล้วกรอก)"""
     from app.features.tool_vision.models import VisionBlade, VisionInspection
     from app.features.tool_vision.service import _blade_dict, _ins_dict
 
@@ -145,17 +139,16 @@ def test_api_payload_has_no_dataset_label():
     blade = VisionBlade(id="INS-T-B1", inspection_id="INS-T", blade=1, image_key="INS-T/B1.jpg", image_ref="T8R13B1",
                         pred_vb=131.2, vb_lo=118.0, vb_hi=158.0, pred_label="accel", confidence=0.55,
                         probs=json.dumps({"normal": 0.1, "accel": 0.55, "eol": 0.35}),
-                        metrology=json.dumps({"flank_wear_um": 137.48, "gaps_um": 105.9, "overhang_um": 28.0}),
-                        review="PENDING", replace_status="NONE")
+                        review="PENDING")
     d = _ins_dict(ins, [blade])
     payload = json.dumps(d)
     assert "T8R13B1" not in payload and "image_label" not in payload and "image_ref" not in payload
-    assert "137.48" not in payload and d["blades"][0]["metrology"] is None            # ค่าจริงยังไม่ถูกเปิดเผย
+    assert "metrology" not in payload and "flank_wear" not in payload                # ไม่มีค่า VB จริงของชุดข้อมูล
     assert d["tool_ref"] == "T3" and d["rul_context"]["t_min"] == 50.9      # ดอกเดียวกับที่ Machine Monitoring สตรีม
     assert d["blades"][0]["near_threshold"] and d["ai_summary"]["mean_vb"] == 131.2   # ช่วง 118–158 คร่อมเกณฑ์ 140 µm
     assert d["low_confidence"] and d["final_summary"] is None             # ค่าเฉลี่ยระดับดอกก็คร่อมเกณฑ์ → แนะนำวัด
-    blade.review, blade.vb_source, blade.final_vb = "MEASURED", "BENCH", 137.5
-    assert _blade_dict(blade)["metrology"]["flank_wear_um"] == 137.48       # สั่งวัดแล้วจึงเห็นค่า
+    blade.review, blade.vb_source, blade.final_vb = "MEASURED", "MANUAL", 137.5
+    assert _blade_dict(blade)["final_vb"] == 137.5 and _blade_dict(blade)["vb_source"] == "MANUAL"   # ค่าที่ผู้ตรวจกรอก
     assert _blade_dict(blade)["image_url"].endswith("/inspections/INS-T/blades/1/image")
 
 
@@ -206,3 +199,85 @@ def test_vb_model_ensemble_crop_and_normalization():
                     state_dict=old.state_dict()), buf)
     m, ck = vm.load_checkpoint(buf.getvalue())
     assert not isinstance(m, vm.Ensemble) and m.norm_mode == "imagenet" and vm.input_spec(ck["config"])["crop"] == (0.0, 1.0)
+
+
+def test_retrain_holdout_splits_whole_tools():
+    """ชุดตรวจ gate ของ retrain = ดอกล่าสุดทั้งดอก — ใบของดอกเดียวกันไม่อยู่ทั้งในชุดฝึกและชุดตรวจ"""
+    from app.features.tool_vision.worker_tasks import split_recent
+
+    labels = [dict(blade_id=f"INS-{i}-B{b}", inspection_id=f"INS-{i}", vb_um=120.0, reviewed_at=f"2026-10-0{i}T00:00:00Z")
+              for i in (1, 2, 3) for b in (1, 2, 3, 4)]
+    train, held = split_recent(labels)
+    assert {d["inspection_id"] for d in held} == {"INS-3"} and len(held) == 4           # 3 ดอก → กัน 1 ดอกล่าสุด
+    assert not {d["inspection_id"] for d in train} & {d["inspection_id"] for d in held}
+    train, held = split_recent(labels[:8])
+    assert held == [] and len(train) == 8                                                 # 2 ดอก: ยังไม่มีชุดตรวจ
+    old = [{k: v for k, v in d.items() if k != "inspection_id"} for d in labels]          # งานเก่าไม่มี inspection_id
+    assert {d["blade_id"][:5] for d in split_recent(old)[1]} == {"INS-3"}
+
+
+def test_auto_retrain_counts_new_tools_not_images():
+    """เกณฑ์ retrain อัตโนมัตินับดอกใหม่ (4 ใบ = 1 ดอก) และไม่นับใบที่เคยถูกลองฝึกในงานที่ถูก reject / รอตัดสิน"""
+    from types import SimpleNamespace
+
+    from app.features.tool_vision.service import AUTO_RETRAIN_MIN_TOOLS, new_tool_count
+
+    pool = [SimpleNamespace(id=f"INS-{i}-B{b}", inspection_id=f"INS-{i}") for i in (1, 2, 3) for b in (1, 2, 3, 4)]
+    assert new_tool_count(pool, set()) == 3 >= AUTO_RETRAIN_MIN_TOOLS
+    assert new_tool_count(pool, {f"INS-1-B{b}" for b in (1, 2, 3, 4)}) == 2             # ดอก 1 เคยลองฝึกแล้ว
+    assert new_tool_count(pool[:8], set()) == 2 < AUTO_RETRAIN_MIN_TOOLS                  # 8 ภาพจาก 2 ดอก ยังไม่ถึงเกณฑ์
+
+
+def test_auto_retrain_starts_only_when_threshold_met(monkeypatch):
+    """เริ่มเองเมื่อดอกใหม่ครบเกณฑ์ · ไม่เริ่มซ้อนงานที่กำลังฝึก หรือระหว่างมี candidate รอผู้ดูแลตัดสิน"""
+    import asyncio
+
+    from app.features.tool_vision import service as svc
+
+    started = []
+
+    async def fake_start(actor, epochs=15):
+        started.append(actor)
+        return dict(job_id="VTR-x")
+
+    monkeypatch.setattr(svc, "start_retrain", fake_start)
+    monkeypatch.setattr(type(svc.registry), "ready", property(lambda self: True))
+    base = dict(n_new_tools=svc.AUTO_RETRAIN_MIN_TOOLS, job_running=False, awaiting_decision=False)
+    for pool, expect in ((base, 1), (dict(base, n_new_tools=svc.AUTO_RETRAIN_MIN_TOOLS - 1), 0),
+                         (dict(base, job_running=True), 0), (dict(base, awaiting_decision=True), 0)):
+        started.clear()
+        monkeypatch.setattr(svc, "training_pool", lambda pool=pool: pool)
+        asyncio.run(svc.maybe_auto_retrain())
+        assert len(started) == expect, pool
+    assert svc.AUTO_ACTOR == "auto-retrain"
+
+
+def test_requisition_payload_and_disposition():
+    """ใบเบิก 1 ใบต่อการถอด: การจัดการดอกที่ถอดตาม VB เฉลี่ย 4 ใบ · ไม่มีรหัสภาพ/ค่าจริงของชุดข้อมูล"""
+    from app.features.tool_vision.models import VisionBlade, VisionInspection
+    from app.features.tool_vision.service import DISPOSITION, _requisition
+
+    ins = VisionInspection(id="INS-261006-ABC123", machine=2, seq=1, source="BENCH_DATASET", source_tool=9, source_run=13,
+                           trigger="RUL_EOL", cycle_id="M2-T6-x", captured_by="t", captured_at=datetime(2026, 10, 6),
+                           rul_context=json.dumps(dict(tool_id="T6", t_min=77.9, reason="REPLACED_BY_OPERATOR", removed_by="op",
+                                                       recommendation="REPLACE_NOW", model_version="tool-rul-gru-1.0.0")),
+                           model_version="v2", ai_verdict="MONITOR", status="VERIFIED", final_verdict="MONITOR", reviewed_by="qc",
+                           reviewed_at=datetime(2026, 10, 6, 1), req_no="REQ-261006-ABC123", req_status="OPEN",
+                           req_created_at=datetime(2026, 10, 6, 1))
+    blades = [VisionBlade(id=f"INS-261006-ABC123-B{b}", inspection_id=ins.id, blade=b, image_key="k", image_ref=f"T9R13B{b}",
+                          pred_vb=v, pred_label="accel", confidence=0.6, probs="{}", review="CONFIRMED", final_vb=v,
+                          vb_source="AI", final_label="accel") for b, v in zip((1, 2, 3, 4), (145.5, 131.7, 144.9, 134.2))]
+    r = _requisition(ins, blades)
+    assert r["req_no"] == "REQ-261006-ABC123" and r["status"] == "OPEN" and r["tool_ref"] == "T6" and r["machine_id"] == "M2"
+    assert r["verdict"] == "MONITOR" and r["disposition"] == DISPOSITION["MONITOR"] and r["mean_vb"] == 139.1
+    assert r["over_limit"] == [1, 3] and r["rul_model_version"] == "tool-rul-gru-1.0.0"
+    assert "T9R13" not in json.dumps(r)                                                # ไม่มีรหัสภาพของชุดข้อมูล
+    assert set(DISPOSITION) == {"OK", "MONITOR", "REPLACE"}
+
+
+@needs_data
+def test_measured_vb_is_bench_flank_wear():
+    """ค่าเริ่มต้นของช่อง "กรอกค่าที่วัด" = flank wear ที่ optical bench วัดของภาพนั้น (ไม่ใช่ค่าที่ AI ทาย)"""
+    df = nd.vb_samples(nd.HELD_OUT_TOOLS)
+    r = df.iloc[0]
+    assert nd.measured_vb(r.id) == pytest.approx(r.vb_um) and nd.measured_vb("T99R1B1") is None

@@ -77,6 +77,7 @@ class MachineStream:
         self.state = "IDLE"
         self.cycle_id: str | None = None              # 1 รอบการใช้งานดอก (ติดตั้ง → ถอด) — ใช้เชื่อมกับงานตรวจใบมีด
         self.inspection: dict | None = None           # ผลตรวจใบมีดของรอบนี้ (จาก listener)
+        self.installed: dict | None = None            # ติดตั้งดอกใหม่ตามใบเบิก (รอผู้ควบคุมกดเริ่มตัด)
         self.idx = 0
         self.features = FeatureState(self.machine)
         self.tracker = EOLTracker()
@@ -89,7 +90,6 @@ class MachineStream:
         self.started_at: str | None = None
         self.completed: dict | None = None
         self.evaluation: dict | None = None
-        self.n_runs = len(ds.schedule(self.tool)[1])
         self._deadline: float | None = None
         self._active_wall = 0.0                       # เวลานาฬิกาที่ใช้เล่นจริง (ไม่นับช่วงหยุด) หน่วยวินาที
         self._pace_hist: deque = deque(maxlen=60)     # (active_wall, t_min) รายรัน → อัตราส่วนสำหรับ ETA
@@ -105,9 +105,10 @@ class MachineStream:
         last = self.last or {}
         rul = last.get("rul")
         t_min = (self.current or {}).get("t_min") or last.get("t_min")
+        # ไม่ส่งจำนวนรันทั้งหมดของข้อมูล — บอกล่วงหน้าว่าดอกจะใช้ได้อีกกี่รัน (สปอย RUL)
         out = dict(
             machine=self.machine, machine_id=m["name"], feed_drive=m["feed_drive"], tool=self.tool,
-            tool_id=f"T{self.tool}", state=self.state, speed=self.speed, run_index=self.idx, n_runs=self.n_runs,
+            tool_id=f"T{self.tool}", state=self.state, speed=self.speed, run_index=self.idx,
             current=self.current, phase=last.get("phase", "BREAK_IN"), t_min=_r(t_min),
             prediction=None if rul is None else dict(
                 rul_min=_r(rul), rul_lo=_r(last["rul_lo"]), rul_hi=_r(last["rul_hi"]), rul_accel_min=_r(last["rul_acc"]),
@@ -118,7 +119,8 @@ class MachineStream:
                 wall_s_per_cut_min=round(self._wall_per_cut_min(), 2)),
             baseline_runs=last.get("baseline_runs"), flagged_runs=self.features.n_flagged,
             input_z_max=last.get("input_z_max"), started_at=self.started_at, completed=self.completed,
-            cycle_id=self.cycle_id, inspection=self.inspection, model_ready=registry.ready, events=self.events[-8:],
+            cycle_id=self.cycle_id, inspection=self.inspection, installed=self.installed, model_ready=registry.ready,
+            events=self.events[-8:],
         )
         if history:
             out["history"] = self.history
@@ -153,6 +155,9 @@ class MachineStream:
             self._event("INFO", "ผู้ควบคุมหยุดเครื่องชั่วคราว (feed hold)")
 
     def resume(self):
+        if self.state == "PAUSED" and (self.task is None or self.task.done()):   # ดอกใหม่ที่ติดตั้งแล้ว ยังไม่เริ่มตัด
+            self.start()
+            return
         if self.state in ("PAUSED", "HOLD"):
             self._running.set()
             self.state = "CUTTING"
@@ -162,6 +167,22 @@ class MachineStream:
         await self._cancel()
         self._reset_state()
         self._event("INFO", "รีเซ็ต: ติดตั้งดอกเดิมใหม่ เริ่มเล่นจากรันแรก")
+
+    async def install_new_tool(self, actor: str, req_no: str, cycle_id: str | None) -> bool:
+        """ติดตั้งดอกใหม่ตามใบเบิก → รอบการใช้งานใหม่ในสถานะหยุดชั่วคราว (ผู้ควบคุมกดเริ่มตัดเอง)
+
+        ทำเฉพาะเมื่อดอกที่ถอดตามใบเบิกคือรอบล่าสุดของเครื่องนี้ (cycle_id ตรงกัน) — ถ้าเครื่องถูกรีเซ็ตไปแล้วก็ไม่แตะ
+        """
+        if self.state != "COMPLETED" or not cycle_id or cycle_id != self.cycle_id:
+            return False
+        await self._cancel()
+        self._reset_state()
+        self.state = "PAUSED"
+        self.cycle_id = f"M{self.machine}-T{self.tool}-{_now():%y%m%d%H%M%S}"
+        self.installed = dict(at=_now().isoformat(), by=actor, req_no=req_no)
+        self._event("INFO", f"ติดตั้งดอกใหม่บน M{self.machine} ตามใบเบิก {req_no} (โดย {actor}) — หยุดชั่วคราว รอผู้ควบคุมกดเริ่มตัด")
+        self.manager.publish_snapshot()
+        return True
 
     def set_speed(self, speed: float):
         if speed not in SPEEDS:

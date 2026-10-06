@@ -8,6 +8,6 @@
 | `service.py` | อ่าน / สร้าง (hash รหัสผ่านด้วย bcrypt) / เปลี่ยนสิทธิ์ / ลบ |
 | `schemas.py` | `UserItem`, `CreateUserRequest`, `UpdateUserRoleRequest` |
 
-สิทธิ์: `engineer` = ใช้งานหน้าเครื่อง/ตรวจใบมีด · `admin` = + retrain, promote/reject, สลับ/โหลดแบบจำลอง (RUL และภาพ), จัดการผู้ใช้
+สิทธิ์: `engineer` = ใช้งานหน้าเครื่อง/ตรวจใบมีด · `admin` = + promote/reject candidate จาก retrain อัตโนมัติ, สลับ/โหลดแบบจำลอง (RUL และภาพ), จัดการผู้ใช้
 (ตรวจที่ backend ด้วย `get_current_admin_user` — หน้าเว็บซ่อน/ปิดปุ่มเพื่อความสะดวกเท่านั้น)
-บัญชีตั้งต้นของเครื่องพัฒนาถูกสร้างใน `main.py` (ปุ่มกรอกอัตโนมัติในหน้า login)
+บัญชีตั้งต้นของเครื่องพัฒนา (admin / engineer) ถูกสร้างใน `main.py`

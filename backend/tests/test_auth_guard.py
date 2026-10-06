@@ -27,7 +27,6 @@ PUBLIC = {("GET", "/api/v1/health"), ("POST", "/api/v1/auth/signup"), ("POST", "
 ADMIN = {
     ("POST", "/api/v1/tool-vision/model/activate"),
     ("POST", "/api/v1/tool-vision/model/reload"),
-    ("POST", "/api/v1/tool-vision/training/start"),
     ("POST", "/api/v1/tool-vision/training/jobs/{job_id}/{action}"),
     ("POST", "/api/v1/tool-life/model/reload"),
 }
@@ -108,12 +107,13 @@ def test_actor_comes_from_token_not_body(client, monkeypatch):
 
     monkeypatch.setattr(tl.manager, "get", lambda m: FakeStream())
     monkeypatch.setattr(tl.manager, "publish_snapshot", lambda: None)
-    monkeypatch.setattr(svc, "measure", lambda ins_id, blade, actor: calls.append(("measure", blade, actor)) or {})
+    monkeypatch.setattr(svc, "review", lambda ins_id, decisions, actor, note: calls.append(("review", ins_id, actor)) or {})
 
     body = {"action": "continue", "actor": "spoofed"}
     assert client.post("/api/v1/tool-life/machines/1/acknowledge", json=body).status_code == 200
-    assert client.post("/api/v1/tool-vision/inspections/x/blades/2/measure", json={"actor": "spoofed"}).status_code == 200
-    assert calls == [("ack", "continue", "Test Engineer"), ("measure", 2, "Test Engineer")]
+    review = {"blades": [{"blade": b, "source": "AI"} for b in (1, 2, 3, 4)], "actor": "spoofed"}
+    assert client.post("/api/v1/tool-vision/inspections/x/review", json=review).status_code == 200
+    assert calls == [("ack", "continue", "Test Engineer"), ("review", "x", "Test Engineer")]
 
 
 @pytest.mark.parametrize("first", [json.dumps({"token": "not-a-jwt"}), json.dumps({"waveform": 1}), "not json"])
@@ -133,3 +133,24 @@ def test_stream_rejects_silent_client(client, monkeypatch):
         with pytest.raises(WebSocketDisconnect) as e:
             ws.receive_text()
     assert e.value.code == 4401
+
+
+def test_install_requisition_readies_machine_paused(client, monkeypatch):
+    """ติดตั้งดอกใหม่ตามใบเบิก → backend สั่งเครื่องของใบเบิกนั้นเริ่มรอบใหม่แบบหยุดชั่วคราว (ผู้ทำรายการ = ผู้ใช้ของ token)"""
+    from app.features.tool_life.streamer import manager
+    from app.features.tool_vision import service as svc
+
+    _login_as("engineer")
+    calls = []
+
+    class FakeStream:
+        async def install_new_tool(self, actor, req_no, cycle_id):
+            calls.append((actor, req_no, cycle_id))
+            return True
+
+    monkeypatch.setattr(svc, "install_requisition", lambda ins_id, actor: dict(
+        req_no="REQ-x", status="INSTALLED", inspection_id=ins_id, machine=2, cycle_id="M2-T6-c"))
+    monkeypatch.setattr(manager, "streams", {2: FakeStream()})
+    r = client.post("/api/v1/tool-vision/requisitions/INS-x/install", json={"actor": "spoofed"})
+    assert r.status_code == 200 and r.json()["machine_ready"] is True
+    assert calls == [("Test Engineer", "REQ-x", "M2-T6-c")]

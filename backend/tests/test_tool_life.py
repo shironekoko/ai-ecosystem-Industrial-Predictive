@@ -110,3 +110,28 @@ def test_stream_replay_equals_offline_evaluation(monkeypatch):
     assert (got.recommendation[ok].values == exp.rec[ok].values).all()
     blob = json.dumps(sent, ensure_ascii=False, default=str)
     assert "VB" not in blob and '"wear"' not in blob and ".h5" not in blob
+
+
+def test_install_new_tool_waits_paused_until_operator_starts():
+    """ติดตั้งดอกใหม่ตามใบเบิก → รอบใหม่ในสถานะหยุดชั่วคราว (ไม่เริ่มเอง) · ทำเฉพาะรอบที่ถอดตามใบเบิกนั้น · กดตัดต่อแล้วจึงเริ่ม"""
+    from app.features.tool_life import streamer as st
+
+    mgr = st.StreamManager()
+    mgr.publish = lambda msg: None
+    mgr.publish_snapshot = lambda: None
+
+    async def run():
+        s = st.MachineStream(mgr, 3, 9)
+        s.state, s.cycle_id = "COMPLETED", "M3-T9-old"
+        assert not await s.install_new_tool("tech", "REQ-1", "M3-T9-other")      # ใบเบิกของรอบอื่น → ไม่แตะเครื่อง
+        assert s.state == "COMPLETED"
+        assert await s.install_new_tool("tech", "REQ-1", "M3-T9-old")
+        snap = s.snapshot()
+        assert snap["state"] == "PAUSED" and snap["run_index"] == 0 and s.task is None
+        assert snap["installed"]["req_no"] == "REQ-1" and snap["cycle_id"] != "M3-T9-old" and snap["started_at"] is None
+        s._loop = lambda: asyncio.sleep(0)                                            # ไม่เล่นข้อมูลจริงในเทสต์
+        s.resume()                                                                     # ผู้ควบคุมกดเริ่มตัด
+        assert s.state == "CUTTING" and s.task is not None and s.started_at is not None
+        await s.task
+
+    asyncio.run(run())

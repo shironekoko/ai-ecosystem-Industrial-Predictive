@@ -22,7 +22,20 @@ docker compose up -d backend trainer-worker          # หรือ: uv run uvic
 uv run python scripts/publish_tool_rul_model.py      # อัปโหลดแบบจำลอง RUL ขึ้น MinIO (ครั้งแรก)
 uv run pytest tests/ -q
 ```
-ตัวแปรสภาพแวดล้อม: ดู [`.env.example`](../.env.example) และ `compose.yml` (`TOOL_LIFE_AUTOSTART`, `TOOL_LIFE_HOLD_ON_REPLACE`, `TOOL_LIFE_STREAMS`, `LUH_DATASET_DIR`, `NONASTREDA_DIR`)
+ตัวแปรสภาพแวดล้อม: ดู [`.env.example`](../.env.example) และ `compose.yml`
+
+| ตัวแปร | ค่าเริ่มต้น | หน้าที่ |
+|---|---|---|
+| `DATABASE_URL` · `REDIS_URL` · `MINIO_ENDPOINT` · `MINIO_ROOT_USER` / `_PASSWORD` | ดู `core/config.py` | การเชื่อมต่อ PostgreSQL / Redis / MinIO |
+| `JWT_SECRET_KEY` · `ACCESS_TOKEN_EXPIRE_MINUTES` | สุ่มทุกครั้งที่เริ่ม · 30 | เซ็น JWT · อายุ token |
+| `TOOL_LIFE_AUTOSTART` | `true` | เริ่มสตรีม 3 เครื่องเมื่อ backend เริ่ม |
+| `TOOL_LIFE_HOLD_ON_REPLACE` | `true` | interlock: หยุดป้อนเมื่อถึง REPLACE_NOW |
+| `TOOL_LIFE_STREAMS` | ดอกที่สงวนไว้ใน meta ของแบบจำลอง (`1:3,2:6,3:9`) | เครื่อง → ดอกที่สตรีม |
+| `TOOL_LIFE_STATE_DIR` | `backend/logs` (`/app/logs` ใน container) | ที่เก็บ `tool_life_evaluations.jsonl` |
+| `LUH_DATASET_DIR` · `NONASTREDA_DIR` | `/dataset` หรือ `dataset/` | ตำแหน่งชุดข้อมูล |
+| `VISION_RETRAIN_MIN_TOOLS` | `3` | จำนวนดอกใหม่ที่มีค่าวัดจริงก่อน retrain อัตโนมัติ |
+| `TB_LOG_DIR` | `/logs/tensorboard` | log TensorBoard ของ retrain (trainer-worker) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | ไม่ตั้ง = ปิด | เปิด OpenTelemetry (ตั้งใน `compose.observability.yml`) |
 
 > container ของ backend ใช้โค้ดที่ mount จาก `./backend` โดยไม่มี `--reload` — แก้โค้ดแล้วต้อง `docker compose restart backend`
 > (สตรีมเริ่มดอกใหม่จากรันแรก · ถ้าไม่ตั้ง `JWT_SECRET_KEY` ใน `.env` ทุกคนต้องล็อกอินใหม่)

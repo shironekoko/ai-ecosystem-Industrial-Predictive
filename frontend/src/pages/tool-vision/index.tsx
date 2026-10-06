@@ -1,22 +1,23 @@
 /**
  * Tool Inspection (Vision) — ขั้นต่อจาก Machine Monitoring
- * RUL แจ้งดอกหมดอายุ → ผู้ควบคุมถอดดอก → ถ่ายภาพ 4 ใบมีด (optical bench) → AI วัดรอยสึก VB (µm) ของแต่ละใบ
+ * RUL แจ้งดอกหมดอายุ → ผู้ควบคุมถอดดอก → ถ่ายภาพ 4 ใบมีด → AI วัดรอยสึก VB (µm) ของแต่ละใบ
  * → ระดับดอก = VB เฉลี่ย 4 ใบ เทียบเกณฑ์ 103 / 140 µm (นิยามเดียวกับ RUL) · VB รายใบบอกคมที่สึกมากสุด
- * → ผู้ตรวจยอมรับค่า AI หรือวัดจริง → ใบสั่งงานระดับดอกให้วิศวกร
+ * → ผู้ตรวจยอมรับค่า AI หรือวัดจริงแล้วกรอกค่า → ใบเบิกดอกทดแทน (PDF) → รับดอกจากคลัง → ติดตั้ง (เครื่องหยุดชั่วคราว รอกดเริ่มตัด)
  * ค่าที่วัดจริงเข้า pool → retrain → promote
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Camera, CheckCircle2, ClipboardCheck, Cpu, Download, Gauge, Microscope, RefreshCw, Ruler, ScanEye, ShieldAlert, Wrench } from 'lucide-react';
+import { Camera, CheckCircle2, ClipboardCheck, Cpu, Download, FileText, Gauge, PackageCheck, RefreshCw, Ruler, ScanEye, ShieldAlert, Wrench, X } from 'lucide-react';
 import { AuthImage, PageHeader } from '../../components/common';
+import { REQ_STATUS, RequisitionDoc, downloadRequisitionPdf } from '../../components/toollife/RequisitionDoc';
 import { TrainingCurves } from '../../components/toollife/TrainingCurves';
 import { Card, RecBadge, StreamBadge, WearBadge, fmt, fmtDateTime } from '../../components/toollife/ui';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { VERSION_STATUS } from '../model-registry/VisionRegistry';
 import type {
-  BenchMeasurement,
-  Replacements,
+  Requisition,
+  Requisitions,
   RulContext,
   ToolVerdict,
   TrainingJob,
@@ -29,7 +30,6 @@ import type {
   VisionStation,
   VisionStats,
   VisionVersion,
-  WorkOrder,
 } from '../../types';
 
 const VB_ACCEL = 103;
@@ -47,8 +47,10 @@ const VERDICT_STYLE: Record<ToolVerdict, { th: string; cls: string }> = {
   MONITOR: { th: 'ใกล้หมดอายุ', cls: 'bg-amber-500 text-white' },
   REPLACE: { th: 'ต้องเปลี่ยน/ลับดอก', cls: 'bg-red-600 text-white' },
 };
-const SOURCE_TEXT: Record<VbSource, string> = { AI: 'ค่า AI', BENCH: 'วัดบน optical bench', MANUAL: 'วัดเอง (กรอก)' };
-type Tab = 'stations' | 'review' | 'replace' | 'model';
+const SOURCE_TEXT: Record<VbSource, string> = { AI: 'ค่า AI', MANUAL: 'ค่าที่ผู้ตรวจวัด' };
+// รายการตรวจเก่าอาจมีที่มาที่เลิกใช้แล้ว (BENCH) — แสดงเป็นค่าที่วัด
+const sourceText = (s: string | null | undefined) => (s ? SOURCE_TEXT[s as VbSource] ?? 'ค่าที่วัด' : '');
+type Tab = 'stations' | 'review' | 'requisition' | 'model';
 
 const ZoneChip: React.FC<{ zone: VbZone | null | undefined; withRange?: boolean }> = ({ zone, withRange }) =>
   zone && ZONE_STYLE[zone] ? (
@@ -130,16 +132,17 @@ const RulContextBar: React.FC<{ ctx: RulContext | null }> = ({ ctx }) =>
   );
 
 // ───────────────────────────── สถานีตรวจ ─────────────────────────────
-const STEPS = ['ใช้งานบนเครื่อง', 'RUL แจ้งหมดอายุ', 'ถอดดอก + AI วัด VB', 'ผู้ตรวจยืนยัน', 'เปลี่ยนใบมีด'];
-const openRep = (b: VisionBlade) => b.replace_status === 'REQUIRED' || b.replace_status === 'ADVISED';
+// ขั้นของงานตรวจเริ่มเมื่อดอกถูกถอดแล้ว — ช่วงที่ดอกยังใช้งานบนเครื่องเป็นงานของ Machine Monitoring
+const STEPS = ['ถอดดอก + AI วัด VB', 'ผู้ตรวจยืนยัน', 'เบิกดอกจากคลัง', 'ติดตั้งดอกใหม่'];
 
+/** -1 = ดอกยังอยู่บนเครื่อง (ยังไม่มีงานตรวจ) · 0..3 = ขั้นปัจจุบัน · 4 = เสร็จ */
 const stationStep = (s: VisionStation): number => {
   const ins = s.cycle_inspection;
-  if (ins?.status === 'VERIFIED') return ins.blades?.some(openRep) ? 4 : 5;
-  if (ins) return 3;
-  if (s.rul?.state === 'COMPLETED') return 2;
-  if (s.rul?.state === 'HOLD' || s.rul?.recommendation === 'REPLACE_NOW') return 1;
-  return 0;
+  const req = ins?.requisition;
+  if (ins?.status === 'VERIFIED') return req?.status === 'INSTALLED' ? 4 : req?.status === 'ISSUED' ? 3 : 2;
+  if (ins) return 1;
+  if (s.rul?.state === 'COMPLETED') return 0;
+  return -1;
 };
 
 const StationsTab: React.FC<{ onOpen: (id: string) => void; onTab: (t: Tab) => void; reloadKey: number }> = ({
@@ -175,7 +178,7 @@ const StationsTab: React.FC<{ onOpen: (id: string) => void; onTab: (t: Tab) => v
       <div className="p-3 rounded-lg bg-indigo-50/60 border border-indigo-100 text-xs text-indigo-900 leading-relaxed">
         <b>ต่อจาก Machine Monitoring:</b> เมื่อแบบจำลอง RUL แจ้งว่าดอกของเครื่องหมดอายุ (REPLACE_NOW) และผู้ควบคุมกด “ถอดดอก” → ระบบถ่ายภาพหน้าคมมีด 4 ใบ (B1–B4)
         → AI <b>วัดรอยสึกด้านข้าง VB (µm)</b> ของแต่ละใบ แล้วเทียบเกณฑ์เดียวกับแบบจำลอง RUL: ปกติ &lt; {VB_ACCEL} µm · ใกล้หมดอายุ {VB_ACCEL}–{VB_EOL} µm · หมดอายุ ≥ {VB_EOL} µm
-        → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งเปลี่ยนใบมีดให้วิศวกร
+        → ผู้ตรวจยืนยันค่า AI หรือกรอกค่าที่วัด → ใบเบิกดอกทดแทน → รับดอกจากคลัง → ติดตั้ง แล้วกดเริ่มตัดที่ Machine Monitoring
         <span className="text-indigo-700/80">
           {' '}
           · ข้อมูลเซนเซอร์ของ M1/M2/M3 คือดอก LUH T3/T6/T9 และภาพใบมีดคือภาพช่วงท้ายอายุของดอก Nonastreda N8/N9/N10 ที่สึกเท่ากับดอกจริงตอนถอด — ทั้งคู่ไม่เคยใช้ฝึกแบบจำลอง
@@ -187,8 +190,7 @@ const StationsTab: React.FC<{ onOpen: (id: string) => void; onTab: (t: Tab) => v
           const step = stationStep(s);
           const ins = s.cycle_inspection;
           const r = s.rul;
-          const orderReq = ins?.blades?.some((b) => b.replace_status === 'REQUIRED');
-          const orderAdv = ins?.blades?.some((b) => b.replace_status === 'ADVISED');
+          const req = ins?.requisition;
           const toolMean = ins ? ins.final_summary?.mean_vb ?? ins.ai_summary?.mean_vb : null;
           return (
             <div key={s.machine} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-col gap-3">
@@ -219,24 +221,30 @@ const StationsTab: React.FC<{ onOpen: (id: string) => void; onTab: (t: Tab) => v
                 </div>
               )}
 
-              <ol className="flex items-center gap-1">
-                {STEPS.map((label, i) => (
-                  <li key={label} className="flex-1" title={label}>
-                    <div className={`h-1.5 rounded-full ${i < step ? 'bg-indigo-500' : i === step ? 'bg-amber-400 animate-pulse' : 'bg-gray-200'}`} />
-                  </li>
-                ))}
-              </ol>
-              <p className="text-[11px] text-gray-600 -mt-1">
-                ขั้นที่ {Math.min(step + 1, STEPS.length)}/{STEPS.length}: <b>{step >= STEPS.length ? 'ใบมีดพร้อมใช้งาน' : STEPS[step]}</b>
-              </p>
-
-              {step === 0 && <p className="text-[11px] text-gray-500">ดอกกำลังใช้งาน — ระบบจะถ่ายภาพและวัด VB เมื่อ Machine Monitoring แจ้งหมดอายุและผู้ควบคุมถอดดอก</p>}
-              {step === 1 && (
-                <Link to={`/machine-monitoring?machine=${s.machine}`} className="btn-danger justify-center">
-                  <Gauge className="w-3.5 h-3.5" /> RUL แจ้งเปลี่ยนดอกทันที — ไปถอดดอกที่ Machine Monitoring
-                </Link>
+              {step < 0 ? (
+                r?.state === 'HOLD' || r?.recommendation === 'REPLACE_NOW' ? (
+                  <Link to={`/machine-monitoring?machine=${s.machine}`} className="btn-danger justify-center">
+                    <Gauge className="w-3.5 h-3.5" /> RUL แจ้งเปลี่ยนดอกทันที — ไปถอดดอกที่ Machine Monitoring
+                  </Link>
+                ) : (
+                  <p className="text-[11px] text-gray-500">ยังไม่มีงานตรวจ — ระบบจะถ่ายภาพและวัด VB เมื่อผู้ควบคุมถอดดอกที่ Machine Monitoring</p>
+                )
+              ) : (
+                <>
+                  <ol className="flex items-center gap-1">
+                    {STEPS.map((label, i) => (
+                      <li key={label} className="flex-1" title={label}>
+                        <div className={`h-1.5 rounded-full ${i < step ? 'bg-indigo-500' : i === step ? 'bg-amber-400 animate-pulse' : 'bg-gray-200'}`} />
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="text-[11px] text-gray-600 -mt-1">
+                    ขั้นที่ {Math.min(step + 1, STEPS.length)}/{STEPS.length}: <b>{step >= STEPS.length ? 'ใบมีดพร้อมใช้งาน' : STEPS[step]}</b>
+                  </p>
+                </>
               )}
-              {step === 2 && (
+
+              {step === 0 && (
                 <button disabled={!s.can_capture || busy !== null} onClick={() => capture(s.machine)} className="btn-primary justify-center">
                   <Camera className={`w-3.5 h-3.5 ${busy === s.machine ? 'animate-pulse' : ''}`} />
                   {busy === s.machine ? 'กำลังถ่ายภาพและวัด VB…' : 'ถ่ายภาพ 4 ใบมีดของดอกที่ถอด'}
@@ -268,19 +276,19 @@ const StationsTab: React.FC<{ onOpen: (id: string) => void; onTab: (t: Tab) => v
                     <button onClick={() => onOpen(ins.id)} className="btn-primary justify-center">
                       <ClipboardCheck className="w-3.5 h-3.5" /> ไปยืนยันค่า VB
                     </button>
-                  ) : orderReq || orderAdv ? (
-                    <button onClick={() => onTab('replace')} className={`${orderReq ? 'btn-danger' : 'btn-secondary'} justify-center`}>
-                      <Wrench className="w-3.5 h-3.5" /> ใบสั่งงาน: {orderReq ? 'ต้องเปลี่ยน/ลับดอก' : 'ควรเปลี่ยนดอกตามแผน'}
+                  ) : req && req.status !== 'INSTALLED' ? (
+                    <button onClick={() => onTab('requisition')} className="btn-primary justify-center">
+                      <FileText className="w-3.5 h-3.5" /> ใบเบิก {req.req_no}: {REQ_STATUS[req.status].th}
                     </button>
                   ) : (
                     <p className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> ใบมีดพร้อม — ติดตั้งดอกกลับเข้าเครื่องได้ (Machine Monitoring)
+                      <CheckCircle2 className="w-3.5 h-3.5" /> ติดตั้งดอกใหม่แล้ว — กดเริ่มตัดที่ Machine Monitoring
                     </p>
                   )}
                 </>
               )}
               <p className="text-[10px] text-gray-400 mt-auto pt-1 border-t border-gray-50">
-                รอยืนยันทั้งหมด {s.pending_review} · ใบสั่งงานค้าง {s.open_replacements}
+                รอยืนยันทั้งหมด {s.pending_review} · ใบเบิกค้าง {s.open_requisitions}
               </p>
             </div>
           );
@@ -291,21 +299,19 @@ const StationsTab: React.FC<{ onOpen: (id: string) => void; onTab: (t: Tab) => v
 };
 
 // ───────────────────────────── รอตรวจสอบ ─────────────────────────────
-type Decision = { source: VbSource; vb: number | null; bench?: BenchMeasurement };
+type Decision = { source: VbSource; vb: number | null; measured?: number | null; loading?: boolean }; // measured = ผลวัดของใบนี้ (ค่าเริ่มต้น)
 
 const BladeReview: React.FC<{
   b: VisionBlade;
   d: Decision;
   readonly: boolean;
-  measuring: boolean;
   worst: boolean;
   onZoom: () => void;
   onChange: (d: Decision) => void;
-  onMeasure: () => void;
-}> = ({ b, d, readonly, measuring, worst, onZoom, onChange, onMeasure }) => {
+  onManual: () => void;
+}> = ({ b, d, readonly, worst, onZoom, onChange, onManual }) => {
   const finalVb = readonly ? b.final_vb : d.vb;
   const fz = finalVb != null ? zoneOf(finalVb) : null;
-  const bench = readonly ? b.metrology : d.bench;
   const measured = readonly ? (b.vb_source !== 'AI' ? b.final_vb : null) : d.source !== 'AI' ? d.vb : null;
   const err = measured != null && b.pred_vb != null ? b.pred_vb - measured : null;
   return (
@@ -334,62 +340,59 @@ const BladeReview: React.FC<{
           </p>
         </div>
         {b.near_threshold && !readonly && d.source === 'AI' && (
-          <p className="text-[10px] text-amber-700 bg-amber-50 rounded px-2 py-1">ช่วงความไม่แน่นอนคร่อมเกณฑ์ — แนะนำวัดยืนยันบน optical bench</p>
+          <p className="text-[10px] text-amber-700 bg-amber-50 rounded px-2 py-1">ช่วงความไม่แน่นอนคร่อมเกณฑ์ — แนะนำวัดจริงแล้วกรอกค่า</p>
         )}
 
         {readonly ? (
           <div className="text-[11px] rounded-md bg-gray-50 p-2 space-y-0.5">
             <p>
-              ค่าที่ใช้ตัดสิน <b>{um(b.final_vb, 1)}</b> ({b.vb_source ? SOURCE_TEXT[b.vb_source] : '—'}) → <ZoneChip zone={b.final_zone} />
+              ค่าที่ใช้ตัดสิน <b>{um(b.final_vb, 1)}</b> ({sourceText(b.vb_source) || '—'}) → <ZoneChip zone={b.final_zone} />
             </p>
             {err != null && <p className="text-gray-500">AI คลาด {err > 0 ? '+' : ''}{err.toFixed(1)} µm</p>}
-            {bench && (
-              <p className="text-gray-500">
-                gaps {bench.gaps_um.toFixed(0)} µm · overhang {bench.overhang_um.toFixed(0)} µm
-              </p>
-            )}
           </div>
         ) : (
           <div className="space-y-1.5">
             <p className="text-[10px] text-gray-500">ผู้ตรวจ: ค่า VB ที่ใช้ตัดสิน</p>
-            <div className="grid grid-cols-3 gap-1">
-              {(['AI', 'BENCH', 'MANUAL'] as VbSource[]).map((src) => (
+            <div className="grid grid-cols-2 gap-1">
+              {(['AI', 'MANUAL'] as VbSource[]).map((src) => (
                 <button
                   key={src}
-                  disabled={measuring}
                   onClick={() => {
-                    if (src === 'AI') onChange({ source: 'AI', vb: b.pred_vb, bench: d.bench });
-                    else if (src === 'BENCH') d.bench ? onChange({ source: 'BENCH', vb: d.bench.flank_wear_um, bench: d.bench }) : onMeasure();
-                    else onChange({ source: 'MANUAL', vb: d.vb, bench: d.bench });
+                    if (src === 'AI') onChange({ source: 'AI', vb: b.pred_vb });
+                    else if (d.source !== 'MANUAL') onManual();   // ดึงผลวัดของใบนี้มาเป็นค่าเริ่มต้น (ไม่ยกค่า AI มา)
                   }}
                   className={`py-1 rounded-md text-[10px] font-bold border transition flex items-center justify-center gap-1 ${
                     d.source === src ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
                   }`}
                 >
-                  {src === 'AI' ? <Cpu className="w-3 h-3" /> : src === 'BENCH' ? <Microscope className="w-3 h-3" /> : <Ruler className="w-3 h-3" />}
-                  {src === 'AI' ? 'ใช้ค่า AI' : src === 'BENCH' ? (measuring ? 'กำลังวัด…' : 'วัด bench') : 'กรอกเอง'}
+                  {src === 'AI' ? <Cpu className="w-3 h-3" /> : <Ruler className="w-3 h-3" />}
+                  {src === 'AI' ? 'ใช้ค่า AI' : 'กรอกค่าที่วัด'}
                 </button>
               ))}
             </div>
             {d.source === 'MANUAL' && (
-              <label className="flex items-center gap-1.5 text-[11px]">
-                VB
-                <input
-                  type="number"
-                  min={0}
-                  max={999}
-                  step={0.1}
-                  value={d.vb ?? ''}
-                  onChange={(e) => onChange({ ...d, vb: e.target.value === '' ? null : Number(e.target.value) })}
-                  className="w-20 border border-gray-200 rounded px-1.5 py-0.5 tabular-nums"
-                />
-                µm (จากกล้องจุลทรรศน์ของผู้ตรวจ)
-              </label>
-            )}
-            {d.source === 'BENCH' && d.bench && (
-              <p className="text-[10px] text-gray-600">
-                optical bench: VB <b>{d.bench.flank_wear_um.toFixed(1)} µm</b> · gaps {d.bench.gaps_um.toFixed(0)} · overhang {d.bench.overhang_um.toFixed(0)} µm
-              </p>
+              <div className="space-y-0.5">
+                <label className="flex items-center gap-1.5 text-[11px]">
+                  VB
+                  <input
+                    type="number"
+                    min={0}
+                    max={999}
+                    step={0.1}
+                    disabled={d.loading}
+                    value={d.vb ?? ''}
+                    placeholder={d.loading ? 'กำลังวัด…' : ''}
+                    onChange={(e) => onChange({ ...d, vb: e.target.value === '' ? null : Number(e.target.value) })}
+                    className="w-20 border border-gray-200 rounded px-1.5 py-0.5 tabular-nums"
+                  />
+                  µm
+                </label>
+                {d.measured != null && (
+                  <p className="text-[10px] text-gray-500">
+                    ผลวัดของใบนี้ {d.measured.toFixed(1)} µm (optical bench ของชุดข้อมูล){d.vb !== d.measured && ' · แก้ไขแล้ว'}
+                  </p>
+                )}
+              </div>
             )}
             <p className={`text-[11px] font-semibold ${fz === 'eol' ? 'text-red-700' : fz === 'accel' ? 'text-amber-700' : 'text-emerald-700'}`}>
               {finalVb != null && fz ? `ใบนี้ ${finalVb.toFixed(1)} µm (${ZONE_STYLE[fz].th}${fz === 'eol' ? ' — เกิน 140 µm เฉพาะใบ' : ''})` : 'กรอกค่า VB'}
@@ -414,7 +417,6 @@ const ReviewTab: React.FC<{ selected: string | null; onSelect: (id: string | nul
   const [dec, setDec] = useState<Record<number, Decision>>({});
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
-  const [measuring, setMeasuring] = useState<number | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -443,17 +445,16 @@ const ReviewTab: React.FC<{ selected: string | null; onSelect: (id: string | nul
     });
   }, [selected]);
 
-  const measure = async (blade: number) => {
+  // เลือก "กรอกค่าที่วัด" → ดึงผลวัดของใบนั้นมาเป็นค่าเริ่มต้น (ผู้ตรวจแก้ได้) · ดึงไม่ได้ก็กรอกเอง
+  const manual = async (blade: number) => {
     if (!ins) return;
-    setMeasuring(blade);
-    setErr(null);
+    setDec((p) => ({ ...p, [blade]: { source: 'MANUAL', vb: null, loading: true } }));
     try {
-      const m = await api.measureBlade(ins.id, blade);
-      setDec((p) => ({ ...p, [blade]: { source: 'BENCH', vb: m.flank_wear_um, bench: m } }));
+      const m = await api.getBladeMeasurement(ins.id, blade);
+      setDec((p) => (p[blade]?.source === 'MANUAL' ? { ...p, [blade]: { source: 'MANUAL', vb: m.vb_um, measured: m.vb_um } } : p));
     } catch (e: any) {
       setErr(e.message);
-    } finally {
-      setMeasuring(null);
+      setDec((p) => (p[blade]?.source === 'MANUAL' ? { ...p, [blade]: { source: 'MANUAL', vb: null } } : p));
     }
   };
 
@@ -589,11 +590,10 @@ const ReviewTab: React.FC<{ selected: string | null; onSelect: (id: string | nul
                     b={b}
                     d={dec[b.blade] ?? { source: 'AI', vb: b.pred_vb }}
                     readonly={readonly}
-                    measuring={measuring === b.blade}
                     worst={worstBlade === b.blade}
                     onZoom={() => setZoom(b.image_url)}
                     onChange={(d) => setDec((p) => ({ ...p, [b.blade]: d }))}
-                    onMeasure={() => measure(b.blade)}
+                    onManual={() => manual(b.blade)}
                   />
                 ))}
               </div>
@@ -610,8 +610,8 @@ const ReviewTab: React.FC<{ selected: string | null; onSelect: (id: string | nul
                   ระดับดอก: VB เฉลี่ย <b>{um(liveMean, 1)}</b> → <VerdictChip v={verdict} />
                   {over.length > 0 && <span className="text-red-700"> · เกิน 140 µm เฉพาะใบ {over.join(', ')}</span>} · วัดจริง {nMeasured}/4 ใบ
                 </span>
-                <button onClick={submit} disabled={busy || !complete || measuring !== null} className="btn-primary">
-                  <ClipboardCheck className="w-3.5 h-3.5" /> ยืนยันผล → {verdict === 'OK' ? 'ใช้ดอกต่อ' : 'ออกใบสั่งงาน'}
+                <button onClick={submit} disabled={busy || !complete} className="btn-primary">
+                  <ClipboardCheck className="w-3.5 h-3.5" /> ยืนยันผล → ออกใบเบิกดอก
                 </button>
               </div>
             ) : (
@@ -633,98 +633,129 @@ const ReviewTab: React.FC<{ selected: string | null; onSelect: (id: string | nul
   );
 };
 
-// ───────────────────────────── ใบสั่งงานระดับดอก ─────────────────────────────
-const ReplaceTab: React.FC<{ reloadKey: number; onChanged: () => void }> = ({ reloadKey, onChanged }) => {
-  const [rep, setRep] = useState<Replacements | null>(null);
-  const load = useCallback(() => api.getReplacements().then(setRep), []);
-  useEffect(() => {
-    load();
-  }, [load, reloadKey]);
-  const done = async (id: string) => {
-    await api.markToolServiced(id);
-    await load();
-    onChanged();
+// ───────────────────────────── ใบเบิกดอกทดแทน ─────────────────────────────
+const RequisitionModal: React.FC<{ r: Requisition; onClose: () => void }> = ({ r, onClose }) => {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState(false);
+  const pdf = async () => {
+    if (!ref.current) return;
+    setBusy(true);
+    try {
+      await downloadRequisitionPdf(ref.current, r.req_no);
+    } catch (e: any) {
+      alert(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
   };
-  if (!rep) return <p className="text-sm text-gray-400">กำลังโหลด…</p>;
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        {rep.open.length === 0 ? (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200">
-            <CheckCircle2 className="w-4 h-4" /> ไม่มีดอกที่ต้องเปลี่ยน
-          </span>
-        ) : (
-          rep.open.map((o) => (
-            <span
-              key={o.inspection_id}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
-                o.priority === 'REQUIRED' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-amber-50 text-amber-700 border-amber-200'
-              }`}
-            >
-              <Wrench className="w-4 h-4" /> {o.machine_id} · ดอก {o.tool_ref ?? '—'}: {o.priority === 'REQUIRED' ? 'ต้องเปลี่ยน/ลับดอก' : 'ควรเปลี่ยนตามแผน'}
-              {o.mean_vb != null && ` (VB เฉลี่ย ${o.mean_vb.toFixed(0)} µm)`}
-            </span>
-          ))
-        )}
-        <button onClick={() => api.downloadReplacementsCsv().catch((err) => alert(err.message))} className="btn-secondary ml-auto">
-          <Download className="w-3.5 h-3.5" /> CSV
-        </button>
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-gray-100 rounded-xl shadow-2xl max-w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-white rounded-t-xl">
+          <FileText className="w-4 h-4 text-indigo-600" />
+          <p className="font-semibold text-sm flex-1">ใบเบิกดอก {r.req_no}</p>
+          <button onClick={pdf} disabled={busy} className="btn-primary">
+            <Download className="w-3.5 h-3.5" /> {busy ? 'กำลังสร้าง PDF…' : 'ดาวน์โหลด PDF'}
+          </button>
+          <button onClick={onClose} className="btn-secondary" aria-label="ปิด">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <div className="p-4 overflow-x-auto">
+          <div className="shadow-md w-fit mx-auto">
+            <RequisitionDoc ref={ref} r={r} />
+          </div>
+        </div>
       </div>
-      <p className="text-[11px] text-gray-500">
-        ใบสั่งงาน 1 ใบต่อดอกที่ถอดตามคำแนะนำของแบบจำลอง RUL — ตัดสินด้วย <b>VB เฉลี่ย 4 ใบ</b> (นิยามเดียวกับ RUL): <b className="text-red-700">ต้องเปลี่ยน/ลับดอก</b> ≥ {VB_EOL} µm ·{' '}
-        <b className="text-amber-700">ควรเปลี่ยนตามแผน</b> {VB_ACCEL}–{VB_EOL} µm · VB รายใบบอกคมที่สึกมากสุดและคมที่เกิน {VB_EOL} µm เฉพาะใบ (ตรวจรอยสึกเฉพาะจุด/การเยื้องศูนย์) ·
-        ดำเนินการแล้วบันทึก จากนั้นติดตั้งดอกที่ Machine Monitoring
-      </p>
-      <Card title={`ใบสั่งงานค้าง (${rep.open.length})`}>
-        <OrderTable items={rep.open} action={(o) => <button onClick={() => done(o.inspection_id)} className="btn-primary">บันทึกว่าดำเนินการแล้ว</button>} />
-      </Card>
-      <Card title={`ประวัติ (${rep.done.length})`}>
-        <OrderTable items={rep.done} action={(o) => <span className="text-[11px] text-gray-500">{o.replaced_by} · {fmtDateTime(o.replaced_at)}</span>} />
-      </Card>
     </div>
   );
 };
 
-const OrderTable: React.FC<{ items: WorkOrder[]; action: (o: WorkOrder) => React.ReactNode }> = ({ items, action }) =>
-  items.length === 0 ? (
-    <p className="text-xs text-gray-400">—</p>
-  ) : (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-left text-gray-500 border-b border-gray-100">
-            <th className="py-2 pr-2">เครื่อง / ดอก</th>
-            <th className="py-2 pr-2">ระดับ</th>
-            <th className="py-2 pr-2">VB เฉลี่ย</th>
-            <th className="py-2 pr-2">VB รายใบ (คมที่สึกมากสุด = กรอบดำ)</th>
-            <th className="py-2 pr-2">ถอดตาม RUL</th>
-            <th className="py-2 pr-2">รายการตรวจ</th>
-            <th className="py-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((o) => (
-            <tr key={o.inspection_id} className="border-b border-gray-50 align-top">
-              <td className="py-2 pr-2 font-semibold">
-                {o.machine_id} · {o.tool_ref ?? '—'}
-              </td>
-              <td className="py-2 pr-2">
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${o.priority === 'REQUIRED' ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'}`}>
-                  {o.priority === 'REQUIRED' ? 'ต้องเปลี่ยน/ลับดอก' : 'ควรเปลี่ยนตามแผน'}
-                </span>
-              </td>
-              <td className="py-2 pr-2 tabular-nums font-bold">{um(o.mean_vb, 1)}</td>
-              <td className="py-2 pr-2">
+const ReqStatusChip: React.FC<{ s: Requisition['status'] }> = ({ s }) => (
+  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ color: REQ_STATUS[s].color, background: REQ_STATUS[s].bg }}>
+    {REQ_STATUS[s].th}
+  </span>
+);
+
+const RequisitionTab: React.FC<{ reloadKey: number; onChanged: () => void }> = ({ reloadKey, onChanged }) => {
+  const [data, setData] = useState<Requisitions | null>(null);
+  const [view, setView] = useState<Requisition | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: React.ReactNode } | null>(null);
+  const load = useCallback(() => api.getRequisitions().then(setData), []);
+  useEffect(() => {
+    load();
+  }, [load, reloadKey]);
+
+  const act = async (r: Requisition, step: 'issue' | 'install') => {
+    if (step === 'install' && !confirm(`ติดตั้งดอกใหม่บน ${r.machine_id} แล้ว?\nเครื่องจะเริ่มรอบการใช้งานใหม่ในสถานะหยุดชั่วคราว — กดเริ่มตัดที่ Machine Monitoring เมื่อพร้อม`)) return;
+    setBusy(r.inspection_id);
+    setMsg(null);
+    try {
+      if (step === 'issue') {
+        await api.issueRequisition(r.inspection_id);
+        setMsg({ ok: true, text: `${r.req_no}: รับดอกจากคลังแล้ว — ติดตั้งบน ${r.machine_id} แล้วกด "ติดตั้งดอกใหม่แล้ว"` });
+      } else {
+        const res = await api.installRequisition(r.inspection_id);
+        setMsg({
+          ok: true,
+          text: res.machine_ready ? (
+            <>
+              {r.req_no}: ติดตั้งดอกใหม่บน {r.machine_id} แล้ว — เครื่องหยุดชั่วคราวรอเริ่มตัด{' '}
+              <Link to={`/machine-monitoring?machine=${r.machine}`} className="underline font-semibold">
+                ไปที่ Machine Monitoring →
+              </Link>
+            </>
+          ) : (
+            `${r.req_no}: ปิดใบเบิกแล้ว (เครื่อง ${r.machine_id} ไม่ได้รอดอกจากการถอดครั้งนี้แล้ว จึงไม่รีเซ็ตเครื่อง)`
+          ),
+        });
+      }
+      await load();
+      onChanged();
+    } catch (e: any) {
+      setMsg({ ok: false, text: e.message || String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!data) return <p className="text-sm text-gray-400">กำลังโหลด…</p>;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[11px] text-gray-500 flex-1 min-w-[280px]">
+          ผู้ตรวจยืนยันผลแล้วระบบออก<b>ใบเบิกดอกทดแทน</b> 1 ใบต่อการถอด (เครื่องต้องได้ดอกใหม่ก่อนตัดต่อ) → นำใบเบิก (PDF) ไปเบิกที่คลังเครื่องมือ → <b>รับดอกจากคลังแล้ว</b> →
+          ติดตั้งบนเครื่อง → <b>ติดตั้งดอกใหม่แล้ว</b> = เครื่องเริ่มรอบใหม่ในสถานะหยุดชั่วคราว ผู้ควบคุมกดเริ่มตัดเองที่ Machine Monitoring · ดอกที่ถอดจัดการตาม VB เฉลี่ย 4 ใบ
+        </p>
+        <button onClick={() => api.downloadRequisitionsCsv().catch((err) => alert(err.message))} className="btn-secondary">
+          <Download className="w-3.5 h-3.5" /> CSV
+        </button>
+      </div>
+      {msg && (
+        <div className={`p-3 rounded-lg border text-sm ${msg.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-700'}`}>{msg.text}</div>
+      )}
+      <Card title={`ใบเบิกที่ยังไม่ติดตั้ง (${data.open.length})`}>
+        {data.open.length === 0 ? (
+          <p className="text-xs text-gray-400 flex items-center gap-1.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-500" /> ไม่มีเครื่องที่รอดอกใหม่
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {data.open.map((r) => (
+              <div key={r.req_no} className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-bold text-sm">
+                    {r.req_no} <span className="font-normal text-gray-500">· {r.machine_id} · ทดแทนดอก {r.tool_ref ?? '—'}</span>
+                  </p>
+                  <ReqStatusChip s={r.status} />
+                </div>
                 <div className="flex gap-1">
-                  {o.blades.map((b) => {
+                  {r.blades.map((b) => {
                     const z = b.final_vb != null ? zoneOf(b.final_vb) : null;
                     return (
-                      <div
-                        key={b.blade}
-                        title={`${b.vb_source ? SOURCE_TEXT[b.vb_source] : ''}${b.pred_vb != null && b.vb_source !== 'AI' ? ` · AI ${b.pred_vb.toFixed(0)} µm` : ''}`}
-                        className={`rounded overflow-hidden border-2 ${o.worst_blade === b.blade ? 'border-gray-900' : 'border-transparent'}`}
-                      >
-                        <AuthImage src={b.image_url} alt="" className="w-14 h-6 object-cover" />
+                      <div key={b.blade} className={`flex-1 rounded overflow-hidden border-2 ${r.worst_blade === b.blade ? 'border-gray-900' : 'border-transparent'}`}>
+                        <AuthImage src={b.image_url} alt="" className="w-full h-8 object-cover" />
                         <p className={`text-[9px] text-center font-bold ${z ? ZONE_STYLE[z].solid : 'bg-gray-200'}`}>
                           B{b.blade} {b.final_vb != null ? b.final_vb.toFixed(0) : '—'}
                         </p>
@@ -732,25 +763,78 @@ const OrderTable: React.FC<{ items: WorkOrder[]; action: (o: WorkOrder) => React
                     );
                   })}
                 </div>
-                {o.over_limit.length > 0 && <p className="text-[10px] text-red-700 mt-0.5">เกิน {VB_EOL} µm เฉพาะใบ: {o.over_limit.map((b) => `B${b}`).join(', ')}</p>}
-              </td>
-              <td className="py-2 pr-2 text-gray-500">
-                {fmt(o.removed_t_min)} นาที {o.rul_recommendation && <RecBadge rec={o.rul_recommendation} />}
-                <br />
-                {o.removed_by}
-              </td>
-              <td className="py-2 pr-2 text-gray-500">
-                {o.inspection_id}
-                <br />
-                ยืนยันโดย {o.reviewed_by}
-              </td>
-              <td className="py-2 text-right">{action(o)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                <p className="text-[11px] text-gray-600">
+                  VB เฉลี่ย 4 ใบ <b>{um(r.mean_vb, 1)}</b> {r.verdict && <VerdictChip v={r.verdict} />} · ดอกที่ถอด: {r.disposition}
+                </p>
+                <p className="text-[10px] text-gray-400">
+                  ออกเมื่อ {fmtDateTime(r.created_at)} โดย {r.requested_by}
+                  {r.issued_by && ` · รับจากคลังโดย ${r.issued_by} ${fmtDateTime(r.issued_at)}`}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => setView(r)} className="btn-secondary">
+                    <FileText className="w-3.5 h-3.5" /> ใบเบิก / PDF
+                  </button>
+                  {r.status === 'OPEN' ? (
+                    <button disabled={busy !== null} onClick={() => act(r, 'issue')} className="btn-primary">
+                      <PackageCheck className="w-3.5 h-3.5" /> รับดอกจากคลังแล้ว
+                    </button>
+                  ) : (
+                    <button disabled={busy !== null} onClick={() => act(r, 'install')} className="btn-primary">
+                      <Wrench className="w-3.5 h-3.5" /> ติดตั้งดอกใหม่แล้ว
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+      <Card title={`ประวัติใบเบิก (${data.done.length})`}>
+        {data.done.length === 0 ? (
+          <p className="text-xs text-gray-400">—</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-100">
+                  <th className="py-2 pr-2">ใบเบิก</th>
+                  <th className="py-2 pr-2">เครื่อง / ดอกที่ถอด</th>
+                  <th className="py-2 pr-2">VB เฉลี่ย</th>
+                  <th className="py-2 pr-2">ดอกที่ถอด</th>
+                  <th className="py-2 pr-2">ขอเบิก → รับ → ติดตั้ง</th>
+                  <th className="py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {data.done.map((r) => (
+                  <tr key={r.req_no} className="border-b border-gray-50 align-top">
+                    <td className="py-2 pr-2 font-semibold">{r.req_no}</td>
+                    <td className="py-2 pr-2">
+                      {r.machine_id} · {r.tool_ref ?? '—'}
+                    </td>
+                    <td className="py-2 pr-2 tabular-nums">{um(r.mean_vb, 1)}</td>
+                    <td className="py-2 pr-2 text-gray-600">{r.disposition}</td>
+                    <td className="py-2 pr-2 text-gray-500">
+                      {r.requested_by} → {r.issued_by ?? '—'} → {r.installed_by ?? '—'}
+                      <br />
+                      {fmtDateTime(r.installed_at)}
+                    </td>
+                    <td className="py-2 text-right">
+                      <button onClick={() => setView(r)} className="btn-secondary">
+                        <FileText className="w-3.5 h-3.5" /> PDF
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      {view && <RequisitionModal r={view} onClose={() => setView(null)} />}
     </div>
   );
+};
 
 // ───────────────────────────── โมเดล & retrain ─────────────────────────────
 const MetricBox: React.FC<{ label: string; m?: { mae?: number; zone_acc?: number; n?: number } | null; hint?: string }> = ({ label, m, hint }) => (
@@ -918,23 +1002,33 @@ const ModelTab: React.FC<{ isAdmin: boolean; reloadKey: number; onChanged: () =>
           {pool && (
             <div className="text-xs space-y-2">
               <p>
-                ค่า VB ที่วัดจริงและยังไม่เคยใช้ฝึก <b>{pool.n_labels}</b> ใบ · AI คลาด &gt; {pool.large_error_um} µm <b className="text-amber-700">{pool.n_large_error}</b> ใบ
+                ค่า VB ที่วัดจริงและยังไม่เคยใช้ฝึก <b>{pool.n_labels}</b> ใบ จาก {pool.n_tools} ดอก · AI คลาด &gt; {pool.large_error_um} µm{' '}
+                <b className="text-amber-700">{pool.n_large_error}</b> ใบ
               </p>
-              <div className="h-2 rounded bg-gray-100 overflow-hidden">
-                <div className="h-full bg-amber-500" style={{ width: `${Math.min(100, (pool.n_large_error / pool.threshold) * 100)}%` }} />
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-gray-500">
+                  ดอกใหม่ที่วัดจริง
+                  {pool.n_tools > pool.n_new_tools && <span className="text-gray-400"> (ไม่นับ {pool.n_tools - pool.n_new_tools} ดอกที่เคยลองฝึกแล้ว)</span>}
+                </span>
+                <b className="tabular-nums">
+                  {Math.min(pool.n_new_tools, pool.min_new_tools)}/{pool.min_new_tools} ดอก
+                </b>
               </div>
-              <p className="text-[11px] text-gray-500">
-                {pool.suggest_retrain ? 'แนะนำให้ retrain แล้ว' : `แนะนำ retrain เมื่อมีใบที่ AI คลาด > ${pool.large_error_um} µm ≥ ${pool.threshold} ใบ`} · ค่าที่ยอมรับจาก AI ไม่ใช้ฝึก
+              <div className="h-2 rounded bg-gray-100 overflow-hidden">
+                <div className="h-full bg-indigo-500" style={{ width: `${Math.min(100, (pool.n_new_tools / pool.min_new_tools) * 100)}%` }} />
+              </div>
+              <p className="text-[11px] text-gray-600 flex items-start gap-1.5">
+                <RefreshCw className={`w-3.5 h-3.5 mt-px shrink-0 ${running || pool.job_running ? 'animate-spin text-indigo-500' : 'text-gray-400'}`} />
+                {running || pool.job_running
+                  ? 'กำลัง retrain อัตโนมัติบน GPU worker…'
+                  : pool.awaiting_decision
+                    ? 'มี candidate รอผู้ดูแลตัดสิน — retrain รอบถัดไปเริ่มหลัง promote / reject'
+                    : `retrain เริ่มอัตโนมัติเมื่อมีค่าวัดจริงจากดอกใหม่ครบ ${pool.min_new_tools} ดอก (${pool.min_new_tools * 4} ภาพ)`}
               </p>
-              <button
-                disabled={!isAdmin || busy || running || pool.n_labels === 0}
-                onClick={() => act(() => api.startRetrain())}
-                className="btn-primary w-full justify-center"
-                title={isAdmin ? '' : 'เฉพาะผู้ดูแลระบบ'}
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} /> {running ? 'กำลัง retrain (GPU worker)…' : 'เริ่ม retrain'}
-              </button>
-              {!isAdmin && <p className="text-[10px] text-gray-400">ปุ่ม retrain / promote ใช้ได้เฉพาะผู้ดูแลระบบ</p>}
+              <p className="text-[10px] text-gray-400">
+                นับเป็นดอก ไม่ใช่ภาพ: 4 ใบของดอกเดียวกันมีความคลาดคงที่ร่วมกัน · ดอกล่าสุดถูกกันไว้ตรวจ gate · ค่าที่ยอมรับจาก AI ไม่ใช้ฝึก
+              </p>
+              {!isAdmin && <p className="text-[10px] text-gray-400">promote / reject ใช้ได้เฉพาะผู้ดูแลระบบ</p>}
             </div>
           )}
         </Card>
@@ -1033,7 +1127,7 @@ const ModelTab: React.FC<{ isAdmin: boolean; reloadKey: number; onChanged: () =>
               </tbody>
             </table>
             <p className="text-[10px] text-gray-400 mt-2">
-              Gate: MAE บนดอก 7 แย่ลงไม่เกิน 1 µm และ MAE บนค่าที่วัดล่าสุด (20% ท้าย ไม่ใช้ฝึก) ต้องไม่แย่กว่าเดิม — candidate ถูกใช้งานเมื่อผู้ดูแลกด Promote เท่านั้น ·
+              Gate: MAE บนดอก 7 แย่ลงไม่เกิน 1 µm และ MAE บนค่าที่วัดจากดอกล่าสุด (แยกทั้งดอก ไม่ใช้ฝึก) ต้องไม่แย่กว่าเดิม — candidate ถูกใช้งานเมื่อผู้ดูแลกด Promote เท่านั้น ·
               log การฝึกดูได้ใน TensorBoard (logs/tensorboard)
             </p>
           </div>
@@ -1072,19 +1166,20 @@ export const ToolVisionPage: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) || 'stations';
+  const raw = params.get('tab');
+  const tab = ((raw === 'replace' ? 'requisition' : raw) as Tab) || 'stations';   // ลิงก์เก่า (ใบสั่งงาน) → ใบเบิก
   const [selected, setSelected] = useState<string | null>(params.get('inspection'));
   useEffect(() => {
     const id = params.get('inspection');
     if (id) setSelected(id);
   }, [params]);
   const [reloadKey, setReloadKey] = useState(0);
-  const [counts, setCounts] = useState({ pending: 0, replace: 0 });
+  const [counts, setCounts] = useState({ pending: 0, requisition: 0 });
   const [model, setModel] = useState<VisionModelInfo | null>(null);
 
   const refreshCounts = useCallback(() => {
     api.getVisionStations().then((s) =>
-      setCounts({ pending: s.reduce((a, x) => a + x.pending_review, 0), replace: s.reduce((a, x) => a + x.open_replacements, 0) }),
+      setCounts({ pending: s.reduce((a, x) => a + x.pending_review, 0), requisition: s.reduce((a, x) => a + x.open_requisitions, 0) }),
     );
   }, []);
   useEffect(() => {
@@ -1098,7 +1193,7 @@ export const ToolVisionPage: React.FC = () => {
       [
         { id: 'stations', label: 'สถานีตรวจ (จาก Machine Monitoring)', icon: Camera },
         { id: 'review', label: `รอตรวจสอบ${counts.pending ? ` (${counts.pending})` : ''}`, icon: ClipboardCheck },
-        { id: 'replace', label: `ใบสั่งงาน${counts.replace ? ` (${counts.replace})` : ''}`, icon: Wrench },
+        { id: 'requisition', label: `ใบเบิกดอก${counts.requisition ? ` (${counts.requisition})` : ''}`, icon: FileText },
         { id: 'model', label: 'โมเดล & Retrain', icon: RefreshCw },
       ] as const,
     [counts],
@@ -1108,7 +1203,7 @@ export const ToolVisionPage: React.FC = () => {
     <div className="space-y-5">
       <PageHeader
         title="Tool Inspection (Vision)"
-        subtitle={`ต่อจาก Machine Monitoring: ดอกที่ RUL แจ้งหมดอายุและถูกถอด → AI วัดรอยสึก VB ของ 4 ใบมีดจากภาพ → VB เฉลี่ย 4 ใบเทียบเกณฑ์ ${VB_ACCEL}/${VB_EOL} µm (เหมือน RUL) → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน`}
+        subtitle={`ต่อจาก Machine Monitoring: ดอกที่ RUL แจ้งหมดอายุและถูกถอด → AI วัดรอยสึก VB ของ 4 ใบมีดจากภาพ → VB เฉลี่ย 4 ใบเทียบเกณฑ์ ${VB_ACCEL}/${VB_EOL} µm (เหมือน RUL) → ผู้ตรวจยืนยัน/กรอกค่าที่วัด → ใบเบิกดอกทดแทน`}
         actions={
           <span
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
@@ -1143,7 +1238,7 @@ export const ToolVisionPage: React.FC = () => {
         />
       )}
       {tab === 'review' && <ReviewTab selected={selected} onSelect={setSelected} onDone={bump} reloadKey={reloadKey} />}
-      {tab === 'replace' && <ReplaceTab reloadKey={reloadKey} onChanged={bump} />}
+      {tab === 'requisition' && <RequisitionTab reloadKey={reloadKey} onChanged={bump} />}
       {tab === 'model' && <ModelTab isAdmin={isAdmin} reloadKey={reloadKey} onChanged={bump} />}
     </div>
   );

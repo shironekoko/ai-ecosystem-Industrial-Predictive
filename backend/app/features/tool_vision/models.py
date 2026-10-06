@@ -2,8 +2,9 @@
 
 inspection 1 ครั้ง = ถ่ายภาพ 4 ใบมีดของดอกที่ถอดจากเครื่อง 1 เครื่อง เมื่อ Machine Monitoring แจ้งหมดอายุ
   (1 รอบการใช้งานดอก = cycle_id เดียวกับสตรีมของ Machine Monitoring = ตรวจ 1 ครั้ง)
-  → AI วัด VB (µm) ของแต่ละใบ → ผู้ตรวจยอมรับค่า AI หรือวัดจริง → ระดับดอก = VB เฉลี่ย 4 ใบ:
-    ≥ 140 µm ต้องเปลี่ยน/ลับดอก, 103–140 µm ควรเปลี่ยนตามแผน (ใบสั่งงาน 1 ใบต่อดอก)
+  → AI วัด VB (µm) ของแต่ละใบ → ผู้ตรวจยอมรับค่า AI หรือวัดจริง → ระดับดอก = VB เฉลี่ย 4 ใบ
+    (≥ 140 µm หมดอายุ, 103–140 µm ใกล้หมดอายุ) → การจัดการดอกที่ถอด
+  → ใบเบิกดอกทดแทน 1 ใบต่อการถอด: OPEN (รอเบิก) → ISSUED (รับดอกจากคลังแล้ว) → INSTALLED (ติดตั้งบนเครื่องแล้ว)
   → ค่าที่วัดจริงเข้า pool สำหรับ retrain
 """
 from datetime import datetime
@@ -35,6 +36,14 @@ class VisionInspection(Base):
     reviewed_by = Column(String(150), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     note = Column(Text, nullable=True)
+    # ใบเบิกดอกทดแทน — ออกเมื่อผู้ตรวจยืนยันผล (เครื่องต้องได้ดอกใหม่ก่อนตัดต่อ)
+    req_no = Column(String(32), nullable=True)
+    req_status = Column(String(12), nullable=True)            # OPEN | ISSUED | INSTALLED
+    req_created_at = Column(DateTime, nullable=True)
+    issued_by = Column(String(150), nullable=True)            # ผู้รับดอกจากคลังเครื่องมือ
+    issued_at = Column(DateTime, nullable=True)
+    installed_by = Column(String(150), nullable=True)         # ผู้ติดตั้งดอกใหม่บนเครื่อง
+    installed_at = Column(DateTime, nullable=True)
 
 
 class VisionBlade(Base):
@@ -51,14 +60,10 @@ class VisionBlade(Base):
     pred_label = Column(String(10), nullable=False)            # โซนจากค่า AI: normal | accel | eol
     confidence = Column(Float, nullable=False)                 # ความน่าจะเป็นของโซนนั้น
     probs = Column(Text, nullable=False)                       # JSON {normal, accel, eol}
-    metrology = Column(Text, nullable=True)                    # JSON ค่าที่ optical bench วัดได้ (เปิดเผยเมื่อสั่งวัดเท่านั้น)
     review = Column(String(12), nullable=False, default="PENDING")   # PENDING | CONFIRMED (ยอมรับค่า AI) | MEASURED
     final_vb = Column(Float, nullable=True)                    # VB สุดท้ายที่ใช้ตัดสิน
-    vb_source = Column(String(10), nullable=True)              # AI | BENCH | MANUAL
+    vb_source = Column(String(10), nullable=True)              # AI | MANUAL
     final_label = Column(String(10), nullable=True)            # โซนจาก final_vb
-    replace_status = Column(String(12), nullable=False, default="NONE")  # ใบสั่งงานระดับดอก: NONE | REQUIRED | ADVISED | REPLACED
-    replaced_by = Column(String(150), nullable=True)
-    replaced_at = Column(DateTime, nullable=True)
     trained_in_version = Column(String(80), nullable=True)     # ถูกใช้ฝึกในเวอร์ชันไหนแล้ว
 
 
@@ -89,6 +94,24 @@ def ensure_schema(engine):
         for col in ("pred_vb", "vb_lo", "vb_hi", "final_vb"):
             c.execute(text(f"ALTER TABLE vision_blades ADD COLUMN IF NOT EXISTS {col} DOUBLE PRECISION"))
         c.execute(text("ALTER TABLE vision_blades ADD COLUMN IF NOT EXISTS vb_source VARCHAR(10)"))
+        c.execute(text("ALTER TABLE vision_blades DROP COLUMN IF EXISTS metrology"))   # เลิกเก็บค่า VB จริงของชุดข้อมูล
         c.execute(text("CREATE INDEX IF NOT EXISTS ix_vision_inspections_cycle_id ON vision_inspections (cycle_id)"))
+        for col, typ in (("req_no", "VARCHAR(32)"), ("req_status", "VARCHAR(12)"), ("req_created_at", "TIMESTAMP"),
+                         ("issued_by", "VARCHAR(150)"), ("issued_at", "TIMESTAMP"),
+                         ("installed_by", "VARCHAR(150)"), ("installed_at", "TIMESTAMP")):
+            c.execute(text(f"ALTER TABLE vision_inspections ADD COLUMN IF NOT EXISTS {col} {typ}"))
+        # ใบสั่งงานแบบเดิม (สถานะรายใบมีด) → ใบเบิกระดับดอก แล้วลบคอลัมน์เดิม
+        old = c.execute(text("SELECT 1 FROM information_schema.columns WHERE table_name = 'vision_blades' "
+                             "AND column_name = 'replace_status'")).first()
+        if old:
+            c.execute(text("""
+                UPDATE vision_inspections i SET req_no = 'REQ-' || substr(i.id, 5), req_created_at = i.reviewed_at,
+                  req_status = CASE WHEN EXISTS (SELECT 1 FROM vision_blades b WHERE b.inspection_id = i.id
+                                                 AND b.replace_status = 'REPLACED') THEN 'INSTALLED' ELSE 'OPEN' END,
+                  installed_by = (SELECT max(b.replaced_by) FROM vision_blades b WHERE b.inspection_id = i.id),
+                  installed_at = (SELECT max(b.replaced_at) FROM vision_blades b WHERE b.inspection_id = i.id)
+                WHERE i.status = 'VERIFIED' AND i.req_no IS NULL"""))
+            for col in ("replace_status", "replaced_by", "replaced_at"):
+                c.execute(text(f"ALTER TABLE vision_blades DROP COLUMN IF EXISTS {col}"))
         # รายการตรวจแบบเดิม (ถ่ายทีละรอบด้วยมือ ไม่ผูกกับรอบการใช้งานดอกของ Machine Monitoring) → เก็บเข้าคลัง ไม่ลบ
         c.execute(text("UPDATE vision_inspections SET status = 'ARCHIVED' WHERE cycle_id IS NULL AND status <> 'ARCHIVED'"))

@@ -5,7 +5,7 @@
 | ต้นทาง (`source_service`) | เมื่อไร | ระดับ |
 |---|---|---|
 | `ToolLife_RUL` (tool_life.streamer) | คำแนะนำของ RUL ยกระดับ: WATCH → PLAN_REPLACEMENT → REPLACE_NOW | INFO → WARNING → CRITICAL |
-| `ToolVision_QC` (tool_vision.service) | ถ่ายภาพใบมีดตอนถอดดอกแล้ว (รอผู้ตรวจ) · ผลตรวจยืนยันว่าต้องเปลี่ยน/ควรเปลี่ยนดอก | INFO / WARNING |
+| `ToolVision_QC` (tool_vision.service) | ถ่ายภาพใบมีดตอนถอดดอกแล้ว — AI วัด VB รอผู้ตรวจ · ผู้ตรวจยืนยันผลแล้ว → ออกใบเบิกดอกทดแทน (บอกการจัดการดอกที่ถอด + คมที่สึกมากสุด) | INFO · WARNING ถ้าระดับดอก REPLACE (VB เฉลี่ย ≥ 140 µm) ไม่เช่นนั้น INFO |
 
 แจ้งเตือนที่ยังไม่อ่านของเครื่อง + ดอก + ต้นทางเดียวกันจะถูกอัปเดตแทนการสร้างซ้ำ
 

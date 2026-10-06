@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { UserRole } from '../../types';
-import { Cpu, Shield, User, Lock, Mail, Building2, UserPlus, LogIn, ArrowRight, Loader2, KeyRound } from 'lucide-react';
+import { Cpu, Shield, User, Lock, Mail, Building2, UserPlus, LogIn, ArrowRight, Loader2 } from 'lucide-react';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -70,12 +70,6 @@ export function LoginPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillQuickAccount = (email: string, pass: string) => {
-    setLoginEmail(email);
-    setLoginPassword(pass);
-    setErrorMsg('');
   };
 
   return (
@@ -185,41 +179,6 @@ export function LoginPage() {
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                   />
-                </div>
-              </div>
-
-              {/* Fast fill badges for verified PostgreSQL accounts */}
-              <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 text-xs">
-                <div className="flex items-center gap-1.5 text-gray-600 font-semibold mb-2">
-                  <KeyRound className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Real PostgreSQL System Accounts</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => fillQuickAccount('admin@machinery.internal', 'admin123')}
-                    className="p-2 text-left rounded-lg bg-white border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/50 transition cursor-pointer"
-                  >
-                    <div className="font-semibold text-gray-900 text-[11px] flex items-center justify-between">
-                      <span>Administrator</span>
-                      <Shield className="w-3 h-3 text-purple-600" />
-                    </div>
-                    <div className="text-[10px] text-gray-500 truncate">admin@machinery.internal</div>
-                    <div className="text-[10px] text-indigo-600 font-mono">admin123</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => fillQuickAccount('engineer@machinery.internal', 'engineer123')}
-                    className="p-2 text-left rounded-lg bg-white border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/50 transition cursor-pointer"
-                  >
-                    <div className="font-semibold text-gray-900 text-[11px] flex items-center justify-between">
-                      <span>Engineer</span>
-                      <User className="w-3 h-3 text-indigo-600" />
-                    </div>
-                    <div className="text-[10px] text-gray-500 truncate">engineer@machinery.internal</div>
-                    <div className="text-[10px] text-indigo-600 font-mono">engineer123</div>
-                  </button>
                 </div>
               </div>
 

@@ -13,15 +13,15 @@
 | ไฟล์ | Route | หน้าที่ |
 |---|---|---|
 | `dashboard/index.tsx` | `/dashboard` | KPI, การ์ดรายเครื่อง (RUL + P10–P90, สถานะ, คำแนะนำ, ETA), Replacement planner, drift ของอินพุต, เหตุการณ์, สรุปดอกที่ถอดแล้ว |
-| `machine-monitoring/index.tsx` | `/machine-monitoring?machine=` | สัญญาณสด, RUL ตามเวลาตัด, health indicator รายรัน, ควบคุมสตรีม, แบนเนอร์ interlock (ถอดดอก → ตรวจใบมีด), สถานะงานตรวจของดอกที่ถอด |
-| `tool-vision/index.tsx` | `/tool-vision?tab=` | Tool Inspection: สถานีตรวจ, รอตรวจสอบ (VB ที่ AI วัด 4 ใบ + ยอมรับ/วัด bench/กรอกเอง), ใบสั่งงาน, โมเดล & Retrain (กราฟสด, promote/reject) |
+| `machine-monitoring/index.tsx` | `/machine-monitoring?machine=` | สัญญาณสด, RUL ตามเวลาตัด, health indicator รายรัน, ควบคุมสตรีม, แบนเนอร์ interlock (ถอดดอก → ตรวจใบมีด), สถานะงานตรวจ/ใบเบิกของดอกที่ถอด, แบนเนอร์ติดตั้งดอกใหม่ (หยุดชั่วคราว → เริ่มตัด) |
+| `tool-vision/index.tsx` | `/tool-vision?tab=` | Tool Inspection: สถานีตรวจ, รอตรวจสอบ (VB ที่ AI วัด 4 ใบ + ยอมรับค่า AI / กรอกค่าที่วัด), ใบเบิกดอก (ดู/PDF, รับจากคลัง, ติดตั้ง), โมเดล & Retrain (กราฟสด, promote/reject) |
 | `model-registry/index.tsx` | `/model-registry` | แท็บ Time series: GRU direct-RUL ที่ใช้งาน + ผลประเมิน + เวอร์ชัน |
 | `model-registry/VisionRegistry.tsx` | `/model-registry?model=vision` | แท็บ Vision: แบบจำลองวัด VB ที่ใช้งาน, ผลประเมิน, กราฟการเทรนรายสมาชิก ensemble, งาน retrain, เวอร์ชัน + สลับเวอร์ชัน |
 | `reports/index.tsx` | `/reports` | ผล RUL เทียบค่าจริงหลังถอดดอก + CSV |
 | `notifications/index.tsx` | `/notifications` | แจ้งเตือน (กรองระดับ, อ่านแล้ว, ลบ) |
 | `audit-log/index.tsx` | `/audit-log` | Audit Trail (กรองตามประเภทเหตุการณ์, ค้นหา) |
 | `user-management/index.tsx` | `/user-management` | ผู้ใช้และสิทธิ์ (admin) |
-| `login/index.tsx` | `/login` | เข้าสู่ระบบ / สมัครสมาชิก + ปุ่มกรอกบัญชีตั้งต้นของเครื่องพัฒนา |
+| `login/index.tsx` | `/login` | เข้าสู่ระบบ / สมัครสมาชิก |
 
 ## ส่วนประกอบ (`components/`)
 | ไฟล์ | หน้าที่ |
@@ -32,6 +32,7 @@
 | `common/AuthImage.tsx` | `<img>` ของภาพที่ต้องล็อกอิน (ภาพใบมีด) — fetch พร้อม Bearer token แล้วแสดงจาก object URL |
 | `toollife/ui.tsx` | `Card`, ป้ายสถานะ/คำแนะนำ/การสึก, สีของแต่ละเครื่อง, ฟังก์ชันจัดรูปแบบตัวเลข/เวลา |
 | `toollife/TrainingCurves.tsx` | กราฟการฝึก (loss, val MAE, learning rate) — แยกเส้นตามสมาชิก ensemble |
+| `toollife/RequisitionDoc.tsx` | ใบเบิกดอกกัดขนาด A4 (style inline) + `downloadRequisitionPdf` — แปลงเป็น PDF ในเบราว์เซอร์ด้วย html2canvas + jsPDF (ภาษาไทยใช้ฟอนต์ของหน้าเว็บ ไม่ต้องฝังฟอนต์) |
 
 ## ข้อมูล
 | ไฟล์ | หน้าที่ |

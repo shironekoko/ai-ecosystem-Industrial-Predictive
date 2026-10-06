@@ -8,10 +8,9 @@
  * ผู้ทำรายการใน audit = ผู้ใช้ของ token (backend ไม่รับ actor จาก body)
  */
 import type {
-  BenchMeasurement,
   VbSource,
   FleetSnapshot,
-  Replacements,
+  Requisitions,
   TrainingJob,
   TrainingPool,
   VisionInspection,
@@ -172,9 +171,9 @@ export class ApiService {
     return res.blob();
   }
 
-  /** วัดใบมีดบน optical bench — เปิดเผยค่าวัดจริงของใบนั้น */
-  public measureBlade(id: string, blade: number) {
-    return request<BenchMeasurement & { blade: number }>(`/tool-vision/inspections/${id}/blades/${blade}/measure`, { method: 'POST' });
+  /** ผลวัด VB ของใบมีด (ชุดข้อมูล) — ค่าเริ่มต้นของช่อง "กรอกค่าที่วัด" */
+  public getBladeMeasurement(id: string, blade: number) {
+    return request<{ blade: number; vb_um: number }>(`/tool-vision/inspections/${id}/blades/${blade}/measurement`);
   }
 
   public reviewInspection(id: string, blades: { blade: number; source: VbSource; vb_um?: number | null }[], note?: string) {
@@ -184,17 +183,25 @@ export class ApiService {
     });
   }
 
-  public getReplacements() {
-    return request<Replacements>('/tool-vision/replacements');
+  public getRequisitions() {
+    return request<Requisitions>('/tool-vision/requisitions');
   }
 
-  /** ช่างเปลี่ยน/ลับดอกตามใบสั่งงานแล้ว (ปิดทั้งดอก) */
-  public markToolServiced(inspectionId: string) {
-    return request<{ inspection_id: string; status: string }>(`/tool-vision/replacements/${inspectionId}/done`, { method: 'POST' });
+  /** รับดอกทดแทนจากคลังเครื่องมือแล้ว */
+  public issueRequisition(inspectionId: string) {
+    return request<{ req_no: string; status: string }>(`/tool-vision/requisitions/${inspectionId}/issue`, { method: 'POST' });
   }
 
-  public downloadReplacementsCsv() {
-    return downloadCsv('/tool-vision/replacements/export/csv', 'blade_replacements.csv');
+  /** ติดตั้งดอกใหม่บนเครื่องแล้ว → เครื่องเริ่มรอบใหม่ในสถานะหยุดชั่วคราว (machine_ready) */
+  public installRequisition(inspectionId: string) {
+    return request<{ req_no: string; status: string; machine: number; machine_ready: boolean }>(
+      `/tool-vision/requisitions/${inspectionId}/install`,
+      { method: 'POST' },
+    );
+  }
+
+  public downloadRequisitionsCsv() {
+    return downloadCsv('/tool-vision/requisitions/export/csv', 'tool_requisitions.csv');
   }
 
   public getVisionStats() {
@@ -228,11 +235,6 @@ export class ApiService {
 
   public getTrainingJobs() {
     return request<TrainingJob[]>('/tool-vision/training/jobs');
-  }
-
-  /** admin */
-  public startRetrain() {
-    return request<{ job_id: string; n_labels: number }>('/tool-vision/training/start', { method: 'POST' });
   }
 
   /** admin */

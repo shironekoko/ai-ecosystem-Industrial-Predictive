@@ -7,9 +7,9 @@
 |---|---|---|
 | `TOOL_REPLACED` · `TOOL_LIFE_OVERRIDE` | tool_life.streamer | ผู้ควบคุมถอดดอก / สั่งตัดต่อแม้ระบบแนะนำ REPLACE_NOW |
 | `VISION_INSPECTION` | tool_vision.service | ถ่ายภาพ 4 ใบมีดของดอกที่ถอด + AI วัด VB |
-| `VISION_MEASURE` · `VISION_REVIEW` | tool_vision.service | ผู้ตรวจวัดใบมีดบน optical bench · ยืนยันผล |
-| `TOOL_SERVICED` | tool_vision.service | ช่างปิดใบสั่งงาน (เปลี่ยน/ลับดอกแล้ว) |
-| `VISION_RETRAIN_REQUESTED` · `VISION_MODEL_PROMOTED` / `_REJECTED` / `_ACTIVATED` | tool_vision.service | เริ่ม retrain · ตัดสิน candidate · สลับเวอร์ชันแบบจำลอง |
+| `VISION_REVIEW` | tool_vision.service | ผู้ตรวจยืนยันผล (ยอมรับค่า AI / กรอกค่าที่วัด) |
+| `TOOL_ISSUED` · `TOOL_INSTALLED` | tool_vision.service | รับดอกทดแทนจากคลังตามใบเบิก · ติดตั้งดอกใหม่บนเครื่อง |
+| `VISION_RETRAIN_REQUESTED` · `VISION_MODEL_PROMOTED` / `_REJECTED` / `_ACTIVATED` | tool_vision.service | retrain เริ่มอัตโนมัติ (ผู้ทำรายการ `auto-retrain`) · ตัดสิน candidate · สลับเวอร์ชันแบบจำลอง |
 
 | ไฟล์ | หน้าที่ |
 |---|---|

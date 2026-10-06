@@ -35,7 +35,7 @@ Auth: `user` · สถานะทุกเครื่อง
   "machines": [{
     "machine": 1, "machine_id": "M1", "tool": 3, "tool_id": "T3", "feed_drive": "ball screw (...)",
     "state": "CUTTING",                            // IDLE | CUTTING | PAUSED | HOLD | COMPLETED | ERROR
-    "speed": 1.0, "run_index": 120, "n_runs": 638,
+    "speed": 1.0, "run_index": 120,
     "current": {"run": 121, "run_index": 120, "t_min": 11.4, "recorded": true},   // recorded=false = กำลังตัดแนวที่ไม่ถูกบันทึก
     "phase": "MONITOR",                            // BREAK_IN | BASELINE | MONITOR
     "t_min": 11.4,                                 // เวลาตัดสะสม (นาที)
@@ -50,7 +50,8 @@ Auth: `user` · สถานะทุกเครื่อง
     "baseline_runs": null, "flagged_runs": 0, "input_z_max": 1.39,
     "started_at": "...", "completed": null,          // หลังถอดดอก: {"reason", "at", "t_min", "by"}
     "cycle_id": "M1-T3-261004164440",              // 1 รอบการใช้งานดอก (ติดตั้ง → ถอด)
-    "inspection": null,                            // หลังถอดดอก: {"id": "INS-…", "ai_verdict", "status"} (งานตรวจใบมีด)
+    "inspection": null,                            // หลังถอดดอก: {"id": "INS-…", "ai_verdict", "status", "mean_pred_vb"} (งานตรวจใบมีด)
+    "installed": null,                             // ติดตั้งดอกใหม่ตามใบเบิกแล้ว (state = PAUSED รอเริ่มตัด): {"at", "by", "req_no"}
     "model_ready": true,
     "events": [{"at": "...", "level": "INFO", "message": "...", "machine": 1}]
   }]
@@ -72,8 +73,8 @@ Auth: `user` · เหมือน 1 เครื่องใน `/fleet` + `his
 ### ควบคุมสตรีม
 | Method | Path | Auth | Body | ผล |
 |---|---|---|---|---|
-| POST | `/tool-life/machines/{m}/start` | `user` | – | เริ่ม (ถ้า COMPLETED = ติดตั้งดอกเดิมใหม่ เริ่มจากรันแรก) |
-| POST | `/tool-life/machines/{m}/pause` · `/resume` · `/reset` | `user` | – | หยุดชั่วคราว / ตัดต่อ / รีเซ็ต |
+| POST | `/tool-life/machines/{m}/start` | `user` | – | เริ่มตัด (สถานะ `IDLE`) · `409` ถ้าดอกถูกถอดแล้ว (`COMPLETED`) — เครื่องได้ดอกใหม่ผ่านใบเบิกที่ Tool Inspection เท่านั้น |
+| POST | `/tool-life/machines/{m}/pause` · `/resume` · `/reset` | `user` | – | หยุดชั่วคราว (feed hold) / ตัดต่อ — รวมถึงเริ่มตัดดอกใหม่ที่ติดตั้งตามใบเบิก (`PAUSED` + `installed`) / รีเซ็ต = ติดตั้งดอกเดิมใหม่ เล่นจากรันแรก |
 | POST | `/tool-life/machines/{m}/speed` | `user` | `{"speed": 1}` | ความเร็วเล่นซ้ำ (1, 2, 5, 10, 20) |
 | POST | `/tool-life/machines/{m}/acknowledge` | `user` | `{"action": "replace" \| "continue"}` | ตอบสนอง REPLACE_NOW: ถอดดอก (จบ + ประเมินผล + **ถ่ายภาพใบมีด 4 ใบให้ AI ตรวจ** — response มี `inspection.id`) หรือตัดต่อ (override) — บันทึก Audit ในชื่อผู้ใช้ของ token |
 
@@ -104,24 +105,25 @@ Auth: `token (ข้อความแรก)` — browser ส่ง `Authorizat
 
 ขั้นตอน: RUL แจ้ง REPLACE_NOW → `POST /tool-life/machines/{m}/acknowledge {"action": "replace"}` → ระบบสร้างรายการตรวจอัตโนมัติ
 (ภาพ 4 ใบมีดตอนถอดดอก → แบบจำลองวัด VB, `trigger = RUL_EOL`, ผูกกับ `cycle_id` ของสตรีม + alarm INFO)
-→ ผู้ตรวจเลือกค่าที่ใช้ตัดสินของแต่ละใบ: ยอมรับค่า AI / วัดบน optical bench (`measure`) / กรอกค่าที่วัดเอง → `review`
-→ **ระดับดอก = VB เฉลี่ย 4 ใบ** (นิยามเดียวกับ label ของ RUL): ≥ 140 µm = ต้องเปลี่ยน/ลับดอก (`REQUIRED`), 103–140 µm = ควรเปลี่ยนตามแผน (`ADVISED`) → ใบสั่งงาน 1 ใบต่อดอก → `REPLACED` + alarm · VB รายใบบอกคมที่สึกมากสุด/เกิน 140 µm เฉพาะใบ · ค่าที่วัดจริงเข้า pool → `training/start` → candidate → `promote`
+→ ผู้ตรวจเลือกค่าที่ใช้ตัดสินของแต่ละใบ: ยอมรับค่า AI / กรอกค่าที่วัด (ช่องกรอกเติมผลวัดของใบนั้นจากชุดข้อมูลให้ — `measurement` — แก้ได้) → `review`
+→ **ระดับดอก = VB เฉลี่ย 4 ใบ** (นิยามเดียวกับ label ของ RUL): → การจัดการดอกที่ถอด (≥ 140 µm ส่งลับคม/ตัดจำหน่าย · 103–140 µm ส่งลับคมตามแผน · < 103 µm เก็บเป็นดอกสำรอง) → **ใบเบิกดอกทดแทน** 1 ใบต่อการถอด (`OPEN` รอเบิก → `issue` = `ISSUED` รับจากคลังแล้ว → `install` = `INSTALLED` ติดตั้งแล้ว: Machine Monitoring เริ่มรอบใหม่ในสถานะ `PAUSED` รอผู้ควบคุมกด resume) + alarm · หน้าเว็บสร้าง PDF ของใบเบิกในเบราว์เซอร์ · VB รายใบบอกคมที่สึกมากสุด/เกิน 140 µm เฉพาะใบ · ค่าที่วัดจริงเข้า pool → ครบ 3 ดอกใหม่ = **retrain อัตโนมัติ** → candidate → `promote`
 
 เกณฑ์เดียวกับแบบจำลอง RUL: `normal` < 103 µm ≤ `accel` < 140 µm ≤ `eol` · เครื่องเดียวกัน ดอกเดียวกัน: M1/M2/M3 = LUH T3/T6/T9 + ภาพ Nonastreda ดอก 8/9/10 (รอบช่วงท้ายอายุที่ VB เฉลี่ย 4 ใบใกล้กับ VB จริงของดอกตอนถอดที่สุด — ค่าจริงใช้เลือกภาพภายใน ไม่ส่งออก)
-ค่าที่ optical bench วัดได้ (`metrology`) ไม่ถูกส่งออกจนกว่าผู้ตรวจสั่งวัดใบนั้น · รายการตรวจแบบเดิมที่ไม่ผูกกับรอบการใช้งานดอกมีสถานะ `ARCHIVED`
-ผู้ทำรายการใน Audit (ถ่ายภาพ, วัด, ยืนยัน, ปิดใบสั่งงาน, retrain, promote/reject, สลับเวอร์ชัน) = ผู้ใช้ของ token
+ค่า VB จริงของชุดข้อมูลไม่อยู่ใน payload ปกติ — ส่งทีละใบผ่าน `measurement` เมื่อผู้ตรวจเลือกกรอกค่าที่วัดของใบนั้น (เฉพาะรายการที่รอตรวจ) · รายการตรวจแบบเดิมที่ไม่ผูกกับรอบการใช้งานดอกมีสถานะ `ARCHIVED`
+ผู้ทำรายการใน Audit (ถ่ายภาพ, ยืนยัน, รับดอกจากคลัง, ติดตั้งดอก, promote/reject, สลับเวอร์ชัน) = ผู้ใช้ของ token · retrain ที่เริ่มเอง = `auto-retrain`
 
 | Method | Path | Auth | Body / ผล |
 |---|---|---|---|
-| GET | `/tool-vision/stations` | `user` | ต่อเครื่อง: `tool_id`, `rul` (state, rul_min, rul_lo, recommendation, …จาก Machine Monitoring), `cycle_id`, `cycle_inspection`, `can_capture`, `pending_review`, `open_replacements` |
+| GET | `/tool-vision/stations` | `user` | ต่อเครื่อง: `tool_id`, `rul` (state, rul_min, rul_lo, recommendation, …จาก Machine Monitoring), `cycle_id`, `cycle_inspection`, `can_capture`, `pending_review`, `open_requisitions` · `cycle_inspection.requisition` = {req_no, status, issued_by/at, installed_by/at} |
 | POST | `/tool-vision/stations/{m}/capture` | `user` | – — ถ่ายซ้ำด้วยมือเมื่อการถ่ายอัตโนมัติไม่สำเร็จ ได้เฉพาะดอกที่ถอดแล้ว (`409` ถ้าดอกยังอยู่บนเครื่อง; เรียกซ้ำได้ผลเดิม) |
-| GET | `/tool-vision/inspections?status=PENDING_REVIEW\|VERIFIED\|ARCHIVED&machine=` · `/inspections/{id}` · `/inspections/{id}/blades/{b}/image` | `user` | รายการ / รายละเอียด (`rul_context`, `ai_summary` = ระดับดอกจากค่า AI {mean_vb, mean_lo, mean_hi, verdict, worst_blade, over_limit}, `final_summary` = ระดับดอกจากค่าที่ยืนยัน, `low_confidence` = ช่วงของค่าเฉลี่ยคร่อมเกณฑ์; `blades[]`: `pred_vb`, `vb_lo`, `vb_hi` (P10–P90), `zone`, `probs` {normal, accel, eol}, `confidence`, `near_threshold`, `final_vb`, `vb_source`, `final_zone`, `replace_status`) / ภาพ (MinIO bucket `inspections`) |
-| POST | `/tool-vision/inspections/{id}/blades/{b}/measure` | `user` | – → `{"flank_wear_um", "gaps_um", "overhang_um"}` ค่าที่ optical bench วัดของใบนั้น (บันทึก Audit) |
-| POST | `/tool-vision/inspections/{id}/review` | `user` | `{"blades": [{"blade": 1, "source": "AI" \| "BENCH" \| "MANUAL", "vb_um": 132.5 (MANUAL)}, …4 ใบ], "note"}` → `review` = CONFIRMED (ยอมรับค่า AI) / MEASURED (วัดจริง) |
-| GET / POST | `/tool-vision/replacements` · `/replacements/{inspection_id}/done` · `/replacements/export/csv` | `user` | ใบสั่งงานระดับดอก `open` / `done`: `priority` REQUIRED/ADVISED, `mean_vb`, `worst_blade`, `over_limit`, `blades[]` (final_vb, vb_source, pred_vb), `tool_ref`, `removed_t_min`, `rul_recommendation` · `done` ปิดใบสั่งงานทั้งดอก |
-| GET | `/tool-vision/stats` | `user` | `measured_blades`, `mae_um` / `bias_um` (AI เทียบค่าวัดจริง), `zone_agreement_pct`, `confusion_measured_vs_ai` |
+| GET | `/tool-vision/inspections?status=PENDING_REVIEW\|VERIFIED\|ARCHIVED&machine=` · `/inspections/{id}` · `/inspections/{id}/blades/{b}/image` | `user` | รายการ / รายละเอียด (`status` = `PENDING_REVIEW` / `VERIFIED` / `ARCHIVED`, `rul_context` = ผลของแบบจำลอง RUL ตอนถอด, `ai_summary` = ระดับดอกจากค่า AI {mean_vb, mean_lo, mean_hi, zone, verdict, probs, worst_blade, worst_vb, over_limit}, `final_summary` = ระดับดอกจากค่าที่ยืนยัน, `low_confidence` = ช่วงของค่าเฉลี่ยคร่อมเกณฑ์, `requisition` = ใบเบิกของการถอดครั้งนี้ {req_no, status, issued_by/at, installed_by/at}; `blades[]`: `pred_vb`, `vb_lo`, `vb_hi` (P10–P90), `zone`, `probs` {normal, accel, eol}, `confidence`, `near_threshold`, `review` (PENDING / CONFIRMED / MEASURED), `final_vb`, `vb_source` (AI / MANUAL), `final_zone`, `trained_in_version`, `image_url`) / ภาพ JPEG (MinIO bucket `inspections`) |
+| GET | `/tool-vision/inspections/{id}/blades/{b}/measurement` | `user` | `{"blade", "vb_um"}` ผลวัด VB ของใบนั้น (optical bench ของชุดข้อมูล) = ค่าเริ่มต้นของช่อง "กรอกค่าที่วัด" · `409` ถ้ารายการยืนยันแล้ว |
+| POST | `/tool-vision/inspections/{id}/review` | `user` | `{"blades": [{"blade": 1, "source": "AI" \| "MANUAL", "vb_um": 132.5 (MANUAL)}, …4 ใบ], "note"}` → `review` = CONFIRMED (ยอมรับค่า AI) / MEASURED (ผู้ตรวจวัดจริงแล้วกรอก) |
+| GET | `/tool-vision/requisitions` · `/requisitions/export/csv` | `user` | ใบเบิก `open` (OPEN/ISSUED) / `done` (INSTALLED): `req_no`, `status`, `machine_id`, `tool_ref`, `verdict`, `disposition`, `mean_vb`, `worst_blade`, `over_limit`, `blades[]` (final_vb, vb_source, pred_vb), `removed_t_min`, `removed_by`, `rul_recommendation`, `rul_model_version`, `vision_model_version`, ผู้ขอเบิก/รับ/ติดตั้ง + เวลา — หน้าเว็บสร้าง PDF จากข้อมูลนี้ |
+| POST | `/tool-vision/requisitions/{inspection_id}/issue` · `/requisitions/{inspection_id}/install` | `user` | `issue`: OPEN → ISSUED (รับดอกจากคลังแล้ว) · `install`: ISSUED → INSTALLED → `machine_ready` = เครื่องเริ่มรอบใหม่ในสถานะ PAUSED (เฉพาะเมื่อเครื่องยังรอดอกจากการถอดครั้งนั้น) · `409` ถ้าข้ามขั้น |
+| GET | `/tool-vision/stats` | `user` | `inspections`, `pending_review`, `reviewed_blades`, `accepted_blades` (ยอมรับค่า AI), `measured_blades` (วัดจริง), `mae_um` / `bias_um` (AI เทียบค่าวัดจริง), `zone_agreement_pct`, `confusion_measured_vs_ai` |
 | GET / POST | `/tool-vision/model` · `/model/versions` · `/model/reload` · `/model/activate` | GET `user` · POST `admin` | แบบจำลองจาก MinIO `models/tool-vision/<version>/{model.pt, meta.json}` (`task = vb_regression`) · `versions` = ตัวที่ใช้งาน/เวอร์ชันก่อน/candidate รอตัดสิน (candidate ที่ reject ยังอยู่ใน MinIO แต่ไม่แสดง) · meta มี `history` (loss/val MAE/lr รายรอบ), ผลระดับดอก · `activate {version}` = สลับ/ย้อนเวอร์ชัน (ตรวจ sha256 + self-test) |
-| GET / POST | `/tool-vision/training/pool` · `/training/start` · `/training/jobs` · `/training/jobs/{id}/promote` · `/training/jobs/{id}/reject` | GET `user` · POST `admin` | retrain ใน trainer-worker (ARQ, GPU) จากค่าที่วัดจริงเท่านั้น · `jobs[].progress` = ความคืบหน้าสดรายรอบ (Redis) · `result.history` = กราฟการเทรน · TensorBoard ที่ http://localhost:6006 · ภาพเดียวกัน (ดอกเดิมถูกเล่นซ้ำ) นับครั้งเดียว · gate: MAE บนดอก 7 แย่ลงไม่เกิน 1 µm และ MAE บนค่าที่วัดล่าสุดไม่แย่กว่าเดิม |
+| GET / POST | `/tool-vision/training/pool` · `/training/jobs` · `/training/jobs/{id}/promote` · `/training/jobs/{id}/reject` | GET `user` · POST `admin` | **retrain เริ่มอัตโนมัติ** (ไม่มี endpoint ให้กดเริ่ม) หลัง `review` หรือ `promote`/`reject` เมื่อค่าที่วัดจริงจากดอกใหม่ครบ `min_new_tools` ดอก (ค่าเริ่มต้น 3 = 12 ภาพ, env `VISION_RETRAIN_MIN_TOOLS`) และไม่มีงานกำลังฝึก/candidate รอตัดสิน · `pool`: `n_labels`, `n_tools`, `n_new_tools`, `min_new_tools`, `job_running`, `awaiting_decision` · ฝึกใน trainer-worker (ARQ, GPU) จากค่าที่วัดจริงเท่านั้น · `jobs[].progress` = ความคืบหน้าสดรายรอบ (Redis) · `result.history` = กราฟการเทรน · TensorBoard ที่ http://localhost:6006 · ภาพเดียวกัน (ดอกเดิมถูกเล่นซ้ำ) นับครั้งเดียว · gate: MAE บนดอก 7 แย่ลงไม่เกิน 1 µm และ MAE บนดอกล่าสุดที่กันไว้ (ทั้งดอก ไม่ใช้ฝึก) ไม่แย่กว่าเดิม |
 
 ## 3. Reports (`/reports`)
 | Method | Path | Auth | ผล |
@@ -132,9 +134,9 @@ Auth: `token (ข้อความแรก)` — browser ส่ง `Authorizat
 ## 4. Alarms / Audit
 | Method | Path | Auth | ผล |
 |---|---|---|---|
-| GET | `/alarms?severity=&is_read=` | `user` | แจ้งเตือน (source `ToolLife_RUL`: WATCH → INFO, PLAN_REPLACEMENT → WARNING, REPLACE_NOW → CRITICAL) |
+| GET | `/alarms?severity=&is_read=` | `user` | แจ้งเตือน — source `ToolLife_RUL`: WATCH → INFO, PLAN_REPLACEMENT → WARNING, REPLACE_NOW → CRITICAL · source `ToolVision_QC`: ถ่ายภาพใบมีดแล้วรอผู้ตรวจ → INFO, ออกใบเบิกดอกหลังยืนยันผล → WARNING (ระดับดอก REPLACE) / INFO · แจ้งเตือนที่ยังไม่อ่านของเครื่อง + ดอก + ต้นทางเดียวกันถูกอัปเดตแทนการสร้างซ้ำ |
 | PATCH | `/alarms/{id}/read` · POST `/alarms/mark-all-read` · DELETE `/alarms/{id}` | `user` | จัดการแจ้งเตือน |
-| GET | `/audit-logs?eventType=&search=&page=&limit=` | `user` | `eventType`: `TOOL_REPLACED`, `TOOL_LIFE_OVERRIDE` (Machine Monitoring) · `VISION_INSPECTION`, `VISION_MEASURE`, `VISION_REVIEW`, `TOOL_SERVICED`, `VISION_RETRAIN_REQUESTED`, `VISION_MODEL_PROMOTED` / `_REJECTED` / `_ACTIVATED` (Tool Inspection) — ตัวกรองค้นหาบางส่วนของชื่อ |
+| GET | `/audit-logs?eventType=&search=&page=&limit=` | `user` | `eventType`: `TOOL_REPLACED`, `TOOL_LIFE_OVERRIDE` (Machine Monitoring) · `VISION_INSPECTION`, `VISION_REVIEW`, `TOOL_ISSUED`, `TOOL_INSTALLED`, `VISION_RETRAIN_REQUESTED`, `VISION_MODEL_PROMOTED` / `_REJECTED` / `_ACTIVATED` (Tool Inspection) — ตัวกรองค้นหาบางส่วนของชื่อ |
 
 ## 5. Auth / Users / Health
 | Method | Path | Auth | Body / ผล |

@@ -91,6 +91,8 @@ async def acknowledge(machine: int, body: AckBody, user: User = Depends(get_curr
 async def control(machine: int, action: str):
     s = _stream(machine)
     if action == "start":
+        if s.state == "COMPLETED":           # ดอกถูกถอดแล้ว — เครื่องได้ดอกใหม่ผ่านใบเบิก (ติดตั้งแล้ว → หยุดชั่วคราว → resume)
+            raise HTTPException(409, "ดอกถูกถอดแล้ว — เบิกและติดตั้งดอกใหม่ตามใบเบิกที่ Tool Inspection ก่อน")
         s.start()
     elif action == "pause":
         s.pause()

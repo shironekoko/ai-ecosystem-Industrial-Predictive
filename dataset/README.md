@@ -19,7 +19,7 @@ dataset/
 | ชุดข้อมูล | ใช้ที่ | ใช้อย่างไร |
 |---|---|---|
 | **LUH milling** — Denkena, Klemme & Stiehl (2023), *Multivariate time series data of milling processes with varying tool wear and machine tools*, Data in Brief · Mendeley Data DOI [10.17632/zpxs87bjt8](https://doi.org/10.17632/zpxs87bjt8) | `timeseries_docs/tool_rul_forecast` (ฝึกแบบจำลอง RUL) · `backend/app/features/tool_life` (สตรีมดอก T3/T6/T9 ที่ไม่ได้ใช้ฝึกบนเครื่อง M1/M2/M3) | VB ใช้เป็น label ตอนฝึก และใช้ประเมินหลังถอดดอกเท่านั้น — ระหว่างสตรีมไม่อ่าน/ไม่ส่ง VB หรือชื่อไฟล์ (มี VB ฝังอยู่) |
-| **Nonastreda** — *Nonastreda Multimodal Dataset for Identifying Tool Wear Condition* · Mendeley Data DOI [10.17632/m892d2wtzh.1](https://doi.org/10.17632/m892d2wtzh.1) | `nontime_docs/tool_vb_vision` (ฝึกแบบจำลองวัด VB) · `backend/app/features/tool_vision` (ภาพใบมีดของดอก 8/9/10 = ดอกบนเครื่อง M1/M2/M3) | ใช้ `tool/` + `flank_wear` เท่านั้น · ฝึกดอก 1–6, val ดอก 7, ดอก 8–10 ไม่เคยใช้ฝึก · ค่าที่ bench วัดแสดงเมื่อผู้ตรวจสั่งวัดใบนั้น |
+| **Nonastreda** — *Nonastreda Multimodal Dataset for Identifying Tool Wear Condition* · Mendeley Data DOI [10.17632/m892d2wtzh.1](https://doi.org/10.17632/m892d2wtzh.1) | `nontime_docs/tool_vb_vision` (ฝึกแบบจำลองวัด VB) · `backend/app/features/tool_vision` (ภาพใบมีดของดอก 8/9/10 = ดอกบนเครื่อง M1/M2/M3) | ใช้ `tool/` + `flank_wear` เท่านั้น · ฝึกดอก 1–6, val ดอก 7, ดอก 8–10 ไม่เคยใช้ฝึก · ค่าที่ bench วัดใช้ฝึก/ประเมิน และใช้เลือกภาพช่วงท้ายอายุภายใน backend — บนเว็บแสดงเฉพาะเมื่อผู้ตรวจเลือก "กรอกค่าที่วัด" ของใบนั้น (เป็นค่าเริ่มต้นของช่องกรอก แทนผลจากเครื่องวัดจริง) |
 
 ตำแหน่งอื่น: ตั้ง `LUH_DATASET_DIR` (โฟลเดอร์ที่มี `filelist.csv`) และ `NONASTREDA_DIR` (โฟลเดอร์ที่มี `labels.csv` + `tool/`)
 

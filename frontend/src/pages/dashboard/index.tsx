@@ -130,9 +130,7 @@ const MachineCard: React.FC<{ m: MachineSnapshot }> = ({ m }) => {
         </div>
         <div className="py-2 border-x border-gray-100">
           <p className="text-gray-400">รันที่</p>
-          <p className="font-semibold text-gray-700 tabular-nums">
-            {m.run_index}/{m.n_runs}
-          </p>
+          <p className="font-semibold text-gray-700 tabular-nums">{m.run_index}</p>
         </div>
         <div className="py-2">
           <p className="text-gray-400">ครบกำหนด (ETA)</p>
@@ -270,7 +268,7 @@ export const DashboardPage: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard label="เครื่องที่กำลังตัด" value={`${cutting}/${machines.length || 0}`} icon={Gauge} accent="emerald" trendLabel="สตรีมดอกที่สงวนไว้ (ไม่ได้ใช้ฝึก)" />
+        <StatCard label="เครื่องที่กำลังตัด" value={`${cutting}/${machines.length || 0}`} icon={Gauge} accent="emerald" />
         <StatCard
           label="RUL ต่ำสุดในกอง"
           value={lowest ? fmt(lowest.prediction!.rul_min) : '—'}
@@ -397,7 +395,9 @@ export const DashboardPage: React.FC = () => {
                         · ดอก {v.tool_id ?? '—'} ·{' '}
                         {v.cycle_inspection
                           ? v.cycle_inspection.status === 'VERIFIED'
-                            ? 'ตรวจแล้ว'
+                            ? v.cycle_inspection.requisition?.status === 'ISSUED'
+                              ? 'เบิกดอกแล้ว รอติดตั้ง'
+                              : 'ตรวจแล้ว รอเบิกดอก'
                             : 'ถอดแล้ว รอตรวจ'
                           : v.rul?.state === 'COMPLETED'
                           ? 'ถอดแล้ว'
@@ -410,12 +410,12 @@ export const DashboardPage: React.FC = () => {
                           รอยืนยัน {v.pending_review}
                         </Link>
                       )}
-                      {v.open_replacements > 0 ? (
-                        <Link to="/tool-vision?tab=replace" className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-semibold">
-                          ใบสั่งงาน {v.open_replacements}
+                      {v.open_requisitions > 0 ? (
+                        <Link to="/tool-vision?tab=requisition" className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
+                          ใบเบิกดอก {v.open_requisitions}
                         </Link>
                       ) : (
-                        <span className="text-emerald-600">ใบมีดปกติ</span>
+                        <span className="text-emerald-600">ไม่มีใบเบิกค้าง</span>
                       )}
                     </span>
                   </li>

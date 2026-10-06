@@ -109,7 +109,7 @@ export default function UserManagementPage() {
             <h3 className="text-sm font-bold text-gray-900">Maintenance Engineer</h3>
           </div>
           <p className="text-xs text-gray-500 leading-relaxed">
-            Monitors machines and RUL predictions, removes tools at REPLACE_NOW, reviews AI blade VB measurements (accept or measure on the bench) and closes replacement work orders. Restricted from user administration.
+            Monitors machines and RUL predictions, removes tools at REPLACE_NOW, reviews AI blade VB measurements (accept the AI value or enter a measured value) and handles tool requisitions (issue from the crib, install the new tool). Restricted from user administration.
           </p>
         </div>
 
@@ -121,7 +121,7 @@ export default function UserManagementPage() {
             <h3 className="text-sm font-bold text-gray-900">System Administrator</h3>
           </div>
           <p className="text-xs text-gray-500 leading-relaxed">
-            Everything an engineer can do, plus starting vision retrains, promoting/rejecting candidates, switching model versions, and managing user accounts and roles.
+            Everything an engineer can do, plus promoting/rejecting candidates from automatic vision retrains, switching model versions, and managing user accounts and roles.
           </p>
         </div>
       </div>

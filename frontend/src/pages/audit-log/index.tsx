@@ -11,10 +11,10 @@ const EVENT_TYPES: [string, string][] = [
   ['TOOL_REPLACED', 'Tool removed (RUL)'],
   ['TOOL_LIFE_OVERRIDE', 'REPLACE_NOW overridden'],
   ['VISION_INSPECTION', 'Blade images captured'],
-  ['VISION_MEASURE', 'Bench measurement'],
   ['VISION_REVIEW', 'Inspection reviewed'],
-  ['TOOL_SERVICED', 'Tool serviced'],
-  ['VISION_RETRAIN_REQUESTED', 'Retrain requested'],
+  ['TOOL_ISSUED', 'Tool issued from crib'],
+  ['TOOL_INSTALLED', 'New tool installed'],
+  ['VISION_RETRAIN_REQUESTED', 'Retrain started (auto)'],
   ['VISION_MODEL', 'Model promote / reject / switch'],
 ];
 

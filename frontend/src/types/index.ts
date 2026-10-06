@@ -49,7 +49,6 @@ export interface MachineSnapshot {
   state: StreamState;
   speed: number;
   run_index: number;
-  n_runs: number;
   current: { run: number | null; run_index: number; t_min: number; recorded: boolean } | null;
   phase: Phase;
   t_min: number | null;
@@ -61,6 +60,7 @@ export interface MachineSnapshot {
   completed: { reason: string; at: string; t_min: number; by?: string } | null;
   cycle_id: string | null; // 1 รอบการใช้งานดอก (ติดตั้ง → ถอด) — เชื่อมกับงานตรวจใบมีด
   inspection: { id: string; ai_verdict: ToolVerdict; status: string } | null;
+  installed: { at: string; by: string; req_no: string } | null; // ติดตั้งดอกใหม่ตามใบเบิกแล้ว รอผู้ควบคุมกดเริ่มตัด
   model_ready: boolean;
   events: StreamEvent[];
   history?: RunRecord[];
@@ -201,7 +201,7 @@ export interface AuditEvent {
 // ─────────────────────────────────────────────────────────────
 /** โซนตามเกณฑ์ VB (เดียวกับแบบจำลอง RUL): normal < 103 µm ≤ accel < 140 µm ≤ eol */
 export type VbZone = 'normal' | 'accel' | 'eol';
-export type VbSource = 'AI' | 'BENCH' | 'MANUAL';
+export type VbSource = 'AI' | 'MANUAL';
 export type ToolVerdict = 'OK' | 'MONITOR' | 'REPLACE';
 
 export interface VisionBlade {
@@ -214,14 +214,10 @@ export interface VisionBlade {
   confidence: number; // ความน่าจะเป็นของโซนที่ทาย
   probs: Record<VbZone, number>;
   near_threshold: boolean; // ช่วง P10–P90 คร่อมเกณฑ์ 103/140 µm → ควรวัดยืนยัน
-  metrology: BenchMeasurement | null; // มีเฉพาะใบที่สั่งวัดบน optical bench แล้ว
   review: 'PENDING' | 'CONFIRMED' | 'MEASURED';
   final_vb: number | null;
   vb_source: VbSource | null;
   final_zone: VbZone | null;
-  replace_status: 'NONE' | 'REQUIRED' | 'ADVISED' | 'REPLACED';
-  replaced_by: string | null;
-  replaced_at: string | null;
   trained_in_version: string | null;
   image_url: string;
 }
@@ -290,6 +286,7 @@ export interface VisionInspection {
   reviewed_by: string | null;
   reviewed_at: string | null;
   note: string | null;
+  requisition: RequisitionBrief | null; // ใบเบิกดอกทดแทน (ออกเมื่อยืนยันผล)
   blades?: VisionBlade[];
   ai_summary?: ToolSummary | null; // ระดับดอกจากค่า AI (เฉลี่ย 4 ใบ + P10–P90)
   final_summary?: ToolFinalSummary | null; // ระดับดอกจากค่าที่ผู้ตรวจยืนยัน/วัด
@@ -315,41 +312,53 @@ export interface VisionStation {
   cycle_inspection: VisionInspection | null; // ผลตรวจของดอกที่เพิ่งถอดในรอบนี้
   can_capture: boolean;
   pending_review: number;
-  open_replacements: number;
+  open_requisitions: number; // ใบเบิกที่ยังไม่ติดตั้ง
   last: VisionInspection | null;
 }
 
-/** ใบสั่งงาน 1 ใบ = ดอก 1 ดอกที่ถอดมา */
-export interface WorkOrder {
+/** ใบเบิกดอกทดแทน: OPEN = รอเบิก → ISSUED = รับดอกจากคลังแล้ว → INSTALLED = ติดตั้งบนเครื่องแล้ว */
+export type RequisitionStatus = 'OPEN' | 'ISSUED' | 'INSTALLED';
+
+export interface RequisitionBrief {
+  req_no: string;
+  status: RequisitionStatus;
+  created_at: string | null;
+  issued_by: string | null;
+  issued_at: string | null;
+  installed_by: string | null;
+  installed_at: string | null;
+}
+
+/** ใบเบิก 1 ใบ = การถอดดอก 1 ครั้ง (หน้าเว็บสร้าง PDF จากข้อมูลนี้) */
+export interface Requisition extends RequisitionBrief {
   inspection_id: string;
   machine: number;
   machine_id: string;
   tool_ref: string | null;
-  priority: 'REQUIRED' | 'ADVISED';
-  status: 'REQUIRED' | 'ADVISED' | 'REPLACED';
+  cycle_id: string | null;
+  requested_by: string | null;
+  verdict: ToolVerdict | null;
+  disposition: string | null; // การจัดการดอกที่ถอด ตาม VB เฉลี่ย 4 ใบ
   mean_vb: number | null;
   worst_blade: number | null;
+  worst_vb: number | null;
   over_limit: number[];
   blades: { blade: number; final_vb: number | null; vb_source: VbSource | null; pred_vb: number | null; zone: VbZone | null; image_url: string }[];
   removed_t_min: number | null;
   removed_by: string | null;
+  removed_at: string | null;
+  removal_reason: string | null;
   rul_recommendation: Recommendation | null;
+  rul_model_version: string | null;
+  vision_model_version: string;
   captured_at: string;
-  reviewed_by: string | null;
   reviewed_at: string | null;
-  replaced_by: string | null;
-  replaced_at: string | null;
+  note: string | null;
 }
 
-export interface Replacements {
-  open: WorkOrder[];
-  done: WorkOrder[];
-}
-
-export interface BenchMeasurement {
-  flank_wear_um: number;
-  gaps_um: number;
-  overhang_um: number;
+export interface Requisitions {
+  open: Requisition[];
+  done: Requisition[];
 }
 
 export interface VisionStats {
@@ -365,12 +374,14 @@ export interface VisionStats {
 }
 
 export interface TrainingPool {
-  n_labels: number; // ค่า VB ที่วัดจริงและยังไม่เคยใช้ฝึก
+  n_labels: number; // ค่า VB ที่วัดจริงและยังไม่เคยใช้ฝึก (ใบ)
+  n_tools: number; // จำนวนดอกของค่าเหล่านั้น
+  n_new_tools: number; // ดอกที่ยังไม่เคยถูกลองฝึก — ครบ min_new_tools แล้ว retrain เริ่มเอง
+  min_new_tools: number;
   n_large_error: number;
   large_error_um: number;
-  suggest_retrain: boolean;
-  threshold: number;
   job_running: boolean;
+  awaiting_decision: boolean; // มี candidate รอ promote / reject → ยังไม่เริ่มรอบใหม่
 }
 
 export interface EvalBrief {

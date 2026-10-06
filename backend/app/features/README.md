@@ -11,7 +11,7 @@
 | Feature | หน้าที่ | API | สิทธิ์ |
 |---|---|---|---|
 | [`tool_life/`](tool_life/README.md) | ★ แบบจำลอง RUL (GRU จาก MinIO) + สตรีมข้อมูล LUH ตามเวลาจริง + interlock + ประเมินผลหลังถอดดอก | `/tool-life/*` + WebSocket | ล็อกอิน · `/model/reload` admin · WebSocket: token ในข้อความแรก |
-| [`tool_vision/`](tool_vision/README.md) | ★ วัดรอยสึก VB ของใบมีดจากภาพ (ต่อจาก tool_life) + ผู้ตรวจยืนยัน/วัดจริง + ใบสั่งงานระดับดอก + retrain | `/tool-vision/*` | ล็อกอิน · สลับ/โหลดแบบจำลอง, retrain, promote/reject: admin |
+| [`tool_vision/`](tool_vision/README.md) | ★ วัดรอยสึก VB ของใบมีดจากภาพ (ต่อจาก tool_life) + ผู้ตรวจยืนยัน/วัดจริง + ใบเบิกดอกทดแทน (PDF) + retrain อัตโนมัติ | `/tool-vision/*` | ล็อกอิน · สลับ/โหลดแบบจำลอง, promote/reject: admin |
 | [`reports/`](reports/README.md) | สรุปผล RUL เทียบค่าจริงของดอกที่ถอดแล้ว + CSV | `/reports/*` | ล็อกอิน |
 | [`alarms/`](alarms/README.md) | แจ้งเตือนจากผลพยากรณ์และผลตรวจใบมีด (INFO / WARNING / CRITICAL) | `/alarms` | ล็อกอิน |
 | [`audit/`](audit/README.md) | บันทึกการตัดสินใจของผู้ใช้ | `/audit-logs` | ล็อกอิน |

@@ -31,7 +31,7 @@ tags_metadata = [
     {
         "name": "Tool Vision (blade inspection)",
         "description": "วัดรอยสึก VB ของ 4 ใบมีดจากภาพ (ensemble ของ ResNet-18 regression จาก MinIO) ของดอกที่ถอดตาม RUL → "
-                       "ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบสั่งงาน → retrain",
+                       "ระดับดอก = VB เฉลี่ย 4 ใบ → ผู้ตรวจยืนยัน/วัดจริง → ใบเบิกดอก → retrain",
     },
     {"name": "Industrial Alarms", "description": "การแจ้งเตือนจากผลพยากรณ์ RUL และผลตรวจใบมีด"},
     {"name": "Audit Trail", "description": "บันทึกการตัดสินใจของผู้ใช้ (ถอดดอก, ยืนยันผลตรวจ, retrain, สลับแบบจำลอง)"},
@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
         ensure_vision_schema(engine)
         print("[OK] Database tables created")
 
-        # บัญชีตั้งต้นสำหรับเครื่องพัฒนา (ปุ่มกรอกอัตโนมัติในหน้า login)
+        # บัญชีตั้งต้นสำหรับเครื่องพัฒนา
         from app.features.auth.service import create_user, get_user_by_email
         from core.database import SessionLocal
 
@@ -108,7 +108,7 @@ app = FastAPI(
     title="AI Ecosystem API — CNC Tool Life",
     description=(
         "Backend ของระบบ CNC Tool Life AI: พยากรณ์อายุดอกกัด (RUL, time series) → ถอดดอก → "
-        "วัดรอยสึก VB จากภาพใบมีด → ผู้ตรวจยืนยัน → ใบสั่งงาน → retrain\n\n"
+        "วัดรอยสึก VB จากภาพใบมีด → ผู้ตรวจยืนยัน → ใบเบิกดอก → retrain\n\n"
         "ทุก endpoint อยู่ใต้ `/api/v1` · ใช้ปุ่ม **Authorize** ใส่ Bearer token สำหรับ endpoint ที่ต้องล็อกอิน"
     ),
     version="1.0.0",

@@ -350,7 +350,20 @@ class TrainConfig:
     ensemble: int = 1               # จำนวนสมาชิก (seed ต่างกัน) ของแบบจำลองที่ใช้งาน
     ref: bool = False               # True = อินพุตคู่กับภาพของใบเดียวกันตอนดอกใหม่ (RefVB)
     tta: bool = False               # test-time augmentation: เฉลี่ยผลของภาพกับภาพกลับซ้าย-ขวา (ตอนใช้งาน)
+    balance: str | None = None      # "inv_freq" = สุ่มภาพตามน้ำหนักผกผันกับจำนวนภาพในช่วง VB (<103 / 103–140 / ≥140) — ช่วงสึกมากถูกเรียนบ่อยขึ้น
     extra: dict = field(default_factory=dict)
+
+
+def balanced_sampler(vb, mode: str, generator: torch.Generator):
+    """WeightedRandomSampler ที่ให้แต่ละช่วงเกณฑ์ (<103 / 103–140 / ≥140 µm) ถูกสุ่มเท่ากันโดยเฉลี่ย — จำนวนตัวอย่างต่อ epoch เท่าเดิม"""
+    if mode != "inv_freq":
+        raise ValueError(f"balance ไม่รู้จัก: {mode}")
+    v = np.asarray(vb, float)
+    bins = np.digitize(v, [VB_ACCEL, VB_EOL])
+    counts = np.bincount(bins, minlength=3).astype(float)
+    w = 1.0 / counts[bins]
+    return torch.utils.data.WeightedRandomSampler(torch.as_tensor(w, dtype=torch.double), num_samples=len(v),
+                                                  replacement=True, generator=generator)
 
 
 def seed_everything(seed: int):
@@ -437,7 +450,11 @@ def fit(cfg: TrainConfig, train_images: list[torch.Tensor], train_vb, val_images
     model.to(dev)
     ds = BladeDataset(train_images, train_vb)
     g = torch.Generator().manual_seed(cfg.seed)
-    dl = torch.utils.data.DataLoader(ds, batch_size=cfg.batch, shuffle=True, drop_last=len(ds) > cfg.batch, generator=g)
+    if cfg.balance:
+        dl = torch.utils.data.DataLoader(ds, batch_size=cfg.batch, sampler=balanced_sampler(train_vb, cfg.balance, g),
+                                         drop_last=len(ds) > cfg.batch)
+    else:
+        dl = torch.utils.data.DataLoader(ds, batch_size=cfg.batch, shuffle=True, drop_last=len(ds) > cfg.batch, generator=g)
     opt = make_optimizer(model, cfg)
     sched = make_scheduler(opt, cfg, len(dl))
     loss_fn = nn.L1Loss() if cfg.loss == "l1" else nn.HuberLoss(delta=cfg.huber_delta)

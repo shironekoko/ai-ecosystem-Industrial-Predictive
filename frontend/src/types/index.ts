@@ -452,5 +452,7 @@ export interface VisionVersion {
   gate: any;
   arch?: string | null;
   epochs?: number | null;
+  patience?: number | null;            // มีค่า = ใช้ checkpoint ที่ MAE บนดอก 7 ดีที่สุด (หยุดเมื่อไม่ดีขึ้น N epoch)
+  checkpoint?: { rule: string; best_epoch?: number[]; best_val_mae?: number[]; stopped_epoch?: number[] } | null;
   history?: TrainEpoch[] | null;
 }

@@ -1,0 +1,5 @@
+level,model,n,zone_acc,macro_recall,eol_recall,eol_precision,eol_called_normal,normal_called_eol
+ใบ,regression,352,69.9,60.7,51.1,54.5,4,3
+ใบ,classifier,352,69.0,62.3,57.4,47.4,4,5
+ดอก (4 ใบ),regression,88,72.7,65.5,60.0,50.0,1,1
+ดอก (4 ใบ),classifier,88,68.2,60.9,50.0,35.7,1,1

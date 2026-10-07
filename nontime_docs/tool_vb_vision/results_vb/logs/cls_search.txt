@@ -1,0 +1,57 @@
+time="2026-10-07T18:53:00+07:00" level=warning msg="Found orphan containers ([grafana otel-collector prometheus tempo loki]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container minio Running 
+ Container redis Running 
+ Container redis Waiting 
+ Container redis Healthy 
+ Container ai-ecosystem-industrial-predictive-trainer-worker-run-dd1df6b16968 Creating 
+ Container ai-ecosystem-industrial-predictive-trainer-worker-run-dd1df6b16968 Created 
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 12.4.1
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+11:53:27 == cls c_e15 {'aug': 'strong', 'epochs': 15}
+11:53:28   โหลดภาพ (352, (224, 672), (0.0, 1.0)) 1s
+11:56:15   cls c_e15 s0: zone acc 67.3%
+/app/.venv/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:1194: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  scheduler.step()
+11:59:02   cls c_e15 s1: zone acc 69.9%
+11:59:02 == cls c_e30_ls {'aug': 'strong', 'epochs': 30, 'extra': {'label_smoothing': 0.1}}
+12:04:37   cls c_e30_ls s0: zone acc 69.6%
+/app/.venv/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:1194: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  scheduler.step()
+12:10:14   cls c_e30_ls s1: zone acc 69.6%
+12:10:14 == cls c_e60_ls {'aug': 'strong', 'epochs': 60, 'extra': {'label_smoothing': 0.1}}
+12:21:27   cls c_e60_ls s0: zone acc 70.5%
+/app/.venv/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:1194: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  scheduler.step()
+12:32:46   cls c_e60_ls s1: zone acc 69.9%
+12:32:46 == cls ord_e30 {'aug': 'strong', 'epochs': 30, 'extra': {'cls_mode': 'ordinal'}}
+12:38:18   cls ord_e30 s0: zone acc 64.8%
+/app/.venv/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:1194: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  scheduler.step()
+12:43:51   cls ord_e30 s1: zone acc 64.8%
+     level                  model   n  zone_acc  macro_recall  eol_recall  eol_precision  eol_called_normal  normal_called_eol
+ดอก (4 ใบ)       classifier c_e15  88      68.2          60.9        50.0           35.7                  1                  1
+ดอก (4 ใบ)    classifier c_e30_ls  88      73.9          64.7        50.0           38.5                  1                  1
+ดอก (4 ใบ)    classifier c_e60_ls  88      76.1          68.7        60.0           50.0                  1                  0
+ดอก (4 ใบ)     classifier ord_e30  88      64.8          58.3        50.0           35.7                  0                  2
+ดอก (4 ใบ)   classifier s3_sa_e60  88      69.3          62.2        50.0           38.5                  0                  3
+ดอก (4 ใบ) regression (s3_sa_e60)  88      72.7          65.5        60.0           50.0                  1                  1
+        ใบ       classifier c_e15 352      69.0          62.3        57.4           47.4                  4                  5
+        ใบ    classifier c_e30_ls 352      71.6          62.3        48.9           43.4                  3                  6
+        ใบ    classifier c_e60_ls 352      70.5          60.7        48.9           45.1                  3                  5
+        ใบ     classifier ord_e30 352      65.3          58.5        57.4           44.3                  0                  5
+        ใบ   classifier s3_sa_e60 352      66.8          57.4        44.7           35.0                  2                 14
+        ใบ regression (s3_sa_e60) 352      69.9          60.7        51.1           54.5                  4                  3
+12:43:51 DONE

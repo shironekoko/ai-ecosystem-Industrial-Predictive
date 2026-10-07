@@ -58,6 +58,10 @@ def test_inspection_uses_only_end_of_life_images():
     # ค่าจริงตอนถอดของ LUH T3/T6/T9 (116/124/125 µm) → ภาพ N8 run 12 / N9 run 12 / N10 run 13
     assert (nd.eol_run_for(8, 116), nd.eol_run_for(9, 124), nd.eol_run_for(10, 125)) == (12, 12, 13)
     assert nd.eol_run_for(8, 152) == 13                       # ตัดต่อจนข้อมูลหมด → ภาพที่สึกมากกว่า
+    # รอบถัดไปของเครื่องเดียวกัน (ดอกใหม่) → ภาพชุดที่ยังไม่เคยตรวจ · ใช้ครบแล้ว → เลือกจากทุกรอบ
+    assert (nd.eol_run_for(8, 116, exclude={12}), nd.eol_run_for(9, 124, exclude={12}), nd.eol_run_for(10, 125, exclude={13})) == (11, 13, 12)
+    assert nd.eol_run_for(9, 124, exclude={12, 13}) == 12
+    assert nd.ref_tool_run("T10R13B2") == (10, 13) and nd.ref_tool_run("x") is None
 
 
 def test_removal_context_from_rul_stream_has_no_ground_truth():
@@ -214,6 +218,13 @@ def test_retrain_holdout_splits_whole_tools():
     assert held == [] and len(train) == 8                                                 # 2 ดอก: ยังไม่มีชุดตรวจ
     old = [{k: v for k, v in d.items() if k != "inspection_id"} for d in labels]          # งานเก่าไม่มี inspection_id
     assert {d["blade_id"][:5] for d in split_recent(old)[1]} == {"INS-3"}
+    # 2 รอบของ 3 เครื่อง: ภาพมาจากดอกจริง 8/9/10 คนละช่วงสึก → กันดอกจริงล่าสุดทั้ง 2 รอบ (ไม่ให้รอบแรกของดอกนั้นอยู่ในชุดฝึก)
+    rounds = [dict(blade_id=f"INS-{k}{t}-B{b}", inspection_id=f"INS-{k}{t}", image_ref=f"T{t}R{r}B{b}", vb_um=120.0,
+                   reviewed_at=f"2026-10-0{k}T00:0{t - 8}:00Z")
+              for k, runs in ((1, {8: 12, 9: 12, 10: 13}), (2, {8: 11, 9: 13, 10: 12})) for t, r in runs.items() for b in (1, 2, 3, 4)]
+    train, held = split_recent(rounds)
+    assert {d["image_ref"][:3] for d in held} == {"T10"} and len(held) == 8
+    assert not {d["image_ref"][:3] for d in train} & {"T10"} and len(train) == 16
 
 
 def test_auto_retrain_counts_new_tools_not_images():
@@ -222,10 +233,11 @@ def test_auto_retrain_counts_new_tools_not_images():
 
     from app.features.tool_vision.service import AUTO_RETRAIN_MIN_TOOLS, new_tool_count
 
-    pool = [SimpleNamespace(id=f"INS-{i}-B{b}", inspection_id=f"INS-{i}") for i in (1, 2, 3) for b in (1, 2, 3, 4)]
-    assert new_tool_count(pool, set()) == 3 >= AUTO_RETRAIN_MIN_TOOLS
-    assert new_tool_count(pool, {f"INS-1-B{b}" for b in (1, 2, 3, 4)}) == 2             # ดอก 1 เคยลองฝึกแล้ว
-    assert new_tool_count(pool[:8], set()) == 2 < AUTO_RETRAIN_MIN_TOOLS                  # 8 ภาพจาก 2 ดอก ยังไม่ถึงเกณฑ์
+    assert AUTO_RETRAIN_MIN_TOOLS == 6                                                     # 6 ดอก = 24 ภาพ (M1–M3 สองรอบ)
+    pool = [SimpleNamespace(id=f"INS-{i}-B{b}", inspection_id=f"INS-{i}") for i in range(1, 7) for b in (1, 2, 3, 4)]
+    assert new_tool_count(pool, set()) == 6 >= AUTO_RETRAIN_MIN_TOOLS
+    assert new_tool_count(pool, {f"INS-1-B{b}" for b in (1, 2, 3, 4)}) == 5 < AUTO_RETRAIN_MIN_TOOLS  # ดอก 1 เคยลองฝึกแล้ว
+    assert new_tool_count(pool[:20], set()) == 5 < AUTO_RETRAIN_MIN_TOOLS                 # 20 ภาพจาก 5 ดอก ยังไม่ถึงเกณฑ์
 
 
 def test_auto_retrain_starts_only_when_threshold_met(monkeypatch):

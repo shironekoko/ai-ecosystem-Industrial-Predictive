@@ -69,6 +69,18 @@ CONFIGS: dict[str, tuple[dict, tuple[int, ...]]] = {
     "s3_sa_r34_e45": (dict(aug="strong", arch="resnet34", epochs=45), (0, 1)),
     # S4 — ตัวที่ดีที่สุด (ResNet-18, augmentation แรง, 60 epoch) + TTA กลับซ้าย-ขวา: seed เดียวกับ s3_sa_e60 → ต่างกันเฉพาะ TTA
     "s4_e60_tta": (dict(aug="strong", epochs=60, tta=True), (0, 1)),
+    # S5 — แก้การทายต่ำของภาพที่สึกมาก (ภาพ VB ≥ 140 มีน้อย ~13%): สุ่มภาพแต่ละช่วงเกณฑ์ด้วยน้ำหนักผกผันกับจำนวนภาพ (seed เดียวกับ s3_sa_e60)
+    "s5_e60_bal": (dict(aug="strong", epochs=60, balance="inv_freq"), (0, 1)),
+}
+
+# classifier 3 คลาส (ปกติ / ใกล้หมดอายุ / หมดอายุ) — จูนแยกจาก regression (--cls-search) เพื่อให้เทียบกันอย่างยุติธรรม
+# ตัวเดิมที่เทียบในรายงานหัวข้อ 5.6 = สูตรของ regression ทั้งหมด (cls_s3_sa_e60: 60 epoch, cross-entropy ถ่วงคลาส)
+# extra: label_smoothing = ลดความมั่นใจเกินของ cross-entropy · cls_mode="ordinal" = 2 ทางออก P(VB ≥ 103), P(VB ≥ 140) รู้ว่าคลาสเรียงกัน
+CLS_CONFIGS: dict[str, tuple[dict, tuple[int, ...]]] = {
+    "c_e15": (dict(aug="strong", epochs=15), (0, 1)),
+    "c_e30_ls": (dict(aug="strong", epochs=30, extra={"label_smoothing": 0.1}), (0, 1)),
+    "c_e60_ls": (dict(aug="strong", epochs=60, extra={"label_smoothing": 0.1}), (0, 1)),
+    "ord_e30": (dict(aug="strong", epochs=30, extra={"cls_mode": "ordinal"}), (0, 1)),
 }
 
 
@@ -177,8 +189,10 @@ def fit_cls(cfg: vm.TrainConfig, imgs: list[torch.Tensor], y: np.ndarray):
 
     vm.seed_everything(cfg.seed)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    ordinal = cfg.extra.get("cls_mode", "ce") == "ordinal"
     model = vm.build(cfg.arch, pretrained=True, p_drop=cfg.p_drop, norm=cfg.norm)
-    model.head = nn.Sequential(nn.Dropout(cfg.p_drop), nn.Linear(model.head[-1].in_features, 3))
+    model.head = nn.Sequential(nn.Dropout(cfg.p_drop), nn.Linear(model.head[-1].in_features, 2 if ordinal else 3))
+    model.ordinal = ordinal                   # ตั้งก่อนสร้าง EMA (AveragedModel คัดลอกโมดูลรวมแอตทริบิวต์)
     model.to(dev)
     ds = list(zip(imgs, torch.as_tensor(y, dtype=torch.long)))
     g = torch.Generator().manual_seed(cfg.seed)
@@ -186,7 +200,13 @@ def fit_cls(cfg: vm.TrainConfig, imgs: list[torch.Tensor], y: np.ndarray):
     opt = vm.make_optimizer(model, cfg)
     sched = vm.make_scheduler(opt, cfg, len(dl))
     freq = np.bincount(y, minlength=3).astype(float)
-    loss_fn = nn.CrossEntropyLoss(weight=torch.tensor(freq.sum() / (3 * np.maximum(freq, 1)), dtype=torch.float32, device=dev))
+    if ordinal:                               # เป้าหมาย [VB ≥ 103, VB ≥ 140] · pos_weight = ลบ/บวก ของแต่ละทางออก (ภาพหมดอายุมีน้อย)
+        pos = np.array([(y >= 1).sum(), (y >= 2).sum()], float)
+        bce = nn.BCEWithLogitsLoss(pos_weight=torch.tensor((len(y) - pos) / np.maximum(pos, 1), dtype=torch.float32, device=dev))
+        loss_fn = lambda out, t: bce(out, torch.stack([t >= 1, t >= 2], 1).float())  # noqa: E731
+    else:
+        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor(freq.sum() / (3 * np.maximum(freq, 1)), dtype=torch.float32, device=dev),
+                                      label_smoothing=float(cfg.extra.get("label_smoothing", 0.0)))
     scaler = torch.amp.GradScaler("cuda", enabled=dev.type == "cuda")
     ema = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(cfg.ema_decay), use_buffers=True)
     for _ in range(cfg.epochs):
@@ -211,7 +231,13 @@ def predict_cls(model, imgs) -> np.ndarray:
     out = []
     for i in range(0, len(imgs), 32):
         x = vm.normalize(torch.stack(imgs[i:i + 32]).to(dev), cfg_norm(model))
-        out.append(torch.softmax(model(x).float(), 1).cpu().numpy())
+        z = model(x).float()
+        if getattr(model, "ordinal", False):  # P(≥103), P(≥140) → ความน่าจะเป็น 3 คลาส (บังคับ P(≥140) ≤ P(≥103))
+            s = torch.sigmoid(z)
+            s1, s2 = s[:, 0], torch.minimum(s[:, 1], s[:, 0])
+            out.append(torch.stack([1 - s1, s1 - s2, s2], 1).cpu().numpy())
+        else:
+            out.append(torch.softmax(z, 1).cpu().numpy())
     return np.concatenate(out)
 
 
@@ -242,7 +268,7 @@ def run_cls(name: str, cfg: vm.TrainConfig, seed: int, df: pd.DataFrame) -> pd.D
     return out
 
 
-def compare_cls(reg_name: str, cls_name: str) -> pd.DataFrame:
+def compare_cls(reg_name: str, cls_name: str, out_path: Path | None = None) -> pd.DataFrame:
     """จำแนก 3 คลาส vs ทายค่า VB แล้วแปลงเป็นคลาส — ระดับใบและระดับดอก (ensemble ของทุก seed ทั้งสองฝั่ง)"""
     reg = ensemble_oof(reg_name)
     cls = [pd.read_csv(f).sort_values("id").reset_index(drop=True) for f in sorted(OUT.glob(f"cls_{cls_name}_s*.csv"))]
@@ -262,7 +288,25 @@ def compare_cls(reg_name: str, cls_name: str) -> pd.DataFrame:
                              eol_recall=round((p[eol] == 2).mean() * 100, 1), eol_precision=round(((truth == 2) & (p == 2)).sum() / max((p == 2).sum(), 1) * 100, 1),
                              eol_called_normal=int((eol & (p == 0)).sum()), normal_called_eol=int(((truth == 0) & (p == 2)).sum())))
     out = pd.DataFrame(rows)
-    out.to_csv(HERE / "results_vb" / "compare_classifier.csv", index=False)
+    out.to_csv(out_path or HERE / "results_vb" / "compare_classifier.csv", index=False)
+    return out
+
+
+def cls_search() -> pd.DataFrame:
+    """จูน classifier ด้วย LOTO ดอก 1–7 (2 seed) แล้วเทียบกับ regression ตัวที่เลือก (s3_sa_e60) ทุกตัว → results_vb/cls_search_summary.csv"""
+    df = nd.vb_samples(DEV_TOOLS)
+    for name, (over, seeds) in CLS_CONFIGS.items():
+        log("== cls", name, over)
+        for sd in seeds:
+            run_cls(name, replace(BASE, **over), sd, df)
+    rows = []
+    for name in ["s3_sa_e60", *CLS_CONFIGS]:          # s3_sa_e60 = classifier เดิม (สูตรของ regression)
+        t = compare_cls("s3_sa_e60", name, out_path=OUT / f"cmp_cls_{name}.csv")
+        if not rows:
+            rows.append(t[t.model == "regression"].assign(model="regression (s3_sa_e60)"))
+        rows.append(t[t.model == "classifier"].assign(model=f"classifier {name}"))
+    out = pd.concat(rows, ignore_index=True).sort_values(["level", "model"], kind="stable")
+    out.to_csv(HERE / "results_vb" / "cls_search_summary.csv", index=False)
     return out
 
 
@@ -272,23 +316,25 @@ def ensemble_oof(name: str) -> pd.DataFrame:
     return base.assign(vb_pred=np.mean([o.sort_values("id").vb_pred.values for o in oofs], 0))
 
 
-def final(name: str, members: int, epochs: int | None = None):
+def final(name: str, members: int, epochs: int | None = None, patience: int | None = None, tag: str = "v2"):
     """ฝึกตัวใช้งานจริงจากชุดที่เลือก: ดอก 1–6 ฝึก · ดอก 7 validation/gate · ดอก 8–10 ทดสอบครั้งเดียว
 
     ช่วง P10–P90 = residual นอกชุดฝึก (LOTO ดอก 1–7) ของ ensemble ทุก seed ที่ค้นหาไว้
+    patience = หยุดเมื่อ MAE บนดอก 7 ไม่ดีขึ้น N epoch ติดกัน แล้วใช้ checkpoint ที่ดีที่สุดของแต่ละสมาชิก (v3.0.0: 10)
+    ผลรวมเขียนที่ results_vb/summary_<tag>.json
     """
     import json
 
     import experiments_vb as ex
 
     over, _ = CONFIGS[name]
-    cfg = replace(BASE, **over, ensemble=members, **({"epochs": epochs} if epochs else {}))
+    cfg = replace(BASE, **{**over, **({"epochs": epochs} if epochs else {})}, ensemble=members, patience=patience or None)
     oof = ensemble_oof(name)
     interval = vm.interval_from_residuals(oof.vb_true - oof.vb_pred)
     table = summary()
     row = table[table.config == name].iloc[0].to_dict()
     df = nd.vb_samples(range(1, 11))
-    log(f"final {name} × {members} ตัว · interval {interval['q_lo']} / +{interval['q_hi']} µm")
+    log(f"final {name} × {members} ตัว · patience {cfg.patience} · interval {interval['q_lo']} / +{interval['q_hi']} µm")
     for d in (ex.RES, ex.FIG, ex.RUNS, ex.MODELS):
         d.mkdir(parents=True, exist_ok=True)
     import shutil
@@ -300,7 +346,7 @@ def final(name: str, members: int, epochs: int | None = None):
     ex.training_curves()
     out = dict(chosen=name, members=members, config=__import__("dataclasses").asdict(cfg), cv=cv,
                search=table.to_dict("records"), final=res)
-    (ex.RES / "summary_v2.json").write_text(json.dumps(out, ensure_ascii=False, indent=2, default=float), encoding="utf-8")
+    (ex.RES / f"summary_{tag}.json").write_text(json.dumps(out, ensure_ascii=False, indent=2, default=float), encoding="utf-8")
     log("val", res["val"]["mae"], "test", res["test"]["mae"], "tool-level test", res["tool_level"]["test"]["mae"])
 
 
@@ -311,11 +357,19 @@ def main():
     ap.add_argument("--summary", action="store_true")
     ap.add_argument("--final", default="", help="ชื่อชุดที่เลือก → ฝึกตัวใช้งานจริง + ทดสอบดอก 8–10")
     ap.add_argument("--members", type=int, default=5, help="จำนวนสมาชิก ensemble ของตัวใช้งานจริง")
+    ap.add_argument("--patience", type=int, default=0, help="--final: หยุดตาม MAE ดอก 7 + ใช้ best checkpoint (0 = ใช้ epoch สุดท้าย)")
+    ap.add_argument("--tag", default="v2", help="--final: ชื่อไฟล์สรุป results_vb/summary_<tag>.json")
     ap.add_argument("--cls", default="", help="ชื่อชุด regression → ฝึกแบบจำแนก 3 คลาสด้วยสูตรเดียวกันแล้วเทียบ")
+    ap.add_argument("--cls-search", action="store_true", help="จูน classifier (CLS_CONFIGS) แล้วเทียบกับ regression")
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     if a.final:
-        final(a.final, a.members)
+        final(a.final, a.members, patience=a.patience, tag=a.tag)
+        return
+    if a.cls_search:
+        pd.set_option("display.width", 220)
+        print(cls_search().to_string(index=False))
+        log("DONE")
         return
     if a.cls:
         over, seeds = CONFIGS[a.cls]

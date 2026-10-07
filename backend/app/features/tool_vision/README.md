@@ -8,13 +8,13 @@
 | ไฟล์ | หน้าที่ |
 |---|---|
 | `router.py` | REST `/tool-vision/*` |
-| `service.py` | ขั้นตอนงาน: สถานีตรวจ, สร้างรายการตรวจตอนถอดดอก (`on_tool_removed` / `capture_eol`), ยืนยันผล (ค่า AI / ค่าที่ผู้ตรวจวัดแล้วกรอก) → ออกใบเบิก, ใบเบิก (`requisitions` / `issue_requisition` / `install_requisition`) + CSV, สถิติ AI เทียบค่าวัดจริง, pool / **retrain อัตโนมัติ** (`maybe_auto_retrain`: ค่าวัดจริงจากดอกใหม่ครบ `VISION_RETRAIN_MIN_TOOLS` = 3 ดอก) / ติดตามงาน / promote / reject, รายการเวอร์ชัน + สลับเวอร์ชัน, audit + alarm |
+| `service.py` | ขั้นตอนงาน: สถานีตรวจ, สร้างรายการตรวจตอนถอดดอก (`on_tool_removed` / `capture_eol`), ยืนยันผล (ค่า AI / ค่าที่ผู้ตรวจวัดแล้วกรอก) → ออกใบเบิก, ใบเบิก (`requisitions` / `issue_requisition` / `install_requisition`) + CSV, สถิติ AI เทียบค่าวัดจริง, pool / **retrain อัตโนมัติ** (`maybe_auto_retrain`: ค่าวัดจริงจากดอกใหม่ครบ `VISION_RETRAIN_MIN_TOOLS` = 6 ดอก = 24 ภาพ) / ติดตามงาน / promote / reject, รายการเวอร์ชัน + สลับเวอร์ชัน, audit + alarm |
 | `models.py` | ตาราง `vision_inspections`, `vision_blades`, `vision_training_jobs` + `ensure_schema` (เพิ่มคอลัมน์ที่ขาดในฐานข้อมูลเดิม) |
 | `vb_model.py` | แบบจำลอง + การฝึก (ใช้ทั้งการทดลอง, retrain และ inference): เตรียมภาพ, augmentation บน GPU, backbone (ResNet/ConvNeXt/EfficientNet/RegNet/YOLO), `Ensemble`, `fit` / `fit_ensemble`, checkpoint |
 | `vb_rules.py` | เกณฑ์ 103/140 µm, โซน, ช่วงความไม่แน่นอนจาก residual, สรุประดับดอก (ไม่ต้องใช้ torch) |
 | `registry.py` | แบบจำลองที่ใช้งาน: ดึงจาก MinIO + ตรวจ sha256 + self-test, `predict(images)` |
 | `training.py` | เก็บ/ดึงแบบจำลองใน MinIO `models/tool-vision/<version>/{model.pt, meta.json}` + `latest.json`, แก้สถานะใน meta |
-| `worker_tasks.py` | งาน ARQ `retrain_tool_vision` (รันใน trainer-worker): fine-tune ทุกสมาชิก ensemble → gate → candidate ใน MinIO, ความคืบหน้าสดใน Redis, TensorBoard |
+| `worker_tasks.py` | งาน ARQ `retrain_tool_vision` (รันใน trainer-worker): fine-tune ทุกสมาชิก ensemble (กติกาเลือก checkpoint `patience` สืบจากเวอร์ชันฐาน) → gate → candidate ใน MinIO, ความคืบหน้าสดใน Redis, TensorBoard |
 | `nonastreda.py` | เข้าถึงชุดข้อมูล Nonastreda (ภาพ + ค่าที่ bench วัด), การแบ่งดอก (ฝึก 1–6 · val 7 · เครื่อง M1/M2/M3 = ดอก 8/9/10), เลือกภาพช่วงท้ายอายุที่สึกเท่ากับดอกจริงตอนถอด |
 
 ## API

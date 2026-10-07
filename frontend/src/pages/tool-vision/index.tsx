@@ -1023,7 +1023,7 @@ const ModelTab: React.FC<{ isAdmin: boolean; reloadKey: number; onChanged: () =>
                   ? 'กำลัง retrain อัตโนมัติบน GPU worker…'
                   : pool.awaiting_decision
                     ? 'มี candidate รอผู้ดูแลตัดสิน — retrain รอบถัดไปเริ่มหลัง promote / reject'
-                    : `retrain เริ่มอัตโนมัติเมื่อมีค่าวัดจริงจากดอกใหม่ครบ ${pool.min_new_tools} ดอก (${pool.min_new_tools * 4} ภาพ)`}
+                    : `retrain รอบถัดไปเริ่มอัตโนมัติเมื่อมีค่าวัดจริงจากดอกใหม่ครบ ${pool.min_new_tools} ดอก (อย่างน้อย ${pool.min_new_tools * 4} ภาพ)`}
               </p>
               <p className="text-[10px] text-gray-400">
                 นับเป็นดอก ไม่ใช่ภาพ: 4 ใบของดอกเดียวกันมีความคลาดคงที่ร่วมกัน · ดอกล่าสุดถูกกันไว้ตรวจ gate · ค่าที่ยอมรับจาก AI ไม่ใช้ฝึก
@@ -1055,7 +1055,7 @@ const ModelTab: React.FC<{ isAdmin: boolean; reloadKey: number; onChanged: () =>
                 <tr className="text-left text-gray-500 border-b border-gray-100">
                   <th className="py-2 pr-2">งาน</th>
                   <th className="py-2 pr-2">สถานะ</th>
-                  <th className="py-2 pr-2">ค่าวัด (คลาดมาก)</th>
+                  <th className="py-2 pr-2">ภาพที่ใช้ (AI คลาด &gt; {pool?.large_error_um ?? 15} µm)</th>
                   <th className="py-2 pr-2">MAE ดอก 7: เดิม → ใหม่</th>
                   <th className="py-2 pr-2">MAE ค่าวัดล่าสุด: เดิม → ใหม่</th>
                   <th className="py-2 pr-2">Gate</th>

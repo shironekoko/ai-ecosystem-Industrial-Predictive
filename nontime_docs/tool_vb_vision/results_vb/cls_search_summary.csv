@@ -1,0 +1,13 @@
+level,model,n,zone_acc,macro_recall,eol_recall,eol_precision,eol_called_normal,normal_called_eol
+ดอก (4 ใบ),classifier c_e15,88,68.2,60.9,50.0,35.7,1,1
+ดอก (4 ใบ),classifier c_e30_ls,88,73.9,64.7,50.0,38.5,1,1
+ดอก (4 ใบ),classifier c_e60_ls,88,76.1,68.7,60.0,50.0,1,0
+ดอก (4 ใบ),classifier ord_e30,88,64.8,58.3,50.0,35.7,0,2
+ดอก (4 ใบ),classifier s3_sa_e60,88,69.3,62.2,50.0,38.5,0,3
+ดอก (4 ใบ),regression (s3_sa_e60),88,72.7,65.5,60.0,50.0,1,1
+ใบ,classifier c_e15,352,69.0,62.3,57.4,47.4,4,5
+ใบ,classifier c_e30_ls,352,71.6,62.3,48.9,43.4,3,6
+ใบ,classifier c_e60_ls,352,70.5,60.7,48.9,45.1,3,5
+ใบ,classifier ord_e30,352,65.3,58.5,57.4,44.3,0,5
+ใบ,classifier s3_sa_e60,352,66.8,57.4,44.7,35.0,2,14
+ใบ,regression (s3_sa_e60),352,69.9,60.7,51.1,54.5,4,3

@@ -193,6 +193,20 @@ def history_records(hist) -> list[dict]:
             for h in rows]
 
 
+def best_checkpoints(hist, cfg: vm.TrainConfig) -> dict:
+    """กติกาเลือกน้ำหนัก: patience → checkpoint ที่ MAE บน val ดีที่สุดของแต่ละสมาชิก (epoch นับภายในสมาชิก) · ไม่มี → epoch สุดท้าย"""
+    h = pd.DataFrame(hist)
+    if "member" not in h:
+        h["member"] = 1
+    h["local"] = h.epoch - (h.member - 1) * cfg.epochs
+    out = dict(rule="best_val" if cfg.patience else "last_epoch", patience=cfg.patience, max_epochs=cfg.epochs,
+               stopped_epoch=[int(g.local.max()) for _, g in h.groupby("member")])
+    if cfg.patience and "val_mae" in h:
+        best = h.loc[h.groupby("member").val_mae.idxmin()]
+        out.update(best_epoch=[int(e) for e in best.local], best_val_mae=[round(float(v), 2) for v in best.val_mae])
+    return out
+
+
 def tool_results(oof: pd.DataFrame, test: pd.DataFrame) -> dict:
     cv = tool_level(oof, "vb_true", "vb_pred")
     te = tool_level(test, "vb_um", "vb_pred").reset_index()
@@ -214,6 +228,7 @@ def final_model(cfg: vm.TrainConfig, df: pd.DataFrame, images: list[torch.Tensor
     model, hist = vm.fit_ensemble(cfg, [images[i] for i in tr], df.vb_um.values[tr], [images[i] for i in va],
                                   df.vb_um.values[va], writer=w, histograms=True)
     pd.DataFrame(hist).to_csv(RES / "final_history.csv", index=False)
+    checkpoint = best_checkpoints(hist, cfg)
     preds = {}
     for split, idx in (("train", tr), ("val", va), ("test", te)):
         preds[split] = vm.predict(model, [images[i] for i in idx])
@@ -233,6 +248,7 @@ def final_model(cfg: vm.TrainConfig, df: pd.DataFrame, images: list[torch.Tensor
                                         zone_true=vm.zone(r.vb_true_max), zone_pred=vm.zone(r.vb_pred_max))
                            for t, r in tool_eol.iterrows()},
         test_interval_coverage_pct=round(float(((test.vb_um >= test.vb_lo) & (test.vb_um <= test.vb_hi)).mean() * 100), 1),
+        checkpoint=checkpoint,
     )
     if oof is not None:
         res["tool_level"] = tool_results(oof, test)
@@ -262,7 +278,7 @@ def final_model(cfg: vm.TrainConfig, df: pd.DataFrame, images: list[torch.Tensor
                 thresholds=dict(vb_accel_um=vm.VB_ACCEL, vb_eol_um=vm.VB_EOL),
                 train_tools=list(nd.BASE_TRAIN_TOOLS), val_tools=list(nd.VAL_TOOLS), test_tools=list(nd.HELD_OUT_TOOLS),
                 interval=interval, interval_tool=tool_interval(oof) if oof is not None else None, cv=cv_summary,
-                history=history_records(hist), selection=selection, chosen_config=chosen,
+                history=history_records(hist), checkpoint=checkpoint, selection=selection, chosen_config=chosen,
                 metrics=dict(train=res["train"], val=res["val"], test=res["test"], test_eol_runs=res["test_eol_runs"],
                              tool_level=res.get("tool_level")),
                 cpu_latency_ms_per_image=res["cpu_latency_ms_per_image"])

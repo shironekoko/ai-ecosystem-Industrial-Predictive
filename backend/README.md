@@ -33,7 +33,7 @@ uv run pytest tests/ -q
 | `TOOL_LIFE_STREAMS` | ดอกที่สงวนไว้ใน meta ของแบบจำลอง (`1:3,2:6,3:9`) | เครื่อง → ดอกที่สตรีม |
 | `TOOL_LIFE_STATE_DIR` | `backend/logs` (`/app/logs` ใน container) | ที่เก็บ `tool_life_evaluations.jsonl` |
 | `LUH_DATASET_DIR` · `NONASTREDA_DIR` | `/dataset` หรือ `dataset/` | ตำแหน่งชุดข้อมูล |
-| `VISION_RETRAIN_MIN_TOOLS` | `3` | จำนวนดอกใหม่ที่มีค่าวัดจริงก่อน retrain อัตโนมัติ |
+| `VISION_RETRAIN_MIN_TOOLS` | `6` | จำนวนดอกใหม่ที่มีค่าวัดจริงก่อน retrain อัตโนมัติ (6 ดอก = 24 ภาพ) |
 | `TB_LOG_DIR` | `/logs/tensorboard` | log TensorBoard ของ retrain (trainer-worker) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | ไม่ตั้ง = ปิด | เปิด OpenTelemetry (ตั้งใน `compose.observability.yml`) |
 

@@ -137,7 +137,7 @@ export const VisionRegistry: React.FC = () => {
                   {meta.config && (
                     <Row
                       k="การฝึก"
-                      v={`${meta.config.epochs} epoch · augmentation ${meta.config.aug === 'strong' ? 'สี/แสงแรง' : 'พื้นฐาน'}${meta.config.ema_decay ? ' · EMA' : ''}`}
+                      v={`${meta.config.patience ? `สูงสุด ${meta.config.epochs} epoch · หยุดตาม val ดอก 7 (patience ${meta.config.patience})` : `${meta.config.epochs} epoch`} · augmentation ${meta.config.aug === 'strong' ? 'สี/แสงแรง' : 'พื้นฐาน'}${meta.config.ema_decay ? ' · EMA' : ''}`}
                     />
                   )}
                   <Row k="ฝึก / val / test" v={`ดอก ${meta.train_tools?.join(',')} / ${meta.val_tools?.join(',')} / ${meta.test_tools?.join(',')}`} />
@@ -207,11 +207,16 @@ export const VisionRegistry: React.FC = () => {
       >
         {shown?.history?.length ? (
           <>
-            <TrainingCurves history={shown.history} epochs={shown.epochs ?? undefined} />
+            <TrainingCurves history={shown.history} epochs={shown.epochs ?? undefined} checkpointEpochs={shown.patience ? shown.checkpoint?.best_epoch : undefined} />
             <p className="text-[10px] text-gray-400 mt-2">
               {shown.base_version ? `fine-tune จาก ${shown.base_version} ด้วยค่าวัดจากคน ${shown.n_human_labels ?? 0} ใบ · ` : 'ฝึกบนดอก 1–6 · '}
-              validation = ดอก 7 · ใช้น้ำหนักของ epoch สุดท้าย (จำนวน epoch เลือกด้วย cross-validation ดอก 1–7 ไม่ได้หยุดตามจุดต่ำสุดของดอก 7
-              เพื่อให้ดอก 7 ยังเป็นเกณฑ์ gate ที่ไม่ลำเอียง) · กราฟละเอียด (histogram น้ำหนัก, โครงข่าย) ดูใน TensorBoard
+              validation = ดอก 7 ·{' '}
+              {shown.patience
+                ? `ใช้ checkpoint ที่ MAE บนดอก 7 ต่ำสุดของแต่ละโมเดลย่อย (หยุดเมื่อไม่ดีขึ้น ${shown.patience} epoch ติดกัน${
+                    shown.checkpoint?.best_epoch ? ` · epoch ที่เลือก ${shown.checkpoint.best_epoch.join(', ')}` : ''
+                  })`
+                : 'ใช้น้ำหนักของ epoch สุดท้าย (จำนวน epoch เลือกด้วย cross-validation ดอก 1–7)'}{' '}
+              · กราฟละเอียด (histogram น้ำหนัก, โครงข่าย) ดูใน TensorBoard
             </p>
           </>
         ) : (

@@ -148,8 +148,8 @@ panel("timeseries", "Pool ค่าวัดจริงสำหรับ retra
     tgt('ai_ecosystem_tool_vision_retrain_pool{kind="new_tools"}', "ดอกใหม่ที่วัดจริง", "A"),
     tgt('ai_ecosystem_tool_vision_retrain_pool{kind="all"}', "ภาพทั้งหมด", "B"),
     tgt('ai_ecosystem_tool_vision_retrain_pool{kind="large_error"}', "ภาพที่ AI คลาด > 15 µm", "C")], 16, 8, 7,
-      "retrain เริ่มอัตโนมัติเมื่อดอกใหม่ที่วัดจริงครบ 3 ดอก (เส้นแดง = VISION_RETRAIN_MIN_TOOLS)", options=TS,
-      fc={"custom": {"thresholdsStyle": {"mode": "line"}, "showPoints": "never"}, "thresholds": thresholds((None, "transparent"), (3, "red")),
+      "retrain เริ่มอัตโนมัติเมื่อดอกใหม่ที่วัดจริงครบ 6 ดอก (เส้นแดง = VISION_RETRAIN_MIN_TOOLS)", options=TS,
+      fc={"custom": {"thresholdsStyle": {"mode": "line"}, "showPoints": "never"}, "thresholds": thresholds((None, "transparent"), (6, "red")),
           "decimals": 0})
 _y[0] += 7
 panel("stat", "เวลาวัด VB ต่อดอก (เฉลี่ย, CPU)", [

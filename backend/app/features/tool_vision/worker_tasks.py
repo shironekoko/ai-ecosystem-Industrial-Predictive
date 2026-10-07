@@ -73,13 +73,18 @@ def split_recent(labels: list[dict]) -> tuple[list[dict], list[dict]]:
     """แยกค่าวัดจริงเป็น (ฝึก, ตรวจ gate) ตามดอก: ดอกล่าสุด 20% (อย่างน้อย 1 ดอก เมื่อมี ≥ 3 ดอก) ไม่ใช้ฝึก
 
     ต้องแยกทั้งดอก — ถ้าบางใบของดอกเดียวกันอยู่ในชุดฝึก แบบจำลองจะเรียนความคลาดคงที่ของดอกนั้นไปแล้ว
-    gate บนใบที่เหลือจึงผ่านง่ายเกินจริง
+    gate บนใบที่เหลือจึงผ่านง่ายเกินจริง · "ดอก" = ดอกจริงที่เป็นที่มาของภาพ (image_ref T8R12B1 → T8):
+    เครื่องเดียวกันหลายรอบได้ภาพจากดอกจริงเดียวกันคนละช่วงสึก จึงกันทุกรอบของดอกนั้นพร้อมกัน (ไม่มี image_ref → ตามรายการตรวจ)
     """
+    from .nonastreda import ref_tool_run
+
     def ins(d):
-        return d.get("inspection_id") or d["blade_id"].rsplit("-B", 1)[0]
+        tr = ref_tool_run(d.get("image_ref"))
+        return f"T{tr[0]}" if tr else (d.get("inspection_id") or d["blade_id"].rsplit("-B", 1)[0])
 
     labels = sorted(labels, key=lambda d: d["reviewed_at"] or "")
-    order = list(dict.fromkeys(ins(d) for d in labels))          # ดอกเรียงตามเวลาที่ยืนยัน
+    last = {ins(d): d["reviewed_at"] or "" for d in labels}       # เวลายืนยันล่าสุดของแต่ละดอก
+    order = sorted(last, key=lambda k: last[k])                   # ดอกเรียงตามเวลาที่ยืนยันล่าสุด
     k = max(1, round(0.2 * len(order))) if len(order) >= 3 else 0
     held = set(order[len(order) - k:]) if k else set()
     return [d for d in labels if ins(d) not in held], [d for d in labels if ins(d) in held]
@@ -108,7 +113,8 @@ def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int
     train_vb = np.concatenate([base_df.vb_um.values, [x["vb_um"] for x in train_lab]])
     val_imgs = vm.load_images(val_df.path, spec["size"], crop=spec["crop"])
 
-    cfg = replace(base_cfg, pretrained=False, epochs=epochs, lr=base_cfg.lr / 3, warmup_epochs=1, patience=None,
+    # patience สืบจากเวอร์ชันฐาน: v3 ใช้ checkpoint ที่ MAE บนดอก 7 ดีที่สุด → candidate ใช้กติกาเดียวกันจึงเทียบกันใน gate ได้
+    cfg = replace(base_cfg, pretrained=False, epochs=epochs, lr=base_cfg.lr / 3, warmup_epochs=1, patience=base_cfg.patience,
                   seed=int(datetime.utcnow().timestamp()) % 10000)
     progress = _progress_writer(job_ref, epochs, len(vm.member_states(ck)))     # ensemble: fine-tune ทีละสมาชิก
     progress("training")

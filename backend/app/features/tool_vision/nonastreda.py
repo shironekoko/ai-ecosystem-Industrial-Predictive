@@ -96,6 +96,12 @@ def eol_run(tool: int) -> int:
 EOL_MIN_MEAN_UM = 103.0      # "ช่วงท้ายอายุ" = รอบที่ VB เฉลี่ย 4 ใบเข้าช่วงสึกเร่งแล้ว
 
 
+def ref_tool_run(ref: str | None) -> tuple[int, int] | None:
+    """"T8R12B3" → (8, 12) — ดอกจริงและรอบที่เป็นที่มาของภาพ"""
+    m = _ID.fullmatch(ref or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
 def run_mean_vb(tool: int) -> dict[int, float]:
     """VB เฉลี่ย 4 ใบของทุกรอบ (ค่าที่ optical bench วัด) — ใช้เลือกภาพภายในระบบเท่านั้น"""
     m = _metrology()
@@ -107,10 +113,14 @@ def run_mean_vb(tool: int) -> dict[int, float]:
     return out
 
 
-def eol_run_for(tool: int, physical_vb_um: float | None) -> int:
-    """รอบช่วงท้ายอายุที่ VB เฉลี่ย 4 ใบใกล้กับ VB จริงของดอกตอนถอดที่สุด (ไม่มีค่า → รอบสุดท้าย)"""
+def eol_run_for(tool: int, physical_vb_um: float | None, exclude=()) -> int:
+    """รอบช่วงท้ายอายุที่ VB เฉลี่ย 4 ใบใกล้กับ VB จริงของดอกตอนถอดที่สุด (ไม่มีค่า → รอบสุดท้าย)
+
+    exclude = รอบที่เคยใช้ตรวจแล้ว → ดอกใหม่แต่ละดอกได้ภาพชุดที่ยังไม่เคยตรวจ (ใช้ครบทุกชุดแล้ว → เลือกจากทุกรอบอีกครั้ง)
+    """
     means = run_mean_vb(tool)
     late = {r: v for r, v in means.items() if v >= EOL_MIN_MEAN_UM} or {eol_run(tool): means.get(eol_run(tool), 0.0)}
+    late = {r: v for r, v in late.items() if r not in set(exclude)} or late
     if physical_vb_um is None:
         return max(late)
     return min(late, key=lambda r: (abs(late[r] - physical_vb_um), -r))

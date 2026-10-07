@@ -1,7 +1,8 @@
 /**
  * กราฟการฝึกแบบจำลองวัด VB รายรอบ (epoch): loss ชุดฝึก/validation, MAE บน validation (µm) และ learning rate
  * ข้อมูลมาจาก history ใน meta.json ของแต่ละเวอร์ชัน หรือความคืบหน้าสดของงาน retrain (Redis)
- * ensemble (history มี member): แกน x = epoch ของแต่ละสมาชิก, loss = ค่าเฉลี่ยของสมาชิก, MAE = เส้นของแต่ละสมาชิก + ค่าเฉลี่ย
+ * ensemble (history มี member): แกน x = epoch ของแต่ละโมเดลย่อย, loss = ค่าเฉลี่ยของโมเดลย่อย, MAE = เส้นของแต่ละโมเดลย่อย + ค่าเฉลี่ย
+ * (ensemble = ResNet-18 หลายตัวที่ฝึกด้วย seed ต่างกันแล้วเฉลี่ยค่า VB — หน้าเว็บเรียกแต่ละตัวว่า "โมเดลย่อย")
  */
 import React from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -42,12 +43,14 @@ function toRows(history: TrainEpoch[]): { rows: Row[]; members: number[] } {
   return { rows, members };
 }
 
-/** epochs = จำนวน epoch ที่ตั้งไว้ของแบบจำลอง 1 ตัว (ensemble: ต่อสมาชิก) — ใช้กำหนดความยาวแกน x ระหว่างฝึกสด */
-export const TrainingCurves: React.FC<{ history: TrainEpoch[]; epochs?: number; height?: number; compact?: boolean }> = ({
+/** epochs = จำนวน epoch ที่ตั้งไว้ของแบบจำลอง 1 ตัว (ensemble: ต่อโมเดลย่อย) — ใช้กำหนดความยาวแกน x ระหว่างฝึกสด
+ *  checkpointEpochs = epoch ที่ใช้น้ำหนักจริงของแต่ละโมเดลย่อย (เลือกตาม val ต่ำสุด) — ไม่ระบุ = ใช้ epoch สุดท้าย */
+export const TrainingCurves: React.FC<{ history: TrainEpoch[]; epochs?: number; height?: number; compact?: boolean; checkpointEpochs?: number[] }> = ({
   history,
   epochs,
   height = 190,
   compact = false,
+  checkpointEpochs,
 }) => {
   if (!history?.length) return <p className="text-xs text-gray-400">ยังไม่มีข้อมูลการฝึก</p>;
   const { rows, members } = toRows(history);
@@ -57,10 +60,10 @@ export const TrainingCurves: React.FC<{ history: TrainEpoch[]; epochs?: number; 
   const hasLr = rows.some((h) => h.lr != null);
   const best = hasVal ? rows.reduce((b, h) => (h.val_mae != null && (b == null || h.val_mae < b.val_mae!) ? h : b), null as Row | null) : null;
   const last = hasVal ? [...rows].reverse().find((h) => h.val_mae != null) : undefined;
-  const xAxis = <XAxis dataKey="epoch" type="number" domain={[1, xMax]} tick={AXIS} allowDecimals={false} label={compact ? undefined : { value: ens ? 'epoch ของแต่ละสมาชิก' : 'epoch', position: 'insideBottomRight', offset: -2, fontSize: 10 }} />;
+  const xAxis = <XAxis dataKey="epoch" type="number" domain={[1, xMax]} tick={AXIS} allowDecimals={false} label={compact ? undefined : { value: ens ? 'epoch ของแต่ละโมเดลย่อย' : 'epoch', position: 'insideBottomRight', offset: -2, fontSize: 10 }} />;
   const charts = [
     <div key="loss">
-      <p className="text-[11px] font-semibold text-gray-600 mb-1">Loss (Huber บน VB/100){ens && <span className="font-normal text-gray-400"> · เฉลี่ย {members.length} สมาชิก</span>}</p>
+      <p className="text-[11px] font-semibold text-gray-600 mb-1">Loss (Huber บน VB/100){ens && <span className="font-normal text-gray-400"> · เฉลี่ย {members.length} โมเดลย่อย</span>}</p>
       <ResponsiveContainer width="100%" height={height}>
         <LineChart data={rows} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
           <CartesianGrid stroke="#f1f5f9" />
@@ -78,8 +81,10 @@ export const TrainingCurves: React.FC<{ history: TrainEpoch[]; epochs?: number; 
     charts.push(
       <div key="mae">
         <p className="text-[11px] font-semibold text-gray-600 mb-1">
-          MAE บน validation (µm){ens && ' รายสมาชิก'}
-          {last && (
+          MAE บน validation (µm){ens && ' ของแต่ละโมเดลย่อยใน ensemble'}
+          {last && checkpointEpochs?.length ? (
+            <span className="font-normal text-gray-400"> · น้ำหนักที่ใช้ = epoch {checkpointEpochs.join(', ')} (val ต่ำสุดของแต่ละโมเดลย่อย) · หลังจากนั้นฝึกต่อเพื่อรอดูว่าดีขึ้นอีกไหม</span>
+          ) : last && (
             <span className="font-normal text-gray-400">
               {' '}
               · epoch สุดท้าย {last.val_mae!.toFixed(1)}
@@ -96,7 +101,7 @@ export const TrainingCurves: React.FC<{ history: TrainEpoch[]; epochs?: number; 
             <Tooltip formatter={(v: number) => `${v.toFixed(1)} µm`} labelFormatter={(l) => `epoch ${l}`} />
             {ens && !compact && <Legend wrapperStyle={{ fontSize: 10 }} />}
             {members.map((m, i) => (
-              <Line key={m} type="monotone" dataKey={`m${m}`} name={`สมาชิก ${m}`} stroke={MEMBER_COLORS[i % MEMBER_COLORS.length]} dot={false} strokeWidth={1} strokeOpacity={0.55} isAnimationActive={false} />
+              <Line key={m} type="monotone" dataKey={`m${m}`} name={`โมเดลย่อย ${m}`} stroke={MEMBER_COLORS[i % MEMBER_COLORS.length]} dot={false} strokeWidth={1} strokeOpacity={0.55} isAnimationActive={false} />
             ))}
             <Line type="monotone" dataKey="val_mae" name={ens ? 'เฉลี่ย' : 'val MAE'} stroke={ens ? '#111827' : '#10b981'} dot={ens ? false : { r: 2 }} strokeWidth={2} isAnimationActive={false} />
           </LineChart>

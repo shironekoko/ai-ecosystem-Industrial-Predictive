@@ -74,7 +74,7 @@ docker compose restart backend
 | แบบจำลอง | วิธี |
 |---|---|
 | RUL (GRU) | [`timeseries_docs/tool_rul_forecast/README.md`](timeseries_docs/tool_rul_forecast/README.md) → `publish_tool_rul_model.py` |
-| วัด VB จากภาพ | ครั้งแรก/ค้นหาใหม่: [`nontime_docs/tool_vb_vision/README.md`](nontime_docs/tool_vb_vision/README.md) → `publish_tool_vb_model.py` · ระหว่างใช้งาน: **retrain อัตโนมัติ** เมื่อค่าวัดจริงจากดอกใหม่ครบ 3 ดอก → admin promote / reject ในหน้า Tool Inspection |
+| วัด VB จากภาพ | ครั้งแรก/ค้นหาใหม่: [`nontime_docs/tool_vb_vision/README.md`](nontime_docs/tool_vb_vision/README.md) → `publish_tool_vb_model.py` · ระหว่างใช้งาน: **retrain อัตโนมัติ** เมื่อค่าวัดจริงจากดอกใหม่ครบ 6 ดอก (24 ภาพ) → admin promote / reject ในหน้า Tool Inspection |
 
 ## ✅ ทดสอบ
 ```bash

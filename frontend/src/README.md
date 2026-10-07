@@ -31,7 +31,7 @@
 | `common/PageHeader.tsx` · `common/StatCard.tsx` · `common/StatusBadge.tsx` · `common/EmptyState.tsx` · `common/index.ts` | หัวหน้า, การ์ดตัวเลข, ป้ายสถานะ, หน้าว่าง |
 | `common/AuthImage.tsx` | `<img>` ของภาพที่ต้องล็อกอิน (ภาพใบมีด) — fetch พร้อม Bearer token แล้วแสดงจาก object URL |
 | `toollife/ui.tsx` | `Card`, ป้ายสถานะ/คำแนะนำ/การสึก, สีของแต่ละเครื่อง, ฟังก์ชันจัดรูปแบบตัวเลข/เวลา |
-| `toollife/TrainingCurves.tsx` | กราฟการฝึก (loss, val MAE, learning rate) — แยกเส้นตามสมาชิก ensemble |
+| `toollife/TrainingCurves.tsx` | กราฟการฝึก (loss, val MAE, learning rate) — แยกเส้นตามโมเดลย่อยของ ensemble |
 | `toollife/RequisitionDoc.tsx` | ใบเบิกดอกกัดขนาด A4 (style inline) + `downloadRequisitionPdf` — แปลงเป็น PDF ในเบราว์เซอร์ด้วย html2canvas + jsPDF (ภาษาไทยใช้ฟอนต์ของหน้าเว็บ ไม่ต้องฝังฟอนต์) |
 
 ## ข้อมูล

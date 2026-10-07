@@ -1233,7 +1233,7 @@
     {
       "type": "timeseries",
       "title": "Pool ค่าวัดจริงสำหรับ retrain",
-      "description": "retrain เริ่มอัตโนมัติเมื่อดอกใหม่ที่วัดจริงครบ 3 ดอก (เส้นแดง = VISION_RETRAIN_MIN_TOOLS)",
+      "description": "retrain เริ่มอัตโนมัติเมื่อดอกใหม่ที่วัดจริงครบ 6 ดอก (เส้นแดง = VISION_RETRAIN_MIN_TOOLS)",
       "id": 20,
       "datasource": {
         "type": "prometheus",
@@ -1300,7 +1300,7 @@
               },
               {
                 "color": "red",
-                "value": 3
+                "value": 6
               }
             ]
           },

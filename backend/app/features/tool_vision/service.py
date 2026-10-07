@@ -41,7 +41,7 @@ from .worker_tasks import INSPECTION_BUCKET
 
 # retrain อัตโนมัติเมื่อมีค่าวัดจริงจากดอกใหม่ (ยังไม่เคยลองฝึก) ครบ N ดอก = N × 4 ภาพ — นับเป็นดอก ไม่ใช่ภาพ
 # เพราะ 4 ใบของดอกเดียวกันมีความคลาดคงที่ร่วมกัน · 3 ดอก = ฝึก 2 ดอก + กันไว้ตรวจ gate 1 ดอก (ขั้นต่ำที่ gate มีความหมาย)
-AUTO_RETRAIN_MIN_TOOLS = int(os.environ.get("VISION_RETRAIN_MIN_TOOLS", "3"))
+AUTO_RETRAIN_MIN_TOOLS = int(os.environ.get("VISION_RETRAIN_MIN_TOOLS", "6"))
 AUTO_ACTOR = "auto-retrain"
 LARGE_ERROR_UM = 15.0
 SOURCES = ("AI", "MANUAL")
@@ -225,8 +225,11 @@ def capture_eol(ctx: dict, actor: str | None = None) -> dict:
             if ex:
                 return _ins_dict(ex, db.query(VisionBlade).filter(VisionBlade.inspection_id == ex.id).all())
             seq = (db.query(func.count(VisionInspection.id)).filter(VisionInspection.machine == machine).scalar() or 0) + 1
-        tool = nd.MACHINE_TOOL[machine]
-        run = nd.eol_run_for(tool, ctx.get("_physical_vb_um"))       # ภาพที่สึกเท่ากับดอกจริงตอนถอด
+            tool = nd.MACHINE_TOOL[machine]
+            used = {tr[1] for (ref,) in db.query(VisionBlade.image_ref).filter(VisionBlade.image_ref.like(f"T{tool}R%")).all()
+                    if (tr := nd.ref_tool_run(ref)) and tr[0] == tool}
+        # ภาพที่สึกใกล้กับดอกจริงตอนถอด และยังไม่เคยตรวจ — ดอกใหม่ (รอบถัดไปของเครื่อง) ได้ภาพใบมีดชุดใหม่ ไม่ซ้ำรอบก่อน
+        run = nd.eol_run_for(tool, ctx.get("_physical_vb_um"), exclude=used)
         refs = [f"T{tool}R{run}B{b}" for b in nd.BLADES]
         images = [nd.image_path(r).read_bytes() for r in refs]
         public = {k: v for k, v in ctx.items() if not k.startswith("_")}  # ไม่เก็บ/แสดง VB จริง
@@ -542,7 +545,7 @@ async def start_retrain(actor: str, epochs: int = 15) -> dict:
         pool = _pool(db)
         if not pool:
             raise WorkflowError("ยังไม่มีค่า VB ที่วัดจริงใหม่ (ค่าที่ยอมรับจาก AI ไม่ใช้ฝึก)")
-        labels = [dict(blade_id=b.id, inspection_id=b.inspection_id, image_key=b.image_key, vb_um=b.final_vb,
+        labels = [dict(blade_id=b.id, inspection_id=b.inspection_id, image_key=b.image_key, image_ref=b.image_ref, vb_um=b.final_vb,
                        reviewed_at=_iso(i.reviewed_at)) for b, i in pool]
         n_tools = len({b.inspection_id for b, _ in pool})
         job = VisionTrainingJob(id=f"VTR-{datetime.utcnow():%y%m%d%H%M%S}", requested_by=actor,
@@ -686,6 +689,7 @@ def model_versions() -> list[dict]:
                             base_version=meta.get("base_version"), n_human_labels=meta.get("n_human_labels"),
                             val_mae=(m.get("val") or {}).get("mae"), test_mae=(m.get("test") or {}).get("mae"),
                             gate=meta.get("gate"), arch=meta.get("arch"), epochs=(meta.get("config") or {}).get("epochs"),
+                            patience=(meta.get("config") or {}).get("patience"), checkpoint=meta.get("checkpoint"),
                             history=meta.get("history")))
     return sorted(out, key=lambda d: d.get("created_utc") or "", reverse=True)
 

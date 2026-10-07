@@ -1,0 +1,29 @@
+time="2026-10-07T17:08:32+07:00" level=warning msg="Found orphan containers ([grafana otel-collector prometheus tempo loki]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container redis Running 
+ Container minio Running 
+ Container redis Waiting 
+ Container redis Healthy 
+ Container ai-ecosystem-industrial-predictive-trainer-worker-run-a8cff79f9c80 Creating 
+ Container ai-ecosystem-industrial-predictive-trainer-worker-run-a8cff79f9c80 Created 
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 12.4.1
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+10:09:00 final s3_sa_e60 × 5 ตัว · patience 10 · interval -33.86 / +26.32 µm
+10:09:01   โหลดภาพ (512, (224, 672), (0.0, 1.0)) 2s
+/app/.venv/lib/python3.12/site-packages/torch/jit/_trace.py:1006: FutureWarning: `torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/torch/jit/_trace.py:1145: FutureWarning: `torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+  warnings.warn(
+10:11:27 val 8.66 test 13.55 tool-level test 11.0

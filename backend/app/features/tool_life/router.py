@@ -7,7 +7,7 @@ REST
 - POST /tool-life/machines/{m}/speed             {"speed": 1|2|5|10|20}  (1 = เวลาจริง)
 - POST /tool-life/machines/{m}/acknowledge       {"action": "continue"|"replace"}  ตอบสนอง REPLACE_NOW
 - GET  /tool-life/model | /model/versions        แบบจำลองที่โหลดจาก MinIO / ทุกเวอร์ชันใน bucket
-- POST /tool-life/model/reload                   ดึงแบบจำลองจาก MinIO ใหม่
+- POST /tool-life/model/reload                   ดึงแบบจำลองจาก MinIO ใหม่ · {"version": ...} = เปลี่ยนเวอร์ชันที่ใช้งาน (latest.json + audit)
 - GET  /tool-life/evaluations                    ผลประเมินของดอกที่ถอดออกแล้ว (เปิดเผยค่าจริงหลังถอดดอกเท่านั้น)
 WebSocket
 - /tool-life/stream?waveform=<m>                 snapshot / run / event (+ frame ของเครื่องที่เลือก)
@@ -123,14 +123,32 @@ class ReloadBody(BaseModel):
     version: str | None = None
 
 
-@router.post("/model/reload", summary="ดึงแบบจำลองจาก MinIO ใหม่ (admin)", dependencies=[Depends(get_current_admin_user)])
-async def model_reload(body: ReloadBody | None = None):
-    await asyncio.to_thread(registry.load, body.version if body else None)
+@router.post("/model/reload", summary="ดึงแบบจำลองจาก MinIO ใหม่ / เปลี่ยนเวอร์ชันที่ใช้งาน (admin)")
+async def model_reload(body: ReloadBody | None = None, user: User = Depends(get_current_admin_user)):
+    """ไม่ระบุ version = โหลดตาม latest.json ใหม่ · ระบุ version = ใช้เวอร์ชันนั้นเป็นตัวหลัก (เขียน latest.json + audit)"""
+    version = body.version if body else None
+    if version:
+        try:
+            previous = await asyncio.to_thread(registry.activate, version)
+        except ValueError as e:
+            manager.publish_snapshot()
+            raise HTTPException(503, str(e))
+        _audit_model_change(actor_name(user), f"ใช้ {version} แทน {previous}")
+    else:
+        await asyncio.to_thread(registry.load, None)
     manager.publish_snapshot()
     info = registry.info()
     if not registry.ready:
         raise HTTPException(503, info["error"])
     return info
+
+
+def _audit_model_change(actor: str, summary: str):
+    try:
+        from app.features.audit.service import record_audit_event
+        record_audit_event("RUL_MODEL_ACTIVATED", actor, "Engineer", "tool-rul", summary)
+    except Exception:
+        pass
 
 
 @router.get("/evaluations", summary="ผลประเมินหลังถอดดอก (เทียบ VB ที่วัดจริง)")

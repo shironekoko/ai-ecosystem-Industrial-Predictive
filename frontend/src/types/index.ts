@@ -140,6 +140,7 @@ export interface ModelVersion {
   train_tools?: number[];
   held_out?: number[];
   variant?: string;
+  subset?: string;
   error?: string;
 }
 

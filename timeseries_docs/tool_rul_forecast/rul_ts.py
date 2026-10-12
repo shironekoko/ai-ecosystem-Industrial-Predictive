@@ -210,15 +210,18 @@ class RULModel:
             return np.mean([net(Xt, Rt, Tt).cpu().numpy() for net in self.nets], axis=0)
 
     def export(self) -> dict:
-        """น้ำหนักแบบ numpy สำหรับ rul_runtime.GRUEnsemble (ใช้ได้เฉพาะ subset 'full')"""
-        assert self.cfg.subset == "full"
+        """น้ำหนักแบบ numpy สำหรับ rul_runtime.GRUEnsemble — อินพุตเต็ม 12 ค่าเสมอ (ไฟล์รูปแบบเดียวกันทุกเวอร์ชัน)
+        subset อื่น: น้ำหนักของอินพุตที่ไม่ใช้ = 0 เช่น sensors+time → m1–m3 ไม่มีผลต่อผลลัพธ์"""
+        assert self.cfg.subset == "full" or not self.cfg.prior      # prior อ่าน one-hot เครื่องตรง ๆ ใน runtime
         z = dict(n_members=np.array(len(self.nets)), x_mean=self.mean.astype(np.float64),
                  x_std=self.std.astype(np.float64), out_scale=np.array(OUT_SCALE),
                  prior=np.array(int(self.cfg.prior)), delta_max=np.array(self.cfg.delta_max),
                  prior_tab=self.prior_tab.astype(np.float64), prior_fleet=self.prior_fleet.astype(np.float64))
         for i, net in enumerate(self.nets):
             sd = {k: v.detach().cpu().numpy().astype(np.float64) for k, v in net.state_dict().items()}
-            z.update({f"m{i}_w_ih": sd["gru.weight_ih_l0"], f"m{i}_w_hh": sd["gru.weight_hh_l0"],
+            w_ih = np.zeros((sd["gru.weight_ih_l0"].shape[0], len(FEATURE_NAMES)))
+            w_ih[:, self.cols] = sd["gru.weight_ih_l0"]
+            z.update({f"m{i}_w_ih": w_ih, f"m{i}_w_hh": sd["gru.weight_hh_l0"],
                       f"m{i}_b_ih": sd["gru.bias_ih_l0"], f"m{i}_b_hh": sd["gru.bias_hh_l0"],
                       f"m{i}_w_out": sd["head.weight"], f"m{i}_b_out": sd["head.bias"]})
         return z

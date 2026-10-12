@@ -18,13 +18,16 @@ label: เวลาถึงเกณฑ์ VB 140 µm (หมดอายุ) �
 | `run_features.csv` | ฟีเจอร์รายแนวตัดของทุกดอก (ผลของ `extract_run_features.py`) — อินพุตของการฝึก/ประเมิน |
 | [`results_rul/`](results_rul/README.md) | ผลการประเมิน (csv/json) + `run.log` |
 | `models/tool_rul_model.{npz,json}` | แบบจำลองที่อัปโหลดขึ้น MinIO (ฝึกด้วย T1,T2,T4,T5,T7,T8; สงวน T3,T6,T9 ไว้สตรีม) |
+| `models/nomachine/tool_rul_model.{npz,json}` | เวอร์ชันสำรอง `tool-rul-gru-nomachine-1.0.0` (ไม่บอกเครื่อง) — อยู่ใน MinIO แต่ไม่ใช่ latest · ผลเล่นดอกที่สงวนไว้: `results_rul/nomachine_stream_replay_*.csv` |
 | [`figures/`](figures/README.md) | รูปในรายงาน (`0*` = EDA, `r*` = งาน RUL, `web_*` = ภาพหน้าเว็บ) |
 
 ## ทำซ้ำผลลัพธ์
 ```bash
 python extract_run_features.py "<โฟลเดอร์ที่มี filelist.csv>" run_features.csv 12   # ~20 วินาที
 python experiments_rul.py                                                         # ~5 นาทีบน GPU
+python experiments_rul.py --nomachine                                             # เวอร์ชันสำรองไม่บอกเครื่อง (~30 วินาที)
 jupyter nbconvert --to notebook --execute --inplace Tool_RUL_Forecasting.ipynb
 cd ../../backend && uv run python scripts/publish_tool_rul_model.py                 # อัปโหลดขึ้น MinIO
+uv run python scripts/publish_tool_rul_model.py --model-dir models/nomachine --no-activate   # อัปโหลดเวอร์ชันสำรอง (ไม่ตั้งเป็น latest)
 uv run pytest tests/test_tool_life.py -q
 ```

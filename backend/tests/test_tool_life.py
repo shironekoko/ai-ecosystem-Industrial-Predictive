@@ -53,6 +53,25 @@ def test_artifact_selftest():
 
 
 @needs_src
+@pytest.mark.skipif(not (SRC / "models" / "nomachine" / "tool_rul_model.npz").exists(), reason="ไม่มีเวอร์ชันไม่บอกเครื่อง")
+def test_nomachine_artifact_ignores_machine():
+    """เวอร์ชันสำรองไม่บอกเครื่อง: ไฟล์รูปแบบเดียวกับตัวหลัก (runtime เดิม) แต่ผลไม่ขึ้นกับ one-hot เครื่อง"""
+    z = np.load(SRC / "models" / "nomachine" / "tool_rul_model.npz")
+    meta = json.loads((SRC / "models" / "nomachine" / "tool_rul_model.json").read_text(encoding="utf-8"))
+    assert meta["inputs"]["subset"] == "sensors+time" and not {"m1", "m2", "m3"} & set(meta["inputs"]["features"])
+    m = GRUEnsemble.from_npz(z)
+    X = np.array(z["selftest_X"])
+    assert np.max(np.abs(m.predict(X) - z["selftest_y"])) < 1e-9
+    preds = []
+    for k in range(3):                               # สลับเป็น M1 / M2 / M3 ทั้งหน้าต่าง
+        Xk = X.copy()
+        Xk[:, :, 8:11] = 0.0
+        Xk[:, :, 8 + k] = 1.0
+        preds.append(m.predict(Xk))
+    assert np.max(np.abs(preds[0] - preds[1])) < 1e-12 and np.max(np.abs(preds[0] - preds[2])) < 1e-12
+
+
+@needs_src
 @needs_data
 def test_live_features_match_training_extraction():
     """ฟีเจอร์ที่ backend คำนวณจาก h5 ระหว่างสตรีม = ฟีเจอร์ใน run_features.csv ที่ใช้ฝึก/ประเมิน"""

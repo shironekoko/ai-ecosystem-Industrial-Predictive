@@ -9,6 +9,7 @@
     cd backend
     uv run python scripts/publish_tool_rul_model.py                     # อัปโหลด + ตั้งเป็น latest
     uv run python scripts/publish_tool_rul_model.py --no-activate       # อัปโหลดอย่างเดียว
+    uv run python scripts/publish_tool_rul_model.py --model-dir models/nomachine --no-activate   # เวอร์ชันสำรองไม่บอกเครื่อง
 
 evaluation.json มีเฉพาะค่าเฉลี่ยรวมของ leave-one-tool-out ของ GRU direct-RUL ที่ใช้งาน — ไม่มีอายุจริงรายดอก (กันสปอยดอกที่สงวนไว้สตรีม)
 """
@@ -31,17 +32,16 @@ DEFAULT_SRC = Path(__file__).resolve().parents[2] / "timeseries_docs" / "tool_ru
 PREFIX = "tool-rul"
 
 
-DEPLOYED_MODEL = "GRU[full]"      # GRU direct-RUL (เซนเซอร์ + เวลา + เครื่อง) — ตัวเดียวที่ใช้งาน
-
-
 def build_evaluation(src: Path, meta: dict) -> dict:
-    """เฉพาะแบบจำลองที่ใช้งาน (ตัวเปรียบเทียบอื่นอยู่ในรายงาน ไม่ส่งขึ้น registry)"""
+    """เฉพาะสูตรของเวอร์ชันนี้: GRU[full] = เซนเซอร์ + เวลา + เครื่อง · GRU[sensors+time] = ไม่บอกเครื่อง
+    (ตัวเปรียบเทียบอื่นอยู่ในรายงาน ไม่ส่งขึ้น registry)"""
+    model = f"GRU[{meta['inputs'].get('subset', 'full')}]"
     loto = pd.read_csv(src / "results_rul" / "loto_metrics.csv")
-    loto = loto[(loto.output == "smooth") & (loto.model == DEPLOYED_MODEL)]
-    cols = ["MAE_all", "MAE_test20", "Bias_test20", "Late_pct_test20"]
+    loto = loto[(loto.output == "smooth") & (loto.model == model)]
+    cols = ["MAE_all", "MAE_test20", "Bias_test20", "Late_pct_test20", "Late_pct_all"]
     return dict(
         protocol="leave-one-tool-out (9 ดอก) — ค่าเฉลี่ยของทุกดอก; หน่วย นาทีของเวลาตัด; test20 = 20% ท้ายของอนุกรมแต่ละดอก",
-        model=DEPLOYED_MODEL,
+        model=model,
         deployed_variant=meta["architecture"].get("variant"),
         n_tools=int(loto.tool.nunique()),
         loto={c: round(float(v), 3) for c, v in loto[cols].mean().items()},
@@ -51,11 +51,12 @@ def build_evaluation(src: Path, meta: dict) -> dict:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", type=Path, default=DEFAULT_SRC)
+    ap.add_argument("--model-dir", default="models", help="โฟลเดอร์ไฟล์แบบจำลองภายใน --src")
     ap.add_argument("--no-activate", action="store_true")
     a = ap.parse_args()
 
-    blob = (a.src / "models" / "tool_rul_model.npz").read_bytes()
-    meta = json.loads((a.src / "models" / "tool_rul_model.json").read_text(encoding="utf-8"))
+    blob = (a.src / a.model_dir / "tool_rul_model.npz").read_bytes()
+    meta = json.loads((a.src / a.model_dir / "tool_rul_model.json").read_text(encoding="utf-8"))
     assert hashlib.sha256(blob).hexdigest() == meta["sha256"], "npz ไม่ตรงกับ sha256 ใน metadata"
     version = meta["version"]
     files = {

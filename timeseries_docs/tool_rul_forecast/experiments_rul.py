@@ -9,6 +9,7 @@
    แล้วเล่นดอกที่สงวนไว้ผ่าน rul_runtime (โค้ดเดียวกับ backend) เพื่อวัดผลจริง
 
 การใช้งาน:  python experiments_rul.py      -> results_rul/*, models/tool_rul_model.npz, models/tool_rul_model.json
+           python experiments_rul.py --nomachine   -> models/nomachine/* (เวอร์ชันสำรองไม่บอกเครื่อง) + results_rul/nomachine_*
 """
 from __future__ import annotations
 
@@ -198,7 +199,15 @@ def train_production(D: dict, cfg: R.TrainConfig) -> tuple[R.RULModel, dict]:
     return model, table
 
 
-def export_artifact(model: R.RULModel, table: dict, D: dict, variant: str) -> dict:
+SUBSET_NOTE = {
+    "full": "ไม่มี VB: ใช้เวลาตัดสะสม, หมายเลขเครื่อง, ตำแหน่งแนวตัด และค่าเฉลี่ยเซนเซอร์รายรันเทียบค่าตั้งต้นของดอก",
+    "sensors+time": "ไม่มี VB และไม่ใช้หมายเลขเครื่อง: ค่าเฉลี่ยเซนเซอร์รายรันเทียบค่าตั้งต้นของดอก, เวลาตัดสะสม และตำแหน่งแนวตัด"
+                    " (ไฟล์รูปแบบเดียวกับตัวหลัก — น้ำหนักของ m1–m3 = 0)",
+}
+
+
+def export_artifact(model: R.RULModel, table: dict, D: dict, variant: str, out_dir: Path = MODELS_DIR,
+                    version: str = MODEL_VERSION) -> dict:
     z = model.export()
     # เวกเตอร์ทดสอบตัวเอง: backend ต้องคำนวณได้ค่าเดียวกันก่อนยอมใช้แบบจำลอง (กัน train/serve skew)
     probe = np.concatenate([D[t].X[[0, len(D[t].X) // 2, -1]] for t in PROD_TRAIN[:2]])
@@ -208,32 +217,34 @@ def export_artifact(model: R.RULModel, table: dict, D: dict, variant: str) -> di
     z["selftest_X"], z["selftest_y"] = probe, expect
     buf = io.BytesIO(); np.savez_compressed(buf, **z)
     blob = buf.getvalue()
-    MODELS_DIR.mkdir(exist_ok=True)
-    (MODELS_DIR / "tool_rul_model.npz").write_bytes(blob)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "tool_rul_model.npz").write_bytes(blob)
     life = {str(t): dict(machine=D[t].machine, T_acc_min=round(D[t].T_acc, 3), T_eol_min=round(D[t].T_eol, 3))
             for t in PROD_TRAIN}
+    subset = model.cfg.subset
     meta = dict(
-        model_name="tool-rul-gru", version=MODEL_VERSION, created_utc=pd.Timestamp.now('UTC').isoformat(),
+        model_name="tool-rul-gru", version=version, created_utc=pd.Timestamp.now('UTC').isoformat(),
         task="Remaining useful life (นาทีของเวลาตัด) ของดอกกัด จนถึง VB = 140 µm และเวลาถึงช่วงสึกเร่ง VB = 103 µm",
         architecture=dict(type="GRU sequence-to-one ensemble", variant=variant, hidden=model.cfg.hidden,
                           members=len(model.nets), input_noise_std=model.cfg.noise,
                           window_runs=WINDOW, outputs=["t_to_accel_min", "t_to_eol_min"],
                           physics="T_EOL คงที่ต่อดอก: RUL = median(t + RUL̂) − t (EOLTracker)"),
-        inputs=dict(features=FEATURE_NAMES, raw_sensors=RAW_SENSORS,
-                    note="ไม่มี VB: ใช้เวลาตัดสะสม, หมายเลขเครื่อง, ตำแหน่งแนวตัด และค่าเฉลี่ยเซนเซอร์รายรันเทียบค่าตั้งต้นของดอก"),
+        inputs=dict(features=[FEATURE_NAMES[i] for i in model.cols], raw_sensors=RAW_SENSORS, subset=subset,
+                    note=SUBSET_NOTE[subset]),
         criteria=dict(vb_accel_um=VB_ACCEL, vb_eol_um=VB_EOL, layer_min=LAYER_MIN,
                       reference="VB วัดตาม ISO 8688-2 (flank wear land); เกณฑ์ 140 µm กำหนดเฉพาะงานนี้"),
         train=dict(tools=PROD_TRAIN, held_out_stream_tools=STREAM_TOOLS, n_windows=int(sum(len(D[t].X) for t in PROD_TRAIN)),
                    epochs=model.cfg.epochs, lr=model.cfg.lr, loss="L1 (t_eol) + 0.5·L1 (t_accel)", tool_life=life),
         interval=table, policy=R.POLICY, sha256=hashlib.sha256(blob).hexdigest(),
     )
-    (MODELS_DIR / "tool_rul_model.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / "tool_rul_model.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return meta
 
 
-def replay_stream_tools(D: dict, runs: pd.DataFrame, meta: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+def replay_stream_tools(D: dict, runs: pd.DataFrame, meta: dict,
+                        model_dir: Path = MODELS_DIR) -> tuple[pd.DataFrame, pd.DataFrame]:
     """เล่นดอกที่สงวนไว้ผ่าน rul_runtime ทีละรัน (เส้นทางโค้ดเดียวกับ backend) — ใช้ไฟล์ artifact ที่ส่งออกจริง"""
-    z = np.load(MODELS_DIR / "tool_rul_model.npz")
+    z = np.load(model_dir / "tool_rul_model.npz")
     model = GRUEnsemble.from_npz(z)
     rows, summ = [], []
     for t in STREAM_TOOLS:
@@ -304,5 +315,28 @@ def main():
     log(f"done in {time.time() - t0:.0f}s")
 
 
+NOMACHINE_DIR = MODELS_DIR / "nomachine"
+NOMACHINE_VERSION = "tool-rul-gru-nomachine-1.0.0"
+
+
+def export_nomachine():
+    """เวอร์ชันสำรอง "ไม่บอกเครื่อง" (เซนเซอร์ + เวลา + ตำแหน่ง) — สูตรเดียวกับตัวหลัก (รูปแบบที่เลือกแบบ nested, 5 ตัว,
+    ดอกฝึกเดียวกัน, ช่วง P10–P90 จาก LOTO ภายในดอกฝึก) ต่างกันแค่ไม่มีหมายเลขเครื่อง · ไม่แตะไฟล์ของตัวหลัก
+    ผลประเมิน LOTO 9 ดอกของสูตรนี้คือแถว GRU[sensors+time] ใน results_rul/loto_metrics.csv (จาก main())"""
+    t0 = time.time()
+    runs = load_runs()
+    D = R.build_all(runs)
+    variant = json.loads((MODELS_DIR / "tool_rul_model.json").read_text(encoding="utf-8"))["architecture"]["variant"]
+    cfg = R.TrainConfig(**{**VARIANTS[variant].__dict__, "subset": "sensors+time"})
+    model, table = train_production(D, cfg)
+    meta = export_artifact(model, table, D, variant, out_dir=NOMACHINE_DIR, version=NOMACHINE_VERSION)
+    stream_rows, stream_sum = replay_stream_tools(D, runs, meta, model_dir=NOMACHINE_DIR)
+    stream_rows.to_csv(OUT / "nomachine_stream_replay_per_run.csv", index=False)
+    stream_sum.to_csv(OUT / "nomachine_stream_replay_summary.csv", index=False)
+    log(stream_sum.round(2).to_string())
+    log(f"{NOMACHINE_VERSION} -> {NOMACHINE_DIR} ({time.time() - t0:.0f}s)")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    export_nomachine() if "--nomachine" in sys.argv else main()

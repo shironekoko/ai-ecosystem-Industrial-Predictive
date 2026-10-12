@@ -1,0 +1,134 @@
+{
+  "model_name": "tool-rul-gru",
+  "version": "tool-rul-gru-nomachine-1.0.0",
+  "created_utc": "2026-10-07T19:25:32.139933+00:00",
+  "task": "Remaining useful life (นาทีของเวลาตัด) ของดอกกัด จนถึง VB = 140 µm และเวลาถึงช่วงสึกเร่ง VB = 103 µm",
+  "architecture": {
+    "type": "GRU sequence-to-one ensemble",
+    "variant": "direct+noise",
+    "hidden": 32,
+    "members": 5,
+    "input_noise_std": 1.0,
+    "window_runs": 29,
+    "outputs": [
+      "t_to_accel_min",
+      "t_to_eol_min"
+    ],
+    "physics": "T_EOL คงที่ต่อดอก: RUL = median(t + RUL̂) − t (EOLTracker)"
+  },
+  "inputs": {
+    "features": [
+      "sp_rel",
+      "ay_rel",
+      "ax_rel",
+      "fx_rel",
+      "fres_rel",
+      "fy_d",
+      "fz_d",
+      "t_hours",
+      "x_norm"
+    ],
+    "raw_sensors": [
+      "sp_rms",
+      "axy_absmean",
+      "axx_absmean",
+      "fx_mean",
+      "fres_mean",
+      "fy_mean",
+      "fz_mean"
+    ],
+    "subset": "sensors+time",
+    "note": "ไม่มี VB และไม่ใช้หมายเลขเครื่อง: ค่าเฉลี่ยเซนเซอร์รายรันเทียบค่าตั้งต้นของดอก, เวลาตัดสะสม และตำแหน่งแนวตัด (ไฟล์รูปแบบเดียวกับตัวหลัก — น้ำหนักของ m1–m3 = 0)"
+  },
+  "criteria": {
+    "vb_accel_um": 103.0,
+    "vb_eol_um": 140.0,
+    "layer_min": 2.7333333333333334,
+    "reference": "VB วัดตาม ISO 8688-2 (flank wear land); เกณฑ์ 140 µm กำหนดเฉพาะงานนี้"
+  },
+  "train": {
+    "tools": [
+      1,
+      2,
+      4,
+      5,
+      7,
+      8
+    ],
+    "held_out_stream_tools": [
+      3,
+      6,
+      9
+    ],
+    "n_windows": 3930,
+    "epochs": 30,
+    "lr": 0.003,
+    "loss": "L1 (t_eol) + 0.5·L1 (t_accel)",
+    "tool_life": {
+      "1": {
+        "machine": 1,
+        "T_acc_min": 42.217,
+        "T_eol_min": 54.5
+      },
+      "2": {
+        "machine": 1,
+        "T_acc_min": 47.3,
+        "T_eol_min": 56.294
+      },
+      "4": {
+        "machine": 2,
+        "T_acc_min": 68.933,
+        "T_eol_min": 81.483
+      },
+      "5": {
+        "machine": 2,
+        "T_acc_min": 70.317,
+        "T_eol_min": 83.467
+      },
+      "7": {
+        "machine": 3,
+        "T_acc_min": 44.017,
+        "T_eol_min": 53.733
+      },
+      "8": {
+        "machine": 3,
+        "T_acc_min": 40.85,
+        "T_eol_min": 54.267
+      }
+    }
+  },
+  "interval": {
+    "edges": [
+      0.0,
+      3.0,
+      6.0,
+      10.0,
+      15.0,
+      20.0,
+      30.0
+    ],
+    "q10": [
+      -1.1299528185526604,
+      -4.125536435445153,
+      -4.035374546051028,
+      -4.068158251444499,
+      -4.489751103719075,
+      -8.384359842936195,
+      -13.359788004557288
+    ],
+    "q90": [
+      2.2133333333333347,
+      3.23840166727702,
+      3.2627436319986884,
+      3.2364176432291742,
+      3.3377060063680064,
+      3.4551077016194625,
+      25.06327663421631
+    ]
+  },
+  "policy": {
+    "replace_min": 2.7333333333333334,
+    "plan_min": 8.2
+  },
+  "sha256": "26c3f518c83b9f8b9162f0c03a9d07e212da29e7d3097279bda2027a133a50d6"
+}

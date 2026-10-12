@@ -83,7 +83,7 @@ Auth: `user` · เหมือน 1 เครื่องใน `/fleet` + `his
 |---|---|---|---|
 | GET | `/tool-life/model` | `user` | `status`, `version`, `sha256`, `source` (minio://…), `meta` (อินพุต เกณฑ์ ดอกฝึก/สงวน ช่วง นโยบาย), `evaluation` (LOTO รวมของ GRU direct-RUL) |
 | GET | `/tool-life/model/versions` | `user` | ทุกเวอร์ชันใน `models/tool-rul/` (+ `active`) |
-| POST | `/tool-life/model/reload` | `admin` | `{"version": null}` = ตาม `latest.json`; ตรวจ sha256 + self-test ก่อนใช้; `503` ถ้าไม่ผ่าน |
+| POST | `/tool-life/model/reload` | `admin` | `{"version": null}` = ตาม `latest.json` · `{"version": "<v>"}` = ใช้เวอร์ชันนั้นเป็นตัวหลัก (เขียน `latest.json` + audit `RUL_MODEL_ACTIVATED`; โหลดไม่ผ่าน = คงเวอร์ชันเดิม); ตรวจ sha256 + self-test ก่อนใช้; `503` ถ้าไม่ผ่าน |
 
 ### `GET /tool-life/evaluations?detail=true`
 Auth: `user` · ผลประเมินของดอกที่ถอดแล้ว (อ่าน VB จริงหลังถอดเท่านั้น): `T_eol_true_min`, `first_replace_now_min`, `replace_margin_min`, `replace_late`, `mae_min`, `mae_last20_min`, `coverage_p10_p90_pct`, `vb_at_removal_um`, `life_used_at_replace_pct`, `trajectory[]`, `vb_measured[]`

@@ -80,6 +80,20 @@ class ModelRegistry:
             with self._lock:
                 self.status, self.error = "UNAVAILABLE", f"{type(e).__name__}: {e}"
 
+    def activate(self, version: str) -> str | None:
+        """ใช้ ``version`` เป็นตัวหลัก: โหลด + self-test ผ่านก่อน แล้วจึงเขียน latest.json (คงอยู่หลังรีสตาร์ต)
+        โหลดไม่ผ่าน → กลับไปเวอร์ชันเดิมและแจ้ง ValueError · คืนชื่อเวอร์ชันเดิม"""
+        previous = (self.meta or {}).get("version")
+        self.load(version)
+        if not self.ready or (self.meta or {}).get("version") != version:
+            error = self.error
+            self.load(previous)
+            raise ValueError(f"โหลด {version} ไม่สำเร็จ: {error}")
+        data = json.dumps(dict(version=version)).encode()
+        get_minio_client().put_object(settings.minio_models_bucket, f"{PREFIX}/latest.json", io.BytesIO(data), len(data),
+                                      content_type="application/json")
+        return previous
+
     def info(self) -> dict:
         m = self.meta or {}
         return dict(status=self.status, error=self.error, loaded_at=self.loaded_at, source=self.source,
@@ -104,7 +118,8 @@ class ModelRegistry:
             try:
                 meta = json.loads(_get_bytes(client, f"{PREFIX}/{v['version']}/tool_rul_model.json"))
                 v.update(created_utc=meta.get("created_utc"), train_tools=meta["train"]["tools"],
-                         held_out=meta["train"]["held_out_stream_tools"], variant=meta["architecture"].get("variant"))
+                         held_out=meta["train"]["held_out_stream_tools"], variant=meta["architecture"].get("variant"),
+                         subset=meta["inputs"].get("subset", "full"))
             except Exception as e:
                 v["error"] = str(e)
         return sorted(out.values(), key=lambda d: d.get("created_utc") or "", reverse=True)

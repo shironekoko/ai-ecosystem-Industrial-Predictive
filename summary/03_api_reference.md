@@ -40,7 +40,7 @@
 | `POST /tool-life/machines/{m}/acknowledge` `{"action": "replace"\|"continue"}` | user | แบนเนอร์ interlock | **การตัดสินใจของคนเมื่อระบบสั่ง REPLACE_NOW** · `replace` = ถอดดอก → ประเมินผล + ส่งต่อให้ตรวจภาพ (response มี `inspection.id`) · `continue` = ตัดต่อ (override) · บันทึก audit |
 | `GET /tool-life/model` | user | Model Registry | แบบจำลองที่ใช้งาน: สถานะ, เวอร์ชัน, sha256, แหล่ง (`minio://…`), meta (อินพุต, เกณฑ์, ดอกฝึก/สงวน, ตารางช่วง, นโยบาย), ผล LOTO รวม |
 | `GET /tool-life/model/versions` | user | Model Registry | ทุกเวอร์ชันใน `models/tool-rul/` + ตัวที่ active — ให้เห็นว่ามีอะไรให้สลับ |
-| `POST /tool-life/model/reload` `{"version"}` | **admin** | ปุ่ม "ดึงเวอร์ชันล่าสุดจาก MinIO" / "ใช้เวอร์ชันนี้" | โหลด/สลับเวอร์ชันโดยไม่ต้อง restart · ตรวจ sha256 + self-test ก่อนใช้ ไม่ผ่าน = `503` |
+| `POST /tool-life/model/reload` `{"version"}` | **admin** | ปุ่ม "ดึงเวอร์ชันล่าสุดจาก MinIO" / "ใช้เวอร์ชันนี้" | โหลด/สลับเวอร์ชันโดยไม่ต้อง restart · สลับ = เขียน `latest.json` (คงอยู่หลังรีสตาร์ต) + audit · ตรวจ sha256 + self-test ก่อนใช้ ไม่ผ่าน = `503` (คงเวอร์ชันเดิม) |
 | `GET /tool-life/evaluations?detail=true` | user | Reports | ผลประเมินของดอกที่ถอดแล้ว (เทียบ VB จริงหลังถอด) — `detail` รวม trajectory RUL ทาย vs จริง |
 | `WS /tool-life/stream?waveform={m}` | token ในข้อความแรก | Dashboard, Machine Monitoring | **ข้อมูลสดแบบ push** (ไม่ต้อง poll): ส่ง `{"token", "waveform"}` ภายใน 5 วินาที (ไม่ผ่าน = ปิดด้วย code `4401`) · ข้อความ: `snapshot` (ทุกครั้งที่สถานะเปลี่ยน), `run` (รันที่เพิ่งจบ), `event`, `gap` (ช่วงตัดแนวที่ไม่บันทึก), `frame` (สัญญาณดิบทุก 0.1 s เฉพาะเครื่องที่เลือก — เปลี่ยนเครื่องด้วย `{"waveform": 2}`) · client ช้า = ทิ้งเฟรมเก่า (คิว 400) |
 

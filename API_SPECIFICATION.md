@@ -5,7 +5,7 @@ Swagger (ข้อมูลล่าสุดเสมอ): `http://localhost:80
 
 **43 endpoint + 1 WebSocket — ทุกตัวถูกใช้โดยหน้าเว็บ** (ยกเว้น `GET /health` ที่ใช้เป็น healthcheck ของ Docker) · ทุก endpoint อยู่ใต้ `/api/v1` เท่านั้น
 
-ระบบมีแบบจำลองอนุกรมเวลาเพียงตัวเดียว: **GRU direct-RUL** (โหลดจาก MinIO `models/tool-rul/<version>/`) — ไม่มี endpoint ที่คืนค่าพยากรณ์จากกฎ threshold หรือค่าสำรอง ถ้าแบบจำลองไม่พร้อม endpoint ที่ต้องใช้แบบจำลองตอบ `503`
+ระบบมีแบบจำลองอนุกรมเวลาเพียงตัวเดียว: **GRU direct-RUL** (โหลดจาก MinIO `models/tool-rul/<version>/` · เวอร์ชันที่ใช้งาน `tool-rul-gru-nomachine-1.0.0`) — ไม่มี endpoint ที่คืนค่าพยากรณ์จากกฎ threshold หรือค่าสำรอง ถ้าแบบจำลองไม่พร้อม endpoint ที่ต้องใช้แบบจำลองตอบ `503`
 
 ## การยืนยันตัวตน (คอลัมน์ Auth)
 | Auth | ความหมาย |
@@ -29,25 +29,25 @@ Auth: `user` · สถานะทุกเครื่อง
 {
   "at": "2026-10-04T10:17:17Z",
   "error": null,                                   // เช่น ไม่พบชุดข้อมูล
-  "model": {"status": "READY", "version": "tool-rul-gru-1.0.0", "error": null},
+  "model": {"status": "READY", "version": "tool-rul-gru-nomachine-1.0.0", "error": null},
   "hold_on_replace": true,
   "speeds": [1, 2, 5, 10, 20],                     // 1 = เวลาจริง
   "machines": [{
     "machine": 1, "machine_id": "M1", "tool": 3, "tool_id": "T3", "feed_drive": "ball screw (...)",
     "state": "CUTTING",                            // IDLE | CUTTING | PAUSED | HOLD | COMPLETED | ERROR
     "speed": 1.0, "run_index": 120,
-    "current": {"run": 121, "run_index": 120, "t_min": 11.4, "recorded": true},   // recorded=false = กำลังตัดแนวที่ไม่ถูกบันทึก
+    "current": {"run": 121, "run_index": 120, "t_min": 11.5, "recorded": true},   // recorded=false = กำลังตัดแนวที่ไม่ถูกบันทึก
     "phase": "MONITOR",                            // BREAK_IN | BASELINE | MONITOR
-    "t_min": 11.4,                                 // เวลาตัดสะสม (นาที)
+    "t_min": 11.5,                                 // เวลาตัดสะสม (นาที)
     "prediction": {
-      "rul_min": 44.8, "rul_lo": 42.7, "rul_hi": 47.7,   // RUL ถึง VB 140 µm + ช่วง P10–P90 (นาทีของเวลาตัด)
-      "rul_accel_min": 33.3,                       // เวลาถึงช่วงสึกเร่ง (VB 103 µm)
-      "t_eol_est": 56.2, "wear_state": "STEADY",   // STEADY | ACCELERATED | END_OF_LIFE
+      "rul_min": 50.9, "rul_lo": 37.5, "rul_hi": 76.0,   // RUL ถึง VB 140 µm + ช่วง P10–P90 (นาทีของเวลาตัด)
+      "rul_accel_min": 41.6,                       // เวลาถึงช่วงสึกเร่ง (VB 103 µm)
+      "t_eol_est": 62.4, "wear_state": "STEADY",   // STEADY | ACCELERATED | END_OF_LIFE
       "recommendation": "OK",                      // OK | WATCH | PLAN_REPLACEMENT | REPLACE_NOW
-      "life_used_pct": 20.3, "eta_utc": "2026-10-04T11:02:58Z", "wall_s_per_cut_min": 66.2,
-      "model_version": "tool-rul-gru-1.0.0", "at_run": 121
+      "life_used_pct": 18.5, "eta_utc": "2026-10-04T11:13:27Z", "wall_s_per_cut_min": 66.2,
+      "model_version": "tool-rul-gru-nomachine-1.0.0", "at_run": 121
     },
-    "baseline_runs": null, "flagged_runs": 0, "input_z_max": 1.39,
+    "baseline_runs": null, "flagged_runs": 0, "input_z_max": 1.87,
     "started_at": "...", "completed": null,          // หลังถอดดอก: {"reason", "at", "t_min", "by"}
     "cycle_id": "M1-T3-261004164440",              // 1 รอบการใช้งานดอก (ติดตั้ง → ถอด)
     "inspection": null,                            // หลังถอดดอก: {"id": "INS-…", "ai_verdict", "status", "mean_pred_vb"} (งานตรวจใบมีด)
@@ -61,12 +61,12 @@ Auth: `user` · สถานะทุกเครื่อง
 ### `GET /tool-life/machines/{machine}?history=true`
 Auth: `user` · เหมือน 1 เครื่องใน `/fleet` + `history` = รายการรันที่จบแล้ว:
 ```jsonc
-{"run": 121, "run_index": 120, "at": "...", "t_min": 11.4, "phase": "MONITOR", "flagged": [],
- "raw": {"sp_rms": 1.21, "axy_absmean": 1.07, "axx_absmean": 0.74, "fx_mean": 190.2, "fres_mean": 205.3, "fy_mean": -12.4, "fz_mean": 21.9},
- "rel": {"sp_rel": 0.031, "ay_rel": 0.12, "ax_rel": 0.05, "fx_rel": 0.10, "fres_rel": 0.08, "fy_d": 0.02, "fz_d": -0.01},
- "x_pos": 87.0, "axis_kind": "torque",
- "rul": 44.8, "rul_lo": 42.7, "rul_hi": 47.7, "rul_acc": 33.3, "raw_rul": 45.6, "T_eol": 56.2, "T_acc": 44.7,
- "state": "STEADY", "recommendation": "OK", "input_z_max": 1.39, "model_version": "tool-rul-gru-1.0.0"}
+{"run": 121, "run_index": 120, "at": "...", "t_min": 11.517, "phase": "MONITOR", "flagged": [],
+ "raw": {"sp_rms": 1.21, "axy_absmean": 1.14, "axx_absmean": 0.92, "fx_mean": 205.81, "fres_mean": 222.04, "fy_mean": 5.08, "fz_mean": 9.61},
+ "rel": {"sp_rel": -0.039, "ay_rel": 0.013, "ax_rel": 0.073, "fx_rel": 0.049, "fres_rel": 0.045, "fy_d": 0.032, "fz_d": -0.032},
+ "x_pos": 27.0, "axis_kind": "torque",
+ "rul": 50.9, "rul_lo": 37.5, "rul_hi": 76.0, "rul_acc": 41.6, "raw_rul": 53.5, "T_eol": 62.4, "T_acc": 53.1,
+ "state": "STEADY", "recommendation": "OK", "input_z_max": 1.87, "model_version": "tool-rul-gru-nomachine-1.0.0"}
 ```
 ไม่มี VB, RUL จริง หรือชื่อไฟล์ในข้อมูลที่ส่งออก
 
@@ -106,7 +106,7 @@ Auth: `token (ข้อความแรก)` — browser ส่ง `Authorizat
 ขั้นตอน: RUL แจ้ง REPLACE_NOW → `POST /tool-life/machines/{m}/acknowledge {"action": "replace"}` → ระบบสร้างรายการตรวจอัตโนมัติ
 (ภาพ 4 ใบมีดตอนถอดดอก → แบบจำลองวัด VB, `trigger = RUL_EOL`, ผูกกับ `cycle_id` ของสตรีม + alarm INFO)
 → ผู้ตรวจเลือกค่าที่ใช้ตัดสินของแต่ละใบ: ยอมรับค่า AI / กรอกค่าที่วัด (ช่องกรอกเติมผลวัดของใบนั้นจากชุดข้อมูลให้ — `measurement` — แก้ได้) → `review`
-→ **ระดับดอก = VB เฉลี่ย 4 ใบ** (นิยามเดียวกับ label ของ RUL): → การจัดการดอกที่ถอด (≥ 140 µm ส่งลับคม/ตัดจำหน่าย · 103–140 µm ส่งลับคมตามแผน · < 103 µm เก็บเป็นดอกสำรอง) → **ใบเบิกดอกทดแทน** 1 ใบต่อการถอด (`OPEN` รอเบิก → `issue` = `ISSUED` รับจากคลังแล้ว → `install` = `INSTALLED` ติดตั้งแล้ว: Machine Monitoring เริ่มรอบใหม่ในสถานะ `PAUSED` รอผู้ควบคุมกด resume) + alarm · หน้าเว็บสร้าง PDF ของใบเบิกในเบราว์เซอร์ · VB รายใบบอกคมที่สึกมากสุด/เกิน 140 µm เฉพาะใบ · ค่าที่วัดจริงเข้า pool → ครบ 3 ดอกใหม่ = **retrain อัตโนมัติ** → candidate → `promote`
+→ **ระดับดอก = VB เฉลี่ย 4 ใบ** (นิยามเดียวกับ label ของ RUL): → การจัดการดอกที่ถอด (≥ 140 µm ส่งลับคม/ตัดจำหน่าย · 103–140 µm ส่งลับคมตามแผน · < 103 µm เก็บเป็นดอกสำรอง) → **ใบเบิกดอกทดแทน** 1 ใบต่อการถอด (`OPEN` รอเบิก → `issue` = `ISSUED` รับจากคลังแล้ว → `install` = `INSTALLED` ติดตั้งแล้ว: Machine Monitoring เริ่มรอบใหม่ในสถานะ `PAUSED` รอผู้ควบคุมกด resume) + alarm · หน้าเว็บสร้าง PDF ของใบเบิกในเบราว์เซอร์ · VB รายใบบอกคมที่สึกมากสุด/เกิน 140 µm เฉพาะใบ · ค่าที่วัดจริงเข้า pool → ครบ 6 ดอกใหม่ (24 ภาพ) = **retrain อัตโนมัติ** → candidate → `promote`
 
 เกณฑ์เดียวกับแบบจำลอง RUL: `normal` < 103 µm ≤ `accel` < 140 µm ≤ `eol` · เครื่องเดียวกัน ดอกเดียวกัน: M1/M2/M3 = LUH T3/T6/T9 + ภาพ Nonastreda ดอก 8/9/10 (รอบช่วงท้ายอายุที่ VB เฉลี่ย 4 ใบใกล้กับ VB จริงของดอกตอนถอดที่สุด — ค่าจริงใช้เลือกภาพภายใน ไม่ส่งออก)
 ค่า VB จริงของชุดข้อมูลไม่อยู่ใน payload ปกติ — ส่งทีละใบผ่าน `measurement` เมื่อผู้ตรวจเลือกกรอกค่าที่วัดของใบนั้น (เฉพาะรายการที่รอตรวจ) · รายการตรวจแบบเดิมที่ไม่ผูกกับรอบการใช้งานดอกมีสถานะ `ARCHIVED`
@@ -136,7 +136,7 @@ Auth: `token (ข้อความแรก)` — browser ส่ง `Authorizat
 |---|---|---|---|
 | GET | `/alarms?severity=&is_read=` | `user` | แจ้งเตือน — source `ToolLife_RUL`: WATCH → INFO, PLAN_REPLACEMENT → WARNING, REPLACE_NOW → CRITICAL · source `ToolVision_QC`: ถ่ายภาพใบมีดแล้วรอผู้ตรวจ → INFO, ออกใบเบิกดอกหลังยืนยันผล → WARNING (ระดับดอก REPLACE) / INFO · แจ้งเตือนที่ยังไม่อ่านของเครื่อง + ดอก + ต้นทางเดียวกันถูกอัปเดตแทนการสร้างซ้ำ |
 | PATCH | `/alarms/{id}/read` · POST `/alarms/mark-all-read` · DELETE `/alarms/{id}` | `user` | จัดการแจ้งเตือน |
-| GET | `/audit-logs?eventType=&search=&page=&limit=` | `user` | `eventType`: `TOOL_REPLACED`, `TOOL_LIFE_OVERRIDE` (Machine Monitoring) · `VISION_INSPECTION`, `VISION_REVIEW`, `TOOL_ISSUED`, `TOOL_INSTALLED`, `VISION_RETRAIN_REQUESTED`, `VISION_MODEL_PROMOTED` / `_REJECTED` / `_ACTIVATED` (Tool Inspection) — ตัวกรองค้นหาบางส่วนของชื่อ |
+| GET | `/audit-logs?eventType=&search=&page=&limit=` | `user` | `eventType`: `TOOL_REPLACED`, `TOOL_LIFE_OVERRIDE` (Machine Monitoring) · `RUL_MODEL_ACTIVATED` (Model Registry — สลับเวอร์ชันแบบจำลอง RUL) · `VISION_INSPECTION`, `VISION_REVIEW`, `TOOL_ISSUED`, `TOOL_INSTALLED`, `VISION_RETRAIN_REQUESTED`, `VISION_MODEL_PROMOTED` / `_REJECTED` / `_ACTIVATED` (Tool Inspection) — ตัวกรองค้นหาบางส่วนของชื่อ |
 
 ## 5. Auth / Users / Health
 | Method | Path | Auth | Body / ผล |

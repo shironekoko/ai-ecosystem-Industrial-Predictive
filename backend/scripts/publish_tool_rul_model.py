@@ -9,7 +9,7 @@
     cd backend
     uv run python scripts/publish_tool_rul_model.py                     # อัปโหลด + ตั้งเป็น latest
     uv run python scripts/publish_tool_rul_model.py --no-activate       # อัปโหลดอย่างเดียว
-    uv run python scripts/publish_tool_rul_model.py --model-dir models/nomachine --no-activate   # เวอร์ชันสำรองไม่บอกเครื่อง
+    uv run python scripts/publish_tool_rul_model.py --model-dir models/nomachine                 # แบบจำลองที่ระบบใช้งาน
 
 evaluation.json มีเฉพาะค่าเฉลี่ยรวมของ leave-one-tool-out ของ GRU direct-RUL ที่ใช้งาน — ไม่มีอายุจริงรายดอก (กันสปอยดอกที่สงวนไว้สตรีม)
 """

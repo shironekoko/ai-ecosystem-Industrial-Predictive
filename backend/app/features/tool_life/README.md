@@ -1,6 +1,6 @@
 # tool_life — พยากรณ์อายุดอกกัด (RUL) จากข้อมูลเครื่องตามเวลาจริง
 
-แบบจำลองอนุกรมเวลา **GRU direct-RUL** (ฝึกใน [`timeseries_docs/tool_rul_forecast`](../../../../timeseries_docs/tool_rul_forecast/README.md))
+แบบจำลองอนุกรมเวลา **GRU direct-RUL** (`tool-rul-gru-nomachine-1.0.0` · ฝึกใน [`timeseries_docs/tool_rul_forecast`](../../../../timeseries_docs/tool_rul_forecast/README.md))
 ถูกดึงจาก MinIO แล้วใช้กับข้อมูลจริงของชุดข้อมูล LUH milling ที่ถูกเล่นซ้ำตามเวลาจริง — ดอก T3/T6/T9 บนเครื่อง M1/M2/M3 ไม่เคยใช้ฝึก
 
 ```
@@ -14,7 +14,7 @@
 | `router.py` | REST `/tool-life/*` (`router`) + WebSocket `/tool-life/stream` (`stream_router` — แยก router เพราะ WebSocket ส่ง Authorization header ไม่ได้) |
 | `streamer.py` | `StreamManager` / `MachineStream`: เล่นข้อมูลตามเวลาจริง (deadline scheduling, ความเร็ว 1–20×), พยากรณ์ทีละรัน, alarm, interlock, ประเมินผลหลังถอดดอก (`backend/logs/tool_life_evaluations.jsonl`), `removal_listeners` (main.py ผูกกับการตรวจใบมีด), `install_new_tool` (ติดตั้งดอกใหม่ตามใบเบิก → หยุดชั่วคราวรอเริ่มตัด), metric ของ observability |
 | `runtime.py` | ส่วนใช้งานของแบบจำลอง (numpy ล้วน): ตัวกรอง outlier แบบ causal, ฟีเจอร์รายรัน, GRU, ข้อจำกัดฟิสิกส์, ช่วงความเชื่อมั่น, สถานะ/คำแนะนำ — **สำเนาของ `timeseries_docs/tool_rul_forecast/rul_runtime.py`** (test ตรวจว่าตรงกัน) |
-| `registry.py` | ดึงแบบจำลองจาก MinIO `models/tool-rul/<version>/` + ตรวจ sha256 + self-test · รายการเวอร์ชัน |
+| `registry.py` | ดึงแบบจำลองจาก MinIO `models/tool-rul/<version>/` + ตรวจ sha256 + self-test · รายการเวอร์ชัน · `activate` = สลับเวอร์ชันที่ใช้งาน (เขียน `latest.json`; โหลดไม่ผ่าน = กลับเวอร์ชันเดิม) |
 | `luh_dataset.py` | อ่านชุดข้อมูล LUH: ตารางรันจาก `filelist.csv` (ตัดคอลัมน์ VB ทิ้ง), สัญญาณ .h5, ฟีเจอร์รายรัน · ค่า VB จริงอ่านได้หลังถอดดอกเท่านั้น (`ground_truth`) |
 
 ## API

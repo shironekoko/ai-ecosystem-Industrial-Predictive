@@ -55,7 +55,7 @@ def test_artifact_selftest():
 @needs_src
 @pytest.mark.skipif(not (SRC / "models" / "nomachine" / "tool_rul_model.npz").exists(), reason="ไม่มีเวอร์ชันไม่บอกเครื่อง")
 def test_nomachine_artifact_ignores_machine():
-    """เวอร์ชันสำรองไม่บอกเครื่อง: ไฟล์รูปแบบเดียวกับตัวหลัก (runtime เดิม) แต่ผลไม่ขึ้นกับ one-hot เครื่อง"""
+    """แบบจำลองที่ระบบใช้งาน (ไม่ใช้หมายเลขเครื่อง): self-test ผ่าน และผลไม่ขึ้นกับช่อง one-hot เครื่องของ runtime"""
     z = np.load(SRC / "models" / "nomachine" / "tool_rul_model.npz")
     meta = json.loads((SRC / "models" / "nomachine" / "tool_rul_model.json").read_text(encoding="utf-8"))
     assert meta["inputs"]["subset"] == "sensors+time" and not {"m1", "m2", "m3"} & set(meta["inputs"]["features"])

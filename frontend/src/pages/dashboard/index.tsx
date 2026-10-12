@@ -329,7 +329,7 @@ export const DashboardPage: React.FC = () => {
               </div>
             ))}
             <div className="pt-2 border-t border-gray-100 text-[11px] text-gray-500 leading-relaxed">
-              อินพุตของแบบจำลอง: เวลาตัดสะสม, เครื่อง, ตำแหน่งแนวตัด และค่าเฉลี่ยรายรันของแรงบิด spindle, แรง/แรงบิดมอเตอร์แกน X/Y และแรงตัด Fx/Fy/Fz/Fres —
+              อินพุตของแบบจำลอง: เวลาตัดสะสม, ตำแหน่งแนวตัด และค่าเฉลี่ยรายรันของแรงบิด spindle, แรง/แรงบิดมอเตอร์แกน X/Y และแรงตัด Fx/Fy/Fz/Fres —
               <b> ไม่มี VB</b> (VB ใช้เป็น label ตอนฝึกเท่านั้น)
             </div>
           </div>

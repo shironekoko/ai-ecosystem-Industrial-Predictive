@@ -2,4 +2,4 @@
 
 | โฟลเดอร์ | เนื้อหา |
 |---|---|
-| [`tool_rul_forecast/`](tool_rul_forecast/README.md) | พยากรณ์อายุใช้งานที่เหลือ (RUL) ของดอกกัดจากข้อมูลเครื่อง (ชุดข้อมูล LUH milling): รายงาน, notebook, การทดลอง, แบบจำลอง **GRU direct-RUL** ที่ระบบใช้ (`backend/app/features/tool_life`) |
+| [`tool_rul_forecast/`](tool_rul_forecast/README.md) | พยากรณ์อายุใช้งานที่เหลือ (RUL) ของดอกกัดจากข้อมูลเครื่อง (ชุดข้อมูล LUH milling): โค้ดการทดลอง, แบบจำลอง **GRU direct-RUL** ที่ระบบใช้ (`backend/app/features/tool_life`) |

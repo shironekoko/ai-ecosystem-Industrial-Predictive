@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import math
 import os
 import threading
 import uuid
@@ -37,13 +38,22 @@ from . import nonastreda as nd
 from .models import VisionBlade, VisionInspection, VisionTrainingJob
 from .registry import registry
 from .vb_rules import VB_ACCEL, VB_EOL, tool_summary, tool_vb, tool_verdict, zone_code
-from .worker_tasks import INSPECTION_BUCKET
+from .worker_tasks import FINETUNE_EPOCHS, GATE_HOLDOUT_FRAC, INSPECTION_BUCKET
 
 # retrain อัตโนมัติเมื่อมีค่าวัดจริงจากดอกใหม่ (ยังไม่เคยลองฝึก) ครบ N ดอก = N × 4 ภาพ — นับเป็นดอก ไม่ใช่ภาพ
-# เพราะ 4 ใบของดอกเดียวกันมีความคลาดคงที่ร่วมกัน · 3 ดอก = ฝึก 2 ดอก + กันไว้ตรวจ gate 1 ดอก (ขั้นต่ำที่ gate มีความหมาย)
-AUTO_RETRAIN_MIN_TOOLS = int(os.environ.get("VISION_RETRAIN_MIN_TOOLS", "6"))
+# เพราะ 4 ใบของดอกเดียวกันมีความคลาดคงที่ร่วมกัน (ข้อมูลใหม่ ≈ 1 ดอก ไม่ใช่ 4 ตัวอย่างอิสระ)
+def default_retrain_min_tools(fleet: int = len(nd.MACHINE_TOOL), holdout_frac: float = GATE_HOLDOUT_FRAC) -> int:
+    """N = จำนวนดอกน้อยที่สุดที่ (1) การกัน holdout_frac ไว้ตรวจ gate ได้ 1 ดอกเต็มโดยไม่ต้องปัดขึ้น (1 / 0.2 = 5 ดอก)
+    และ (2) เป็นจำนวนรอบเต็มของทุกเครื่อง — ดอกถูกถอดมาเป็นรอบ รอบละ 1 ดอกต่อเครื่อง (3 เครื่อง: 5 → 6 = เครื่องละ 2 ดอก)
+    ผลจริงในระบบ (7 ต.ค. 2026): 3 ดอก (1 รอบ) candidate ไม่ผ่าน gate · 6 ดอก (2 รอบ) ผ่าน"""
+    whole_tool = math.ceil(round(1.0 / holdout_frac, 9))
+    return math.ceil(whole_tool / fleet) * fleet
+
+
+AUTO_RETRAIN_MIN_TOOLS = int(os.environ.get("VISION_RETRAIN_MIN_TOOLS") or default_retrain_min_tools())
 AUTO_ACTOR = "auto-retrain"
-LARGE_ERROR_UM = 15.0
+LARGE_ERROR_UM = 15.0         # ตัวเลขประกอบในหน้า retrain (จำนวนใบที่ AI คลาดจากค่าวัดจริงเกินค่านี้) — ไม่ใช้ตัดสินอะไร
+VB_INPUT_MAX_UM = 1000.0     # ค่าที่ผู้ตรวจกรอกได้: 0–1 mm (เกณฑ์ของงาน 0.14 mm) — เกินนี้คือกรอกผิดหน่วย/พิมพ์ผิด
 SOURCES = ("AI", "MANUAL")
 
 
@@ -348,8 +358,8 @@ def review(ins_id: str, decisions: dict[int, dict], actor: str, note: str | None
                 vb = b.pred_vb
             else:
                 vb = float(d.get("vb_um") or -1)
-                if not 0 < vb < 1000:
-                    raise WorkflowError(f"B{b.blade}: ค่า VB ที่กรอกต้องอยู่ระหว่าง 0–1000 µm")
+                if not 0 < vb < VB_INPUT_MAX_UM:
+                    raise WorkflowError(f"B{b.blade}: ค่า VB ที่กรอกต้องอยู่ระหว่าง 0–{VB_INPUT_MAX_UM:.0f} µm")
             b.final_vb, b.vb_source = round(float(vb), 1), d["source"]
             b.review = "CONFIRMED" if d["source"] == "AI" else "MEASURED"
             b.final_label = zone_code(b.final_vb)
@@ -532,7 +542,7 @@ async def maybe_auto_retrain() -> dict | None:
         return await start_retrain(AUTO_ACTOR)
 
 
-async def start_retrain(actor: str, epochs: int = 15) -> dict:
+async def start_retrain(actor: str, epochs: int = FINETUNE_EPOCHS) -> dict:
     from arq import create_pool
 
     from core.redis_client import get_arq_redis_settings

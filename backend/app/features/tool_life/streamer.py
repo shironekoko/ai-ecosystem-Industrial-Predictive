@@ -188,6 +188,7 @@ class MachineStream:
         if speed not in SPEEDS:
             raise ValueError(f"speed ต้องเป็นหนึ่งใน {SPEEDS}")
         self._pace_hist = deque(((w / speed * self.speed, t) for w, t in self._pace_hist), maxlen=60)
+        self._active_wall = self._active_wall / speed * self.speed     # สเกลเดียวกับประวัติที่แปลงแล้ว — ไม่เช่นนั้น ETA ผิดจนกว่าจะครบ 60 รัน
         self.speed = speed
         self._deadline = None
         self._event("INFO", f"ตั้งความเร็วการเล่นซ้ำเป็น {speed:g}× ({'เวลาจริง' if speed == 1 else 'เร่งเวลา'})")

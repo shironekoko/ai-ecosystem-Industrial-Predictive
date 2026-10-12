@@ -2,13 +2,11 @@
 
 | เอกสาร | เนื้อหา |
 |---|---|
-| [../summary/README.md](../summary/README.md) | **สรุปทั้งโปรเจกต์** — วัตถุประสงค์, loop การทำงานของระบบ, API ทุกตัวมีไว้ทำไม, เทคโนโลยีทั้งหมด, เหตุผลของแบบจำลอง, คำถามที่อาจถูกถาม |
 | [../README.md](../README.md) | ภาพรวมระบบ, สถาปัตยกรรม, โครงสร้างโปรเจกต์, Quickstart |
 | [../API_SPECIFICATION.md](../API_SPECIFICATION.md) | API ทั้งหมด (43 endpoint + WebSocket) พร้อมตัวอย่าง request/response |
-| [../timeseries_docs/tool_rul_forecast/Report_TimeSeries_Tool_RUL.md](../timeseries_docs/tool_rul_forecast/Report_TimeSeries_Tool_RUL.md) | **รายงานอนุกรมเวลา** — EDA → แบบจำลอง RUL (GRU direct-RUL) → การใช้งานในระบบ |
-| [../nontime_docs/tool_vb_vision/Report_NonTimeSeries_VB.md](../nontime_docs/tool_vb_vision/Report_NonTimeSeries_VB.md) | **รายงาน non-time-series** — แบบจำลองวัด VB จากภาพใบมีด: dataset card, การเลือกแบบจำลอง (stage A–D), ผลทดสอบ, เทียบการจำแนก 3 คลาส |
+| [../timeseries_docs/tool_rul_forecast/README.md](../timeseries_docs/tool_rul_forecast/README.md) | **แบบจำลอง RUL (time series)** — โค้ดการทดลอง GRU direct-RUL และแบบจำลองที่ใช้งาน |
+| [../nontime_docs/tool_vb_vision/README.md](../nontime_docs/tool_vb_vision/README.md) | **แบบจำลองวัด VB จากภาพใบมีด (non-time-series)** — โค้ดการทดลอง (stage A–D) และการเทียบกับการจำแนก 3 คลาส |
 | [../observability/README.md](../observability/README.md) | ชุดติดตามระบบ (OpenTelemetry → Prometheus / Tempo / Loki → Grafana) |
-| [progress-3/](progress-3/README.md) | รายงาน Progress 3 (ฉบับที่ส่งแล้ว — ภาพของระบบ ณ ตอนนั้น) |
 | Swagger | http://localhost:8000/docs |
 
 ## ระบบโดยสรุป

@@ -9,7 +9,7 @@
    แล้วเล่นดอกที่สงวนไว้ผ่าน rul_runtime (โค้ดเดียวกับ backend) เพื่อวัดผลจริง
 
 การใช้งาน:  python experiments_rul.py      -> results_rul/*, models/tool_rul_model.npz, models/tool_rul_model.json
-           python experiments_rul.py --nomachine   -> models/nomachine/* (เวอร์ชันสำรองไม่บอกเครื่อง) + results_rul/nomachine_*
+           python experiments_rul.py --nomachine   -> models/nomachine/* (รุ่นไม่บอกเครื่อง = แบบจำลองที่ระบบใช้งาน) + results_rul/nomachine_*
 """
 from __future__ import annotations
 
@@ -201,8 +201,7 @@ def train_production(D: dict, cfg: R.TrainConfig) -> tuple[R.RULModel, dict]:
 
 SUBSET_NOTE = {
     "full": "ไม่มี VB: ใช้เวลาตัดสะสม, หมายเลขเครื่อง, ตำแหน่งแนวตัด และค่าเฉลี่ยเซนเซอร์รายรันเทียบค่าตั้งต้นของดอก",
-    "sensors+time": "ไม่มี VB และไม่ใช้หมายเลขเครื่อง: ค่าเฉลี่ยเซนเซอร์รายรันเทียบค่าตั้งต้นของดอก, เวลาตัดสะสม และตำแหน่งแนวตัด"
-                    " (ไฟล์รูปแบบเดียวกับตัวหลัก — น้ำหนักของ m1–m3 = 0)",
+    "sensors+time": "ไม่มี VB และไม่ใช้หมายเลขเครื่อง: ค่าเฉลี่ยเซนเซอร์รายรันเทียบค่าตั้งต้นของดอก, เวลาตัดสะสม และตำแหน่งแนวตัด",
 }
 
 
@@ -320,7 +319,7 @@ NOMACHINE_VERSION = "tool-rul-gru-nomachine-1.0.0"
 
 
 def export_nomachine():
-    """เวอร์ชันสำรอง "ไม่บอกเครื่อง" (เซนเซอร์ + เวลา + ตำแหน่ง) — สูตรเดียวกับตัวหลัก (รูปแบบที่เลือกแบบ nested, 5 ตัว,
+    """รุ่น "ไม่บอกเครื่อง" ที่ระบบใช้งาน (เซนเซอร์ + เวลา + ตำแหน่ง) — สูตรเดียวกับตัวหลัก (รูปแบบที่เลือกแบบ nested, 5 ตัว,
     ดอกฝึกเดียวกัน, ช่วง P10–P90 จาก LOTO ภายในดอกฝึก) ต่างกันแค่ไม่มีหมายเลขเครื่อง · ไม่แตะไฟล์ของตัวหลัก
     ผลประเมิน LOTO 9 ดอกของสูตรนี้คือแถว GRU[sensors+time] ใน results_rul/loto_metrics.csv (จาก main())"""
     t0 = time.time()

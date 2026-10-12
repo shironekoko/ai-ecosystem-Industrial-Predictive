@@ -4,15 +4,13 @@
 
 | ไฟล์ | เนื้อหา |
 |---|---|
-| [Report_NonTimeSeries_VB.md](Report_NonTimeSeries_VB.md) | รายงาน: โจทย์, dataset card, การเลือกแบบจำลอง (stage A–D), ผลทดสอบ, เทียบกับการจำแนก 3 คลาส, การใช้งานในระบบ, เหตุผลตามเนื้อหารายวิชา |
 | `experiments_vb.py` | stage A–C (dataset card → LOTO CV เลือกสถาปัตยกรรม → ablation → หัว/ความละเอียด) + ฟังก์ชันฝึกตัวใช้งานจริง/ทดสอบ/ส่งออกที่ `search_vb.py` เรียกใช้ |
 | `search_vb.py` | stage D: ค้นหาการเตรียมภาพ/augmentation/backbone/epoch (LOTO ดอก 1–7, หลาย seed, รันต่อจากที่ค้างได้) · `--final` ฝึกตัวใช้งานจริง (ensemble) + ทดสอบดอก 8–10 (`--patience`/`--tag` = การทดลอง v3) · `--cls` เทียบกับการจำแนก 3 คลาส |
 | `../../backend/app/features/tool_vision/vb_model.py` | โค้ดแบบจำลอง/การฝึก/augmentation/ensemble ที่ใช้ร่วมกับระบบจริง (retrain + inference ใช้โค้ดเดียวกัน) |
 | `../../backend/app/features/tool_vision/vb_rules.py` | เกณฑ์ 103/140 µm, โซน, ช่วงความไม่แน่นอนจาก residual |
-| [`results_vb/`](results_vb/README.md) | ผลทุกการทดลอง: stage A–C (`cv_summary.csv`, `oof_*.csv`), stage D (`search/`, `search_summary.csv`), เทียบ classifier, ตัวใช้งานจริง (`test_predictions.csv`, `summary_v2.json`), `logs/` |
-| [`figures/`](figures/README.md) | กราฟ d01–d04 (ข้อมูล), r01–r04 (ผล), `web_*` (ภาพหน้าเว็บ) |
-| `runs/` | TensorBoard event files (`cv/<config>/fold_T*`, `final/<arch>`) |
-| [`models/`](models/README.md) | `tool_vb_model.pt` + `.json` ของตัวล่าสุด (อัปโหลดขึ้น MinIO ด้วย `backend/scripts/publish_tool_vb_model.py`) · `archive-1.0.0/` = v1.0.0 · `archive-3.0.0/` = v3.0.0 (การทดลอง) |
+| `results_vb/` · `figures/` | ผลและกราฟที่สคริปต์เขียนเมื่อรันการทดลอง — ไม่อยู่ใน git |
+| `runs/` | TensorBoard event files (`cv/<config>/fold_T*`, `final/<arch>`) — ไม่อยู่ใน git (สร้างเมื่อรันการทดลอง) |
+| [`models/`](models/README.md) | `tool_vb_model.pt` (ไม่อยู่ใน git — ไฟล์ใหญ่) + `.json` ของตัวล่าสุด (อัปโหลดขึ้น MinIO ด้วย `backend/scripts/publish_tool_vb_model.py`) · `archive-1.0.0/` = v1.0.0 · `archive-3.0.0/` = v3.0.0 (การทดลอง) |
 
 ## รัน
 

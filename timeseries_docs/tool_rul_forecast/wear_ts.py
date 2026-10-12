@@ -1,6 +1,6 @@
 """wear_ts.py — การวิเคราะห์อนุกรม VB รายชั้นงาน และแบบจำลอง StateSpace ที่ใช้เปรียบเทียบกับ GRU direct-RUL
 
-ใช้ใน Tool_RUL_Forecasting.ipynb (หัวข้อ 2–3: outlier แบบ STL, อนุกรมรายชั้น, ADF, SETAR) และ experiments_rul.py
+ใช้ในการวิเคราะห์อนุกรม (outlier แบบ STL, อนุกรมรายชั้น, ADF, SETAR) และ experiments_rul.py
 (แบบจำลองทางอ้อม: พยากรณ์ VB แฝงแล้วหาเวลาที่ข้ามเกณฑ์)
 
 ข้อกำหนด: **ตอนพยากรณ์ห้ามใช้ VB เป็นอินพุต** — VB ใช้เป็น label ตอนฝึกจากดอกเก่าที่ใช้จนหมดอายุเท่านั้น

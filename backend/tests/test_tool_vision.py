@@ -272,7 +272,7 @@ def test_requisition_payload_and_disposition():
     ins = VisionInspection(id="INS-261006-ABC123", machine=2, seq=1, source="BENCH_DATASET", source_tool=9, source_run=13,
                            trigger="RUL_EOL", cycle_id="M2-T6-x", captured_by="t", captured_at=datetime(2026, 10, 6),
                            rul_context=json.dumps(dict(tool_id="T6", t_min=77.9, reason="REPLACED_BY_OPERATOR", removed_by="op",
-                                                       recommendation="REPLACE_NOW", model_version="tool-rul-gru-1.0.0")),
+                                                       recommendation="REPLACE_NOW", model_version="tool-rul-gru-nomachine-1.0.0")),
                            model_version="v2", ai_verdict="MONITOR", status="VERIFIED", final_verdict="MONITOR", reviewed_by="qc",
                            reviewed_at=datetime(2026, 10, 6, 1), req_no="REQ-261006-ABC123", req_status="OPEN",
                            req_created_at=datetime(2026, 10, 6, 1))
@@ -282,7 +282,7 @@ def test_requisition_payload_and_disposition():
     r = _requisition(ins, blades)
     assert r["req_no"] == "REQ-261006-ABC123" and r["status"] == "OPEN" and r["tool_ref"] == "T6" and r["machine_id"] == "M2"
     assert r["verdict"] == "MONITOR" and r["disposition"] == DISPOSITION["MONITOR"] and r["mean_vb"] == 139.1
-    assert r["over_limit"] == [1, 3] and r["rul_model_version"] == "tool-rul-gru-1.0.0"
+    assert r["over_limit"] == [1, 3] and r["rul_model_version"] == "tool-rul-gru-nomachine-1.0.0"
     assert "T9R13" not in json.dumps(r)                                                # ไม่มีรหัสภาพของชุดข้อมูล
     assert set(DISPOSITION) == {"OK", "MONITOR", "REPLACE"}
 

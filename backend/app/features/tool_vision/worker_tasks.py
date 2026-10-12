@@ -18,9 +18,14 @@ from datetime import datetime
 from pathlib import Path
 
 INSPECTION_BUCKET = "inspections"
-VAL_TOLERANCE_UM = 1.0
+VAL_TOLERANCE_UM = 1.0        # ความแปรปรวนจากการสุ่มของการฝึก: SD ของ MAE ระหว่าง seed สูงสุด 0.82 µm (การทดลองเลือกแบบจำลอง search_vb.py)
+                              # → จำนวนเต็ม µm ถัดไป: แย่ลงเกินนี้ = แย่ลงจริง ไม่ใช่ความบังเอิญของ seed
+GATE_HOLDOUT_FRAC = 0.2       # กันดอกล่าสุด 20% ไว้ตรวจ gate (80:20 แบบเดียวกับการแบ่งฝึก/ทดสอบของแบบจำลอง RUL)
+GATE_MIN_TOOLS = 3            # น้อยกว่านี้ยังกันดอกไว้ไม่ได้: ชุดฝึกต้องมี ≥ 2 ดอก (ไม่ให้แบบจำลองแค่เลื่อนค่าตามดอกเดียว) + 1 ดอกตรวจ
+FINETUNE_EPOCHS = 15          # ¼ ของการฝึกครั้งแรก (60 epoch) — retrain จริง: MAE บนดอก 7 ของทุกสมาชิกต่ำสุดภายใน epoch 7–12 แล้วไม่ลดอีก
+FINETUNE_LR_DIV = 3           # lr เริ่มต้น = ⅓ ของการฝึกครั้งแรก (3e-4 → 1e-4): ปรับน้ำหนักเดิมทีละน้อย ไม่ลืมสิ่งที่เรียนจากดอก 1–6
 PROGRESS_KEY = "tool_vision:retrain:{}"          # Redis: ความคืบหน้าของงาน retrain (หน้าเว็บอ่านไปวาดกราฟสด)
-PROGRESS_TTL_S = 7 * 24 * 3600
+PROGRESS_TTL_S = 7 * 24 * 3600                   # 1 สัปดาห์: กราฟการฝึกยังเปิดดูได้จนผู้ดูแลตัดสิน candidate (ฉบับถาวรอยู่ใน meta.json)
 
 
 def _hist_brief(h: dict) -> dict:
@@ -85,12 +90,12 @@ def split_recent(labels: list[dict]) -> tuple[list[dict], list[dict]]:
     labels = sorted(labels, key=lambda d: d["reviewed_at"] or "")
     last = {ins(d): d["reviewed_at"] or "" for d in labels}       # เวลายืนยันล่าสุดของแต่ละดอก
     order = sorted(last, key=lambda k: last[k])                   # ดอกเรียงตามเวลาที่ยืนยันล่าสุด
-    k = max(1, round(0.2 * len(order))) if len(order) >= 3 else 0
+    k = max(1, round(GATE_HOLDOUT_FRAC * len(order))) if len(order) >= GATE_MIN_TOOLS else 0
     held = set(order[len(order) - k:]) if k else set()
     return [d for d in labels if ins(d) not in held], [d for d in labels if ins(d) in held]
 
 
-def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int = 15) -> dict:
+def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int = FINETUNE_EPOCHS) -> dict:
     import numpy as np
     import torch
 
@@ -114,7 +119,7 @@ def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int
     val_imgs = vm.load_images(val_df.path, spec["size"], crop=spec["crop"])
 
     # patience สืบจากเวอร์ชันฐาน: v3 ใช้ checkpoint ที่ MAE บนดอก 7 ดีที่สุด → candidate ใช้กติกาเดียวกันจึงเทียบกันใน gate ได้
-    cfg = replace(base_cfg, pretrained=False, epochs=epochs, lr=base_cfg.lr / 3, warmup_epochs=1, patience=base_cfg.patience,
+    cfg = replace(base_cfg, pretrained=False, epochs=epochs, lr=base_cfg.lr / FINETUNE_LR_DIV, warmup_epochs=1, patience=base_cfg.patience,
                   seed=int(datetime.utcnow().timestamp()) % 10000)
     progress = _progress_writer(job_ref, epochs, len(vm.member_states(ck)))     # ensemble: fine-tune ทีละสมาชิก
     progress("training")
@@ -163,7 +168,7 @@ def run_retrain(job_ref: str, base_version: str, labels: list[dict], epochs: int
                              base_recent=brief(base_recent)))
 
 
-async def retrain_tool_vision(ctx: dict, job_ref: str, base_version: str, labels: list[dict], epochs: int = 15,
+async def retrain_tool_vision(ctx: dict, job_ref: str, base_version: str, labels: list[dict], epochs: int = FINETUNE_EPOCHS,
                               trace_ctx: dict | None = None) -> dict:
     """ARQ task — ฝึกใน thread แยกเพื่อไม่บล็อก event loop ของ worker
 

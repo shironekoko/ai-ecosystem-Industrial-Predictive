@@ -1,11 +1,15 @@
 # Environments (ค่าลับอยู่ใน .env — ดูตัวอย่างที่ .env.example)
 .env
+.env.*
+!.env.example
 .venv
 backend/.venv
 
 # Node / Frontend
 node_modules/
 dist/
+*.tsbuildinfo
+npm-debug.log*
 
 # Python
 __pycache__/
@@ -13,12 +17,18 @@ __pycache__/
 *.egg-info/
 build/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
 
 # Logs ที่ระบบเขียนตอนรัน (compose mount ./logs และ backend/logs)
 logs/*
 !logs/.gitkeep
 backend/logs/*
 !backend/logs/.gitkeep
+*.log
 
 # ชุดข้อมูล (ไฟล์ใหญ่) — ดูวิธีวางที่ dataset/README.md
 dataset/*
@@ -31,6 +41,9 @@ dataset/*
 *.pth
 *.onnx
 
+# ไฟล์ระหว่างทางของการทดลอง (สร้างใหม่ได้จากสคริปต์ — ผลที่รายงานใช้เป็น csv/json)
+*.pkl
+
 # TensorBoard runs และน้ำหนัก ImageNet ที่ torchvision ดาวน์โหลดระหว่างการทดลอง
 runs/
 nontime_docs/tool_vb_vision/.torch_cache/
@@ -40,8 +53,27 @@ nontime_docs/tool_vb_vision/.torch_cache/
 *.tar.gz
 *.7z
 
-# OS / IDE
+# งานรายวิชา (ส่งแยก เก็บไว้ในเครื่อง) — ใน git มีเฉพาะตัวโปรเจกต์
+# รายงาน · เอกสารสรุป · notebook · รูป · ผลการทดลอง (สร้างใหม่ได้จากสคริปต์ในโฟลเดอร์การทดลอง)
+Report_*
+docs/progress-3/
+/summary/
+*.ipynb
+timeseries_docs/tool_rul_forecast/figures/
+nontime_docs/tool_vb_vision/figures/
+nontime_docs/tool_vb_vision/results_vb/
+timeseries_docs/tool_rul_forecast/results_rul/*
+# ยกเว้นผล 2 ไฟล์ที่โค้ดของโปรเจกต์อ่าน: backend/scripts/publish_tool_rul_model.py และ backend/tests/test_tool_life.py
+!timeseries_docs/tool_rul_forecast/results_rul/loto_metrics.csv
+!timeseries_docs/tool_rul_forecast/results_rul/stream_replay_per_run.csv
+
+# เครื่องมือช่วยเขียนโค้ด (worktree / การตั้งค่าเฉพาะเครื่อง)
+.claude/
+
+# OS / IDE / Office
 .DS_Store
 Thumbs.db
+desktop.ini
+~$*
 .vscode/
 .idea/

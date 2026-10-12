@@ -19,14 +19,14 @@ API ทั้งหมดอยู่ใต้ `/api/v1` ([API_SPECIFICATION.md]
 ## รัน
 ```bash
 docker compose up -d backend trainer-worker          # หรือ: uv run uvicorn main:app --port 8000
-uv run python scripts/publish_tool_rul_model.py      # อัปโหลดแบบจำลอง RUL ขึ้น MinIO (ครั้งแรก)
+uv run python scripts/publish_tool_rul_model.py --model-dir models/nomachine   # อัปโหลดแบบจำลอง RUL ที่ใช้งานขึ้น MinIO (ครั้งแรก — ดู scripts/README.md)
 uv run pytest tests/ -q
 ```
 ตัวแปรสภาพแวดล้อม: ดู [`.env.example`](../.env.example) และ `compose.yml`
 
 | ตัวแปร | ค่าเริ่มต้น | หน้าที่ |
 |---|---|---|
-| `DATABASE_URL` · `REDIS_URL` · `MINIO_ENDPOINT` · `MINIO_ROOT_USER` / `_PASSWORD` | ดู `core/config.py` | การเชื่อมต่อ PostgreSQL / Redis / MinIO |
+| `DATABASE_URL` · `REDIS_URL` · `MINIO_ENDPOINT` · `MINIO_ROOT_USER` / `_PASSWORD` · `MINIO_SECURE` | ดู `core/config.py` | การเชื่อมต่อ PostgreSQL / Redis / MinIO |
 | `JWT_SECRET_KEY` · `ACCESS_TOKEN_EXPIRE_MINUTES` | สุ่มทุกครั้งที่เริ่ม · 30 | เซ็น JWT · อายุ token |
 | `TOOL_LIFE_AUTOSTART` | `false` | `false` = ทุกเครื่องหยุดอยู่ (IDLE) จนผู้ควบคุมกดเริ่มตัด · `true` = เริ่มสตรีม 3 เครื่องเองเมื่อ backend เริ่ม |
 | `TOOL_LIFE_HOLD_ON_REPLACE` | `true` | interlock: หยุดป้อนเมื่อถึง REPLACE_NOW |
@@ -35,7 +35,7 @@ uv run pytest tests/ -q
 | `LUH_DATASET_DIR` · `NONASTREDA_DIR` | `/dataset` หรือ `dataset/` | ตำแหน่งชุดข้อมูล |
 | `VISION_RETRAIN_MIN_TOOLS` | `6` | จำนวนดอกใหม่ที่มีค่าวัดจริงก่อน retrain อัตโนมัติ (6 ดอก = 24 ภาพ) |
 | `TB_LOG_DIR` | `/logs/tensorboard` | log TensorBoard ของ retrain (trainer-worker) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | ไม่ตั้ง = ปิด | เปิด OpenTelemetry (ตั้งใน `compose.observability.yml`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` · `OTEL_SERVICE_NAME` | ไม่ตั้ง = ปิด · `ai-ecosystem-backend` | เปิด OpenTelemetry · ชื่อบริการใน trace/metric (ตั้งใน `compose.observability.yml`) |
 
 > container ของ backend ใช้โค้ดที่ mount จาก `./backend` โดยไม่มี `--reload` — แก้โค้ดแล้วต้อง `docker compose restart backend`
 > (สตรีมเริ่มดอกใหม่จากรันแรก · ถ้าไม่ตั้ง `JWT_SECRET_KEY` ใน `.env` ทุกคนต้องล็อกอินใหม่)

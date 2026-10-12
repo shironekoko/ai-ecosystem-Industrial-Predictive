@@ -433,7 +433,8 @@
         "tags": [
           "Tool Life (RUL)"
         ],
-        "summary": "ดึงแบบจำลองจาก MinIO ใหม่ (admin)",
+        "summary": "ดึงแบบจำลองจาก MinIO ใหม่ / เปลี่ยนเวอร์ชันที่ใช้งาน (admin)",
+        "description": "ไม่ระบุ version = โหลดตาม latest.json ใหม่ · ระบุ version = ใช้เวอร์ชันนั้นเป็นตัวหลัก (เขียน latest.json + audit)",
         "operationId": "model_reload_api_v1_tool_life_model_reload_post",
         "requestBody": {
           "content": {

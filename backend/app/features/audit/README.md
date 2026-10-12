@@ -6,6 +6,7 @@
 | eventType | บันทึกจาก | เมื่อไร |
 |---|---|---|
 | `TOOL_REPLACED` · `TOOL_LIFE_OVERRIDE` | tool_life.streamer | ผู้ควบคุมถอดดอก / สั่งตัดต่อแม้ระบบแนะนำ REPLACE_NOW |
+| `RUL_MODEL_ACTIVATED` | tool_life.router | admin สลับเวอร์ชันแบบจำลอง RUL ที่ใช้งาน (Model Registry) |
 | `VISION_INSPECTION` | tool_vision.service | ถ่ายภาพ 4 ใบมีดของดอกที่ถอด + AI วัด VB |
 | `VISION_REVIEW` | tool_vision.service | ผู้ตรวจยืนยันผล (ยอมรับค่า AI / กรอกค่าที่วัด) |
 | `TOOL_ISSUED` · `TOOL_INSTALLED` | tool_vision.service | รับดอกทดแทนจากคลังตามใบเบิก · ติดตั้งดอกใหม่บนเครื่อง |

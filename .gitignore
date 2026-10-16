@@ -62,6 +62,8 @@ docs/progress-3/
 timeseries_docs/tool_rul_forecast/figures/
 nontime_docs/tool_vb_vision/figures/
 nontime_docs/tool_vb_vision/results_vb/
+# แบบจำลองภาพเวอร์ชันเก่าที่เลิกใช้แล้ว (v1.0.0, v3.0.0) — ไม่มีโค้ดของโปรเจกต์อ่าน
+nontime_docs/tool_vb_vision/models/archive-*/
 timeseries_docs/tool_rul_forecast/results_rul/*
 # ยกเว้นผล 2 ไฟล์ที่โค้ดของโปรเจกต์อ่าน: backend/scripts/publish_tool_rul_model.py และ backend/tests/test_tool_life.py
 !timeseries_docs/tool_rul_forecast/results_rul/loto_metrics.csv

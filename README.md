@@ -62,7 +62,7 @@ ai-ecosystem-Industrial-Predictive/
 | สิ่งที่ขาด | ขนาด | ได้มาอย่างไร |
 |---|---|---|
 | ชุดข้อมูล LUH milling + Nonastreda (`dataset/`) | ~10 GB + ~1.4 GB | ดาวน์โหลดจาก Mendeley Data แล้วแตกไฟล์ตาม [`dataset/README.md`](dataset/README.md) |
-| น้ำหนักแบบจำลองวัด VB (`nontime_docs/tool_vb_vision/models/*.pt`) | ~214 MB | ฝึกด้วย `search_vb.py --final` ([`nontime_docs/tool_vb_vision/README.md`](nontime_docs/tool_vb_vision/README.md)) — ไฟล์ `.json` (ผลประเมิน + config) และค่าทายรายภาพอยู่ใน git |
+| น้ำหนักแบบจำลองวัด VB (`nontime_docs/tool_vb_vision/models/*.pt`) | ~214 MB | ฝึกด้วย `search_vb.py --final` ([`nontime_docs/tool_vb_vision/README.md`](nontime_docs/tool_vb_vision/README.md)) — ไฟล์ `.json` (ผลประเมิน + config) อยู่ใน git |
 | `.env`, log ของ container, TensorBoard `runs/` | – | สร้างเองตอนรัน (`.env` คัดลอกจาก `.env.example`) |
 | งานรายวิชา: รายงาน, เอกสารสรุป, notebook, รูปและผลการทดลอง (csv/json) | – | ส่งแยก ไม่เกี่ยวกับการรันระบบ — ผลการทดลองสร้างใหม่ได้ด้วยสคริปต์ใน [`timeseries_docs/tool_rul_forecast/`](timeseries_docs/tool_rul_forecast/README.md) และ [`nontime_docs/tool_vb_vision/`](nontime_docs/tool_vb_vision/README.md) |
 
